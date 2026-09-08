@@ -4,7 +4,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { Client as SshClient } from "ssh2";
 import { parse } from "url";
 import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth";
-import { buildSshConfig } from "@/lib/ssh";
+import { buildSshConfig, buildPrivilegedCommand, shellQuote } from "@/lib/ssh";
 import { logAudit } from "@/lib/db";
 
 const SSH_WS_PATH = "/ws/ssh";
@@ -44,9 +44,10 @@ export function attachSshWebSocketServer(server: import("http").Server) {
         socket.destroy();
         return;
       }
+      const containerId = typeof query.containerId === "string" ? query.containerId : null;
 
       wss.handleUpgrade(req, socket, head, (ws) => {
-        handleSshSession(ws, hostId, username);
+        handleSshSession(ws, hostId, username, containerId);
       });
     })().catch(() => {
       socket.destroy();
@@ -56,14 +57,19 @@ export function attachSshWebSocketServer(server: import("http").Server) {
   return wss;
 }
 
-function handleSshSession(ws: WebSocket, hostId: number, username: string) {
+function handleSshSession(ws: WebSocket, hostId: number, username: string, containerId: string | null) {
   const send = (payload: object) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
   };
 
   let config;
+  let dockerExec: { command: string; stdinPassword: string | null } | null = null;
   try {
     config = buildSshConfig(hostId);
+    if (containerId) {
+      const dockerCmd = `docker exec -it ${shellQuote(containerId)} sh -c 'exec bash || exec sh'`;
+      dockerExec = buildPrivilegedCommand(hostId, dockerCmd);
+    }
   } catch (err) {
     send({ type: "error", message: err instanceof Error ? err.message : "Erreur de configuration SSH." });
     ws.close();
@@ -71,39 +77,57 @@ function handleSshSession(ws: WebSocket, hostId: number, username: string) {
   }
 
   const conn = new SshClient();
+  const logTarget = containerId ? `${hostId}/container:${containerId}` : String(hostId);
+
+  const wireChannel = (stream: import("ssh2").ClientChannel) => {
+    stream.on("data", (data: Buffer) => send({ type: "data", data: data.toString("utf8") }));
+    stream.stderr.on("data", (data: Buffer) => send({ type: "data", data: data.toString("utf8") }));
+    stream.on("close", () => {
+      send({ type: "closed" });
+      conn.end();
+    });
+
+    ws.on("message", (raw) => {
+      let msg: ClientMessage;
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        return;
+      }
+      if (msg.type === "input") stream.write(msg.data);
+      else if (msg.type === "resize") stream.setWindow(msg.rows, msg.cols, 0, 0);
+    });
+
+    ws.on("close", () => {
+      stream.close();
+      conn.end();
+      logAudit("ssh.disconnected", logTarget, username);
+    });
+  };
 
   conn.on("ready", () => {
-    logAudit("ssh.connected", String(hostId), username);
+    logAudit("ssh.connected", logTarget, username);
+
+    if (dockerExec) {
+      conn.exec(dockerExec.command, { pty: { term: "xterm-256color" } }, (err, stream) => {
+        if (err) {
+          send({ type: "error", message: err.message });
+          conn.end();
+          return;
+        }
+        if (dockerExec!.stdinPassword) stream.write(`${dockerExec!.stdinPassword}\n`);
+        wireChannel(stream);
+      });
+      return;
+    }
+
     conn.shell({ term: "xterm-256color" }, (err, stream) => {
       if (err) {
         send({ type: "error", message: err.message });
         conn.end();
         return;
       }
-
-      stream.on("data", (data: Buffer) => send({ type: "data", data: data.toString("utf8") }));
-      stream.stderr.on("data", (data: Buffer) => send({ type: "data", data: data.toString("utf8") }));
-      stream.on("close", () => {
-        send({ type: "closed" });
-        conn.end();
-      });
-
-      ws.on("message", (raw) => {
-        let msg: ClientMessage;
-        try {
-          msg = JSON.parse(raw.toString());
-        } catch {
-          return;
-        }
-        if (msg.type === "input") stream.write(msg.data);
-        else if (msg.type === "resize") stream.setWindow(msg.rows, msg.cols, 0, 0);
-      });
-
-      ws.on("close", () => {
-        stream.close();
-        conn.end();
-        logAudit("ssh.disconnected", String(hostId), username);
-      });
+      wireChannel(stream);
     });
   });
 

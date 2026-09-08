@@ -1,5 +1,5 @@
 import { Client as SshClient } from "ssh2";
-import { buildSshConfig } from "./ssh";
+import { buildSshConfig, buildPrivilegedCommand } from "./ssh";
 
 export type UpdateMethod = "apt" | "opkg" | "dsm";
 export type UpdateMode = "dry-run" | "apply";
@@ -31,7 +31,7 @@ const COMMANDS: Record<UpdateMethod, CommandSet> = {
   },
   dsm: {
     dryRun:
-      "sudo /usr/syno/bin/synoupgrade --check 2>/dev/null || echo 'Vérification DSM non disponible via SSH standard sur ce modèle.'",
+      "/usr/syno/bin/synoupgrade --check 2>/dev/null || echo 'Vérification DSM non disponible via SSH standard sur ce modèle.'",
     apply:
       "echo 'Mise à jour DSM à confirmer manuellement : Panneau de configuration > Mise à jour et restauration.'",
     rebootCheck: null,
@@ -59,14 +59,17 @@ export function buildUpdateCommand(
   return `${base}; reboot_check=$(${set.rebootCheck}); ${rebootAction}`;
 }
 
-export function streamSshCommand(hostId: number, command: string): ReadableStream<Uint8Array> {
+export function streamSshCommand(hostId: number, rawCommand: string): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
 
   return new ReadableStream({
     start(controller) {
       let config;
+      let command: string;
+      let stdinPassword: string | null;
       try {
         config = buildSshConfig(hostId);
+        ({ command, stdinPassword } = buildPrivilegedCommand(hostId, rawCommand));
       } catch (err) {
         controller.enqueue(
           encoder.encode(`event: error\ndata: ${err instanceof Error ? err.message : "Erreur"}\n\n`)
@@ -92,6 +95,7 @@ export function streamSshCommand(hostId: number, command: string): ReadableStrea
             conn.end();
             return;
           }
+          if (stdinPassword) stream.write(`${stdinPassword}\n`);
           stream.on("data", (data: Buffer) => sendLine(data.toString("utf8")));
           stream.stderr.on("data", (data: Buffer) => sendLine(data.toString("utf8")));
           stream.on("close", (code: number) => {

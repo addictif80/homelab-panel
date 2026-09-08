@@ -1,8 +1,9 @@
 import { Client as SshClient } from "ssh2";
-import { buildSshConfig } from "./ssh";
+import { buildSshConfig, buildPrivilegedCommand, shellQuote } from "./ssh";
 
-function execOnHost(hostId: number, command: string): Promise<{ stdout: string; stderr: string; code: number }> {
+function execOnHost(hostId: number, rawCommand: string): Promise<{ stdout: string; stderr: string; code: number }> {
   const config = buildSshConfig(hostId);
+  const { command, stdinPassword } = buildPrivilegedCommand(hostId, rawCommand);
   const conn = new SshClient();
 
   return new Promise((resolve, reject) => {
@@ -13,6 +14,7 @@ function execOnHost(hostId: number, command: string): Promise<{ stdout: string; 
           reject(err);
           return;
         }
+        if (stdinPassword) stream.write(`${stdinPassword}\n`);
         let stdout = "";
         let stderr = "";
         stream.on("data", (d: Buffer) => (stdout += d.toString("utf8")));
@@ -37,10 +39,6 @@ export type DockerContainer = {
   ports: string;
   createdAt: string;
 };
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
 
 export async function listContainers(hostId: number): Promise<DockerContainer[]> {
   const { stdout, stderr, code } = await execOnHost(

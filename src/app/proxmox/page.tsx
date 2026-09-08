@@ -14,6 +14,7 @@ type Resource = {
   maxmem: number;
   uptime: number;
 };
+type AggregatedResource = Resource & { hostId: number };
 
 function formatUptime(seconds: number): string {
   if (!seconds) return "—";
@@ -25,60 +26,76 @@ function formatUptime(seconds: number): string {
 
 export default function ProxmoxPage() {
   const [hosts, setHosts] = useState<Host[]>([]);
-  const [selectedHostId, setSelectedHostId] = useState<number | null>(null);
-  const [configured, setConfigured] = useState<boolean | null>(null);
-  const [resources, setResources] = useState<Resource[]>([]);
+  const [configuredHostIds, setConfiguredHostIds] = useState<number[]>([]);
+  const [resources, setResources] = useState<AggregatedResource[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
+  const [configHostId, setConfigHostId] = useState<number | null>(null);
   const [tokenId, setTokenId] = useState("root@pam!homelab");
   const [secret, setSecret] = useState("");
   const [verifySsl, setVerifySsl] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/hosts")
-      .then((r) => r.json())
-      .then((d) => {
-        const physical = d.hosts.filter((h: Host) => h.kind === "physical");
-        setHosts(physical);
-        if (physical.length > 0) setSelectedHostId(physical[0].id);
-      });
-  }, []);
-
-  const loadConfig = useCallback(async (hostId: number) => {
-    const res = await fetch(`/api/proxmox/${hostId}/config`);
-    const data = await res.json();
-    setConfigured(data.configured);
-  }, []);
-
-  const loadResources = useCallback(async (hostId: number) => {
+  const loadAll = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`/api/proxmox/${hostId}/resources`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setResources(data.resources);
+      const hostsRes = await fetch("/api/hosts");
+      const hostsData = await hostsRes.json();
+      const physical: Host[] = hostsData.hosts.filter((h: Host) => h.kind === "physical");
+      setHosts(physical);
+      if (physical.length > 0 && configHostId === null) setConfigHostId(physical[0].id);
+
+      const configs = await Promise.all(
+        physical.map(async (h) => {
+          const res = await fetch(`/api/proxmox/${h.id}/config`);
+          const data = await res.json();
+          return { hostId: h.id, configured: data.configured as boolean };
+        })
+      );
+      const configured = configs.filter((c) => c.configured).map((c) => c.hostId);
+      setConfiguredHostIds(configured);
+
+      if (configured.length === 0) {
+        setResources([]);
+        return;
+      }
+
+      const merged = new Map<string, AggregatedResource>();
+      const errors: string[] = [];
+      for (const hostId of configured) {
+        const res = await fetch(`/api/proxmox/${hostId}/resources`);
+        const data = await res.json();
+        if (!res.ok) {
+          errors.push(data.error);
+          continue;
+        }
+        for (const r of data.resources as Resource[]) {
+          const key = `${r.node}-${r.type}-${r.vmid}`;
+          if (!merged.has(key)) merged.set(key, { ...r, hostId });
+        }
+      }
+      setResources([...merged.values()].sort((a, b) => a.name.localeCompare(b.name)));
+      if (errors.length > 0) setError(errors[0]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur");
-      setResources([]);
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!selectedHostId) return;
-    loadConfig(selectedHostId).then(() => loadResources(selectedHostId));
-  }, [selectedHostId, loadConfig, loadResources]);
+    loadAll();
+  }, [loadAll]);
 
   async function saveConfig(e: React.FormEvent) {
     e.preventDefault();
-    if (!selectedHostId) return;
+    if (!configHostId) return;
     setError("");
     try {
-      const res = await fetch(`/api/proxmox/${selectedHostId}/config`, {
+      const res = await fetch(`/api/proxmox/${configHostId}/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tokenId, secret, verifySsl }),
@@ -87,25 +104,23 @@ export default function ProxmoxPage() {
       if (!res.ok) throw new Error(data.error);
       setShowConfig(false);
       setSecret("");
-      setConfigured(true);
-      loadResources(selectedHostId);
+      loadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur");
     }
   }
 
-  async function runAction(r: Resource, action: "start" | "stop" | "shutdown" | "reboot") {
-    if (!selectedHostId) return;
+  async function runAction(r: AggregatedResource, action: "start" | "stop" | "shutdown" | "reboot") {
     setPending(`${r.vmid}-${action}`);
     try {
-      const res = await fetch(`/api/proxmox/${selectedHostId}/action`, {
+      const res = await fetch(`/api/proxmox/${r.hostId}/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ node: r.node, type: r.type, vmid: r.vmid, action }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setTimeout(() => loadResources(selectedHostId), 1500);
+      setTimeout(loadAll, 1500);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur");
     } finally {
@@ -117,36 +132,39 @@ export default function ProxmoxPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Proxmox</h1>
-          <p className="text-sm text-neutral-400">VM et conteneurs LXC du cluster.</p>
+          <h1 className="text-2xl font-semibold">Serveurs VM</h1>
+          <p className="text-sm text-neutral-400">
+            VM et conteneurs LXC de tous les nœuds Proxmox configurés, en une seule vue.
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <select
-            value={selectedHostId ?? ""}
-            onChange={(e) => setSelectedHostId(Number(e.target.value))}
-            className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
-          >
-            {hosts.map((h) => (
-              <option key={h.id} value={h.id}>
-                {h.name}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => setShowConfig((s) => !s)}
-            className="rounded border border-neutral-700 px-3 py-1 text-sm hover:bg-neutral-800"
-          >
-            {configured ? "Reconfigurer" : "Configurer l'API"}
-          </button>
-        </div>
+        <button
+          onClick={() => setShowConfig((s) => !s)}
+          className="rounded border border-neutral-700 px-3 py-1 text-sm hover:bg-neutral-800"
+        >
+          Gérer les connexions API
+        </button>
       </div>
 
       {showConfig && (
         <form onSubmit={saveConfig} className="max-w-md space-y-3 rounded border border-neutral-800 p-4">
           <p className="text-xs text-neutral-400">
-            Crée un token API dans Proxmox (Datacenter → Permissions → API Tokens) et colle ses
-            informations ici. Le secret est chiffré avant stockage.
+            Crée un token API dans Proxmox (Datacenter → Permissions → API Tokens) sur un nœud du
+            cluster — les VM de tous les nœuds apparaîtront automatiquement.
           </p>
+          <div>
+            <label className="block text-xs mb-1">Nœud Proxmox</label>
+            <select
+              value={configHostId ?? ""}
+              onChange={(e) => setConfigHostId(Number(e.target.value))}
+              className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+            >
+              {hosts.map((h) => (
+                <option key={h.id} value={h.id}>
+                  {h.name} {configuredHostIds.includes(h.id) ? "(configuré)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
           <div>
             <label className="block text-xs mb-1">Token ID</label>
             <input
@@ -180,9 +198,9 @@ export default function ProxmoxPage() {
       {error && <p className="text-sm text-red-400">{error}</p>}
       {loading && <p className="text-sm text-neutral-500">Chargement...</p>}
 
-      {!loading && configured === false && (
+      {!loading && configuredHostIds.length === 0 && (
         <p className="text-sm text-neutral-500">
-          Aucun token API configuré pour ce nœud. Clique sur &laquo; Configurer l&apos;API &raquo;.
+          Aucun token API configuré. Clique sur &laquo; Gérer les connexions API &raquo;.
         </p>
       )}
 

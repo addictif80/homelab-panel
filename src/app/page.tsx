@@ -1,11 +1,12 @@
 const MODULES = [
-  { name: "Inventaire & topologie", status: "disponible" },
+  { name: "Serveurs physiques", status: "disponible" },
+  { name: "Serveurs VM", status: "disponible" },
+  { name: "Docker", status: "disponible" },
   { name: "Terminal SSH", status: "disponible" },
-  { name: "Proxmox", status: "disponible" },
   { name: "Mises à jour", status: "disponible" },
   { name: "Explorateur de fichiers", status: "disponible" },
   { name: "Tailscale", status: "disponible" },
-  { name: "Docker", status: "disponible" },
+  { name: "Inventaire & topologie", status: "disponible" },
 ];
 
 export default function Home() {

@@ -5,13 +5,14 @@ import { usePathname, useRouter } from "next/navigation";
 
 const NAV_ITEMS = [
   { href: "/", label: "Vue d'ensemble" },
-  { href: "/inventory", label: "Inventaire & topologie" },
+  { href: "/servers", label: "Serveurs physiques" },
+  { href: "/proxmox", label: "Serveurs VM" },
+  { href: "/docker", label: "Docker" },
   { href: "/ssh", label: "Terminal SSH" },
-  { href: "/proxmox", label: "Proxmox" },
   { href: "/updates", label: "Mises à jour" },
   { href: "/files", label: "Explorateur de fichiers" },
   { href: "/tailscale", label: "Tailscale" },
-  { href: "/docker", label: "Docker" },
+  { href: "/inventory", label: "Inventaire & topologie" },
 ];
 
 export default function Sidebar() {

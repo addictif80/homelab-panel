@@ -7,9 +7,11 @@ import "@xterm/xterm/css/xterm.css";
 
 export default function Terminal({
   hostId,
+  containerId,
   onStatusChange,
 }: {
   hostId: number;
+  containerId?: string;
   onStatusChange?: (status: "connecting" | "connected" | "closed" | "error", message?: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -29,7 +31,9 @@ export default function Terminal({
     fitAddon.fit();
 
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${protocol}://${window.location.host}/ws/ssh?hostId=${hostId}`);
+    const params = new URLSearchParams({ hostId: String(hostId) });
+    if (containerId) params.set("containerId", containerId);
+    const ws = new WebSocket(`${protocol}://${window.location.host}/ws/ssh?${params.toString()}`);
     wsRef.current = ws;
     onStatusChange?.("connecting");
 
@@ -70,7 +74,7 @@ export default function Terminal({
       ws.close();
       term.dispose();
     };
-  }, [hostId, onStatusChange]);
+  }, [hostId, containerId, onStatusChange]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }

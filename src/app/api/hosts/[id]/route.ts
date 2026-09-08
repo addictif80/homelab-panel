@@ -13,6 +13,7 @@ const EDITABLE_FIELDS = [
   "ssh_user",
   "docker_enabled",
   "update_method",
+  "needs_sudo",
   "notes",
 ] as const;
 

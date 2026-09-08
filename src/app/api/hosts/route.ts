@@ -17,6 +17,7 @@ export type Host = {
   ssh_user: string | null;
   docker_enabled: number;
   update_method: string | null;
+  needs_sudo: number;
   notes: string | null;
 };
 
@@ -39,8 +40,22 @@ function slugify(name: string): string {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { name, kind, role, os, cluster, lan_ip, tailscale_ip, public_ip, ssh_port, ssh_user, docker_enabled, update_method, notes } =
-    body;
+  const {
+    name,
+    kind,
+    role,
+    os,
+    cluster,
+    lan_ip,
+    tailscale_ip,
+    public_ip,
+    ssh_port,
+    ssh_user,
+    docker_enabled,
+    update_method,
+    needs_sudo,
+    notes,
+  } = body;
 
   if (!name || typeof name !== "string") {
     return NextResponse.json({ error: "Le nom est requis." }, { status: 400 });
@@ -55,8 +70,8 @@ export async function POST(req: NextRequest) {
   try {
     const info = db
       .prepare(
-        `INSERT INTO hosts (name, slug, kind, role, os, cluster, lan_ip, tailscale_ip, public_ip, ssh_port, ssh_user, docker_enabled, update_method, notes)
-         VALUES (@name, @slug, @kind, @role, @os, @cluster, @lan_ip, @tailscale_ip, @public_ip, @ssh_port, @ssh_user, @docker_enabled, @update_method, @notes)`
+        `INSERT INTO hosts (name, slug, kind, role, os, cluster, lan_ip, tailscale_ip, public_ip, ssh_port, ssh_user, docker_enabled, update_method, needs_sudo, notes)
+         VALUES (@name, @slug, @kind, @role, @os, @cluster, @lan_ip, @tailscale_ip, @public_ip, @ssh_port, @ssh_user, @docker_enabled, @update_method, @needs_sudo, @notes)`
       )
       .run({
         name,
@@ -72,6 +87,7 @@ export async function POST(req: NextRequest) {
         ssh_user: ssh_user ?? null,
         docker_enabled: docker_enabled ? 1 : 0,
         update_method: update_method ?? null,
+        needs_sudo: needs_sudo === undefined ? 1 : needs_sudo ? 1 : 0,
         notes: notes ?? null,
       });
     logAudit("host.created", name);

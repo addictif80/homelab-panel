@@ -62,6 +62,7 @@ function migrate(db: Database.Database) {
       ssh_user TEXT,
       docker_enabled INTEGER NOT NULL DEFAULT 0,
       update_method TEXT,
+      needs_sudo INTEGER NOT NULL DEFAULT 1,
       notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -69,7 +70,7 @@ function migrate(db: Database.Database) {
     CREATE TABLE IF NOT EXISTS credentials (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
-      kind TEXT NOT NULL CHECK (kind IN ('ssh_key','ssh_password','api_token')),
+      kind TEXT NOT NULL CHECK (kind IN ('ssh_key','ssh_password','sudo_password','api_token')),
       label TEXT,
       encrypted_data TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -96,6 +97,11 @@ function migrate(db: Database.Database) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  const hostColumns = db.prepare(`PRAGMA table_info(hosts)`).all() as { name: string }[];
+  if (!hostColumns.some((c) => c.name === "needs_sudo")) {
+    db.exec(`ALTER TABLE hosts ADD COLUMN needs_sudo INTEGER NOT NULL DEFAULT 1`);
+  }
 }
 
 export function logAudit(action: string, target?: string, detail?: string) {

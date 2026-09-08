@@ -14,7 +14,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params;
   const { kind, label, secret } = await req.json();
 
-  if (!["ssh_key", "ssh_password", "api_token"].includes(kind)) {
+  if (!["ssh_key", "ssh_password", "sudo_password", "api_token"].includes(kind)) {
     return NextResponse.json({ error: "Type de credential invalide." }, { status: 400 });
   }
   if (!secret || typeof secret !== "string") {

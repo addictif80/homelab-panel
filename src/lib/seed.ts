@@ -12,6 +12,7 @@ type SeedHost = {
   public_ip?: string;
   update_method?: string;
   docker_enabled?: number;
+  needs_sudo?: number;
   notes?: string;
 };
 
@@ -25,7 +26,8 @@ const SEED_HOSTS: SeedHost[] = [
     cluster: "abhd",
     lan_ip: "192.168.0.100",
     update_method: "apt",
-    notes: "pve1 / dell",
+    needs_sudo: 0,
+    notes: "pve1 / dell (connexion root)",
   },
   {
     name: "Fujitsu PRIMERGY TX1310 M1",
@@ -36,7 +38,8 @@ const SEED_HOSTS: SeedHost[] = [
     cluster: "abhd",
     lan_ip: "192.168.0.200",
     update_method: "apt",
-    notes: "pve2 / fujitsu",
+    needs_sudo: 0,
+    notes: "pve2 / fujitsu (connexion root)",
   },
   {
     name: "Synology DS115J",
@@ -55,6 +58,7 @@ const SEED_HOSTS: SeedHost[] = [
     os: "ZimaOS",
     update_method: "apt",
     docker_enabled: 1,
+    needs_sudo: 1,
     notes: "Hébergé chez un membre de la famille, failover web via Caddy",
   },
   {
@@ -64,6 +68,7 @@ const SEED_HOSTS: SeedHost[] = [
     role: "Mailcow + CloudPanel",
     update_method: "apt",
     docker_enabled: 1,
+    needs_sudo: 1,
     notes: "Mailcow + CloudPanel",
   },
   {
@@ -73,6 +78,7 @@ const SEED_HOSTS: SeedHost[] = [
     role: "Frontend public (Nginx Proxy Manager)",
     update_method: "apt",
     docker_enabled: 1,
+    needs_sudo: 1,
     notes: "Nginx Proxy Manager en Docker",
   },
   {
@@ -82,7 +88,8 @@ const SEED_HOSTS: SeedHost[] = [
     role: "Routeur / Wi-Fi",
     os: "OpenWrt",
     update_method: "opkg",
-    notes: "Flashé en OpenWrt",
+    needs_sudo: 0,
+    notes: "Flashé en OpenWrt (connexion root)",
   },
 ];
 
@@ -109,8 +116,8 @@ export function seedIfEmpty() {
   if (c > 0) return;
 
   const insertHost = db.prepare(`
-    INSERT INTO hosts (name, slug, kind, role, os, cluster, lan_ip, tailscale_ip, public_ip, update_method, docker_enabled, notes)
-    VALUES (@name, @slug, @kind, @role, @os, @cluster, @lan_ip, @tailscale_ip, @public_ip, @update_method, @docker_enabled, @notes)
+    INSERT INTO hosts (name, slug, kind, role, os, cluster, lan_ip, tailscale_ip, public_ip, update_method, docker_enabled, needs_sudo, notes)
+    VALUES (@name, @slug, @kind, @role, @os, @cluster, @lan_ip, @tailscale_ip, @public_ip, @update_method, @docker_enabled, @needs_sudo, @notes)
   `);
 
   const insertMany = db.transaction((hosts: SeedHost[]) => {
@@ -127,6 +134,7 @@ export function seedIfEmpty() {
         public_ip: h.public_ip ?? null,
         update_method: h.update_method ?? null,
         docker_enabled: h.docker_enabled ?? 0,
+        needs_sudo: h.needs_sudo ?? 1,
         notes: h.notes ?? null,
       });
     }
