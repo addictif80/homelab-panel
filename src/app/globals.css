@@ -3,6 +3,16 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /* The app is always dark (see body classes in layout.tsx) — tell the browser so native
+     form controls (inputs, selects, scrollbars) render with dark, legible defaults instead
+     of assuming a light page and drawing black-on-dark text. */
+  color-scheme: dark;
+}
+
+input,
+textarea,
+select {
+  color: inherit;
 }
 
 @theme inline {
