@@ -3,7 +3,7 @@ const MODULES = [
   { name: "Terminal SSH", status: "disponible" },
   { name: "Proxmox", status: "disponible" },
   { name: "Mises à jour", status: "disponible" },
-  { name: "Explorateur de fichiers", status: "à venir" },
+  { name: "Explorateur de fichiers", status: "disponible" },
   { name: "Tailscale", status: "à venir" },
   { name: "Docker", status: "à venir" },
 ];
