@@ -1,33 +1,7 @@
-import { Client as SshClient } from "ssh2";
-import { buildSshConfig, buildPrivilegedCommand, shellQuote } from "./ssh";
+import { runSshCommand, shellQuote } from "./ssh";
 
-function execOnHost(hostId: number, rawCommand: string): Promise<{ stdout: string; stderr: string; code: number }> {
-  const config = buildSshConfig(hostId);
-  const { command, stdinPassword } = buildPrivilegedCommand(hostId, rawCommand);
-  const conn = new SshClient();
-
-  return new Promise((resolve, reject) => {
-    conn.on("ready", () => {
-      conn.exec(command, (err, stream) => {
-        if (err) {
-          conn.end();
-          reject(err);
-          return;
-        }
-        if (stdinPassword) stream.write(`${stdinPassword}\n`);
-        let stdout = "";
-        let stderr = "";
-        stream.on("data", (d: Buffer) => (stdout += d.toString("utf8")));
-        stream.stderr.on("data", (d: Buffer) => (stderr += d.toString("utf8")));
-        stream.on("close", (code: number) => {
-          conn.end();
-          resolve({ stdout, stderr, code });
-        });
-      });
-    });
-    conn.on("error", reject);
-    conn.connect(config);
-  });
+function execOnHost(hostId: number, rawCommand: string) {
+  return runSshCommand(hostId, rawCommand, { sudo: true });
 }
 
 export type DockerContainer = {
@@ -78,6 +52,21 @@ export async function containerLogs(hostId: number, containerId: string, tail = 
   const { stdout, stderr, code } = await execOnHost(
     hostId,
     `docker logs --tail ${Number(tail) || 200} ${shellQuote(containerId)} 2>&1`
+  );
+  if (code !== 0 && !stdout) throw new Error(stderr || "Erreur Docker.");
+  return stdout;
+}
+
+/** Tails a specific log file inside a running container (e.g. NPM's per-host access/error logs). */
+export async function tailContainerFile(
+  hostId: number,
+  containerId: string,
+  filePath: string,
+  tail = 200
+): Promise<string> {
+  const { stdout, stderr, code } = await execOnHost(
+    hostId,
+    `docker exec ${shellQuote(containerId)} tail -n ${Number(tail) || 200} ${shellQuote(filePath)}`
   );
   if (code !== 0 && !stdout) throw new Error(stderr || "Erreur Docker.");
   return stdout;

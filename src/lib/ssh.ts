@@ -1,3 +1,4 @@
+import { Client as SshClient } from "ssh2";
 import { getDb } from "./db";
 import { vaultDecrypt } from "./crypto";
 import type { ConnectConfig } from "ssh2";
@@ -107,4 +108,42 @@ export function buildPrivilegedCommand(
     command: `sudo -S -p '' bash -lc ${shellQuote(rawCommand)}`,
     stdinPassword: password,
   };
+}
+
+export type SshExecResult = { stdout: string; stderr: string; code: number };
+
+/**
+ * Runs a command over SSH and buffers its output. Pass `sudo: true` for commands that need
+ * root (apt, docker) on a host configured with `needs_sudo` — the password is fed on stdin
+ * automatically. Leave it false for read-only commands (stats, log tailing) that don't need it.
+ */
+export function runSshCommand(hostId: number, rawCommand: string, opts: { sudo?: boolean } = {}): Promise<SshExecResult> {
+  const config = buildSshConfig(hostId);
+  const { command, stdinPassword } = opts.sudo
+    ? buildPrivilegedCommand(hostId, rawCommand)
+    : { command: rawCommand, stdinPassword: null as string | null };
+  const conn = new SshClient();
+
+  return new Promise((resolve, reject) => {
+    conn.on("ready", () => {
+      conn.exec(command, (err, stream) => {
+        if (err) {
+          conn.end();
+          reject(err);
+          return;
+        }
+        if (stdinPassword) stream.write(`${stdinPassword}\n`);
+        let stdout = "";
+        let stderr = "";
+        stream.on("data", (d: Buffer) => (stdout += d.toString("utf8")));
+        stream.stderr.on("data", (d: Buffer) => (stderr += d.toString("utf8")));
+        stream.on("close", (code: number) => {
+          conn.end();
+          resolve({ stdout, stderr, code });
+        });
+      });
+    });
+    conn.on("error", reject);
+    conn.connect(config);
+  });
 }
