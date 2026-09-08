@@ -4,7 +4,7 @@ const MODULES = [
   { name: "Proxmox", status: "disponible" },
   { name: "Mises à jour", status: "disponible" },
   { name: "Explorateur de fichiers", status: "disponible" },
-  { name: "Tailscale", status: "à venir" },
+  { name: "Tailscale", status: "disponible" },
   { name: "Docker", status: "à venir" },
 ];
 
