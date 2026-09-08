@@ -1,0 +1,169 @@
+import { Client as SshClient } from "ssh2";
+import { buildSshConfig } from "./ssh";
+
+function execOnHost(hostId: number, command: string): Promise<{ stdout: string; stderr: string; code: number }> {
+  const config = buildSshConfig(hostId);
+  const conn = new SshClient();
+
+  return new Promise((resolve, reject) => {
+    conn.on("ready", () => {
+      conn.exec(command, (err, stream) => {
+        if (err) {
+          conn.end();
+          reject(err);
+          return;
+        }
+        let stdout = "";
+        let stderr = "";
+        stream.on("data", (d: Buffer) => (stdout += d.toString("utf8")));
+        stream.stderr.on("data", (d: Buffer) => (stderr += d.toString("utf8")));
+        stream.on("close", (code: number) => {
+          conn.end();
+          resolve({ stdout, stderr, code });
+        });
+      });
+    });
+    conn.on("error", reject);
+    conn.connect(config);
+  });
+}
+
+export type DockerContainer = {
+  id: string;
+  name: string;
+  image: string;
+  status: string;
+  state: string;
+  ports: string;
+  createdAt: string;
+};
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+export async function listContainers(hostId: number): Promise<DockerContainer[]> {
+  const { stdout, stderr, code } = await execOnHost(
+    hostId,
+    `docker ps -a --format '{{json .}}'`
+  );
+  if (code !== 0) throw new Error(stderr || "Erreur Docker.");
+
+  return stdout
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const raw = JSON.parse(line);
+      return {
+        id: raw.ID,
+        name: raw.Names,
+        image: raw.Image,
+        status: raw.Status,
+        state: raw.State,
+        ports: raw.Ports,
+        createdAt: raw.CreatedAt,
+      };
+    });
+}
+
+export async function containerAction(
+  hostId: number,
+  containerId: string,
+  action: "start" | "stop" | "restart" | "remove"
+): Promise<void> {
+  const cmd = action === "remove" ? `docker rm -f ${shellQuote(containerId)}` : `docker ${action} ${shellQuote(containerId)}`;
+  const { stderr, code } = await execOnHost(hostId, cmd);
+  if (code !== 0) throw new Error(stderr || "Erreur Docker.");
+}
+
+export async function containerLogs(hostId: number, containerId: string, tail = 200): Promise<string> {
+  const { stdout, stderr, code } = await execOnHost(
+    hostId,
+    `docker logs --tail ${Number(tail) || 200} ${shellQuote(containerId)} 2>&1`
+  );
+  if (code !== 0 && !stdout) throw new Error(stderr || "Erreur Docker.");
+  return stdout;
+}
+
+type ContainerInspect = {
+  Name: string;
+  Config: { Image: string; Env: string[] | null; ExposedPorts: Record<string, unknown> | null };
+  HostConfig: {
+    Binds: string[] | null;
+    PortBindings: Record<string, { HostPort: string }[]> | null;
+    RestartPolicy: { Name: string };
+    NetworkMode: string;
+  };
+};
+
+/** Pulls the latest image and recreates the container with the same run configuration. */
+export async function pullAndRecreate(hostId: number, containerId: string): Promise<string[]> {
+  const log: string[] = [];
+
+  const inspectRes = await execOnHost(hostId, `docker inspect ${shellQuote(containerId)}`);
+  if (inspectRes.code !== 0) throw new Error(inspectRes.stderr || "Conteneur introuvable.");
+  const [info] = JSON.parse(inspectRes.stdout) as ContainerInspect[];
+
+  const image = info.Config.Image;
+  const name = info.Name.replace(/^\//, "");
+
+  log.push(`Pull de l'image ${image}...`);
+  const pullRes = await execOnHost(hostId, `docker pull ${shellQuote(image)}`);
+  log.push(pullRes.stdout.trim());
+  if (pullRes.code !== 0) throw new Error(pullRes.stderr || "Échec du pull.");
+
+  log.push(`Suppression du conteneur ${name}...`);
+  const rmRes = await execOnHost(hostId, `docker rm -f ${shellQuote(containerId)}`);
+  if (rmRes.code !== 0) throw new Error(rmRes.stderr || "Échec de la suppression.");
+
+  const args = ["run", "-d", "--name", shellQuote(name)];
+  if (info.HostConfig.RestartPolicy?.Name) {
+    args.push("--restart", shellQuote(info.HostConfig.RestartPolicy.Name));
+  }
+  if (info.HostConfig.NetworkMode && info.HostConfig.NetworkMode !== "default") {
+    args.push("--network", shellQuote(info.HostConfig.NetworkMode));
+  }
+  for (const bind of info.HostConfig.Binds ?? []) {
+    args.push("-v", shellQuote(bind));
+  }
+  for (const [containerPort, bindings] of Object.entries(info.HostConfig.PortBindings ?? {})) {
+    for (const binding of bindings ?? []) {
+      args.push("-p", shellQuote(`${binding.HostPort}:${containerPort}`));
+    }
+  }
+  for (const env of info.Config.Env ?? []) {
+    args.push("-e", shellQuote(env));
+  }
+  args.push(shellQuote(image));
+
+  const runCmd = `docker ${args.join(" ")}`;
+  log.push(`Recréation: ${runCmd}`);
+  const runRes = await execOnHost(hostId, runCmd);
+  if (runRes.code !== 0) throw new Error(runRes.stderr || "Échec de la recréation.");
+  log.push("Conteneur recréé avec succès.");
+
+  return log;
+}
+
+export type NewContainerSpec = {
+  image: string;
+  name: string;
+  ports: string[]; // "hostPort:containerPort"
+  volumes: string[]; // "hostPath:containerPath"
+  env: string[]; // "KEY=VALUE"
+  restartPolicy: string;
+};
+
+export async function runNewContainer(hostId: number, spec: NewContainerSpec): Promise<string> {
+  const args = ["run", "-d"];
+  if (spec.name) args.push("--name", shellQuote(spec.name));
+  if (spec.restartPolicy) args.push("--restart", shellQuote(spec.restartPolicy));
+  for (const p of spec.ports) if (p.trim()) args.push("-p", shellQuote(p.trim()));
+  for (const v of spec.volumes) if (v.trim()) args.push("-v", shellQuote(v.trim()));
+  for (const e of spec.env) if (e.trim()) args.push("-e", shellQuote(e.trim()));
+  args.push(shellQuote(spec.image));
+
+  const { stdout, stderr, code } = await execOnHost(hostId, `docker ${args.join(" ")}`);
+  if (code !== 0) throw new Error(stderr || "Erreur Docker.");
+  return stdout.trim();
+}

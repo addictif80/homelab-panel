@@ -5,7 +5,7 @@ const MODULES = [
   { name: "Mises à jour", status: "disponible" },
   { name: "Explorateur de fichiers", status: "disponible" },
   { name: "Tailscale", status: "disponible" },
-  { name: "Docker", status: "à venir" },
+  { name: "Docker", status: "disponible" },
 ];
 
 export default function Home() {
