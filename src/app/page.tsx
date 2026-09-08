@@ -1,5 +1,5 @@
 const MODULES = [
-  { name: "Inventaire & topologie", status: "à venir" },
+  { name: "Inventaire & topologie", status: "disponible" },
   { name: "Terminal SSH", status: "à venir" },
   { name: "Proxmox", status: "à venir" },
   { name: "Mises à jour", status: "à venir" },

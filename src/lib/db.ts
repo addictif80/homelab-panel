@@ -21,6 +21,8 @@ export function getDb(): Database.Database {
     db.pragma("foreign_keys = ON");
     migrate(db);
     global.__homelabDb = db;
+    // Lazy import avoids a circular dependency (seed.ts calls back into getDb()).
+    require("./seed").seedIfEmpty();
   }
   return global.__homelabDb;
 }
