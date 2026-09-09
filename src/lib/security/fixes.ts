@@ -2,10 +2,11 @@ import { runSshCommand } from "../ssh";
 import { getDb } from "../db";
 import { buildUpdateCommand, startUpdateJob, type UpdateMethod } from "../updates";
 import { withTimeout } from "../timeout";
+import { blockIp } from "../firewall";
 
 export type FixResult = { message: string; jobId?: string };
 
-type FixFn = (hostId: number) => Promise<FixResult>;
+type FixFn = (hostId: number, params?: Record<string, string>) => Promise<FixResult>;
 
 const FIX_TIMEOUT_MS = 30_000;
 
@@ -66,10 +67,20 @@ export const FIX_REGISTRY: Record<string, FixFn> = {
       message: `Pare-feu de base activé (SSH sur le port ${sshPort} conservé, reste du trafic entrant bloqué).`,
     };
   },
+
+  "block-ip": async (hostId, params) => {
+    const ip = params?.ip;
+    if (!ip) throw new Error("Adresse IP manquante.");
+    return blockIp(hostId, ip);
+  },
 };
 
-export async function applySecurityFix(hostId: number, fixId: string): Promise<FixResult> {
+export async function applySecurityFix(
+  hostId: number,
+  fixId: string,
+  params?: Record<string, string>
+): Promise<FixResult> {
   const fn = FIX_REGISTRY[fixId];
   if (!fn) throw new Error("Correctif inconnu.");
-  return fn(hostId);
+  return fn(hostId, params);
 }

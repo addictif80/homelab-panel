@@ -16,11 +16,20 @@ export function reasonLabel(reason: SuspiciousReason): string {
   return REASON_LABELS[reason];
 }
 
-// Heuristic thresholds over the lines currently in view (the live tail buffer, not a fixed
+export type DetectionThresholds = {
+  authFailure: number;
+  notFound: number;
+  highVolume: number;
+};
+
+// Heuristic defaults over the lines currently in view (the live tail buffer, not a fixed
 // time window) — generous enough to avoid flagging normal traffic on a small homelab.
-const AUTH_FAILURE_THRESHOLD = 5;
-const NOT_FOUND_THRESHOLD = 20;
-const HIGH_VOLUME_THRESHOLD = 200;
+// Overridable per-installation from the Security Center settings panel.
+export const DEFAULT_THRESHOLDS: DetectionThresholds = {
+  authFailure: 5,
+  notFound: 20,
+  highVolume: 200,
+};
 
 const IPV4_RE = /\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/;
 const AUTH_FAILURE_RE =
@@ -44,7 +53,10 @@ function extractStatusCode(line: string): number | null {
 }
 
 /** Scans a batch of log lines and returns IPs worth suggesting a block for, with why. */
-export function analyzeLogLines(lines: string[]): IpSuggestion[] {
+export function analyzeLogLines(
+  lines: string[],
+  thresholds: DetectionThresholds = DEFAULT_THRESHOLDS
+): IpSuggestion[] {
   const stats = new Map<string, { authFailure: number; notFound: number; total: number }>();
 
   for (const line of lines) {
@@ -65,9 +77,9 @@ export function analyzeLogLines(lines: string[]): IpSuggestion[] {
   const suggestions: IpSuggestion[] = [];
   for (const [ip, counts] of stats) {
     const reasons: SuspiciousReason[] = [];
-    if (counts.authFailure >= AUTH_FAILURE_THRESHOLD) reasons.push("auth_failure");
-    if (counts.notFound >= NOT_FOUND_THRESHOLD) reasons.push("not_found_scan");
-    if (counts.total >= HIGH_VOLUME_THRESHOLD) reasons.push("high_volume");
+    if (counts.authFailure >= thresholds.authFailure) reasons.push("auth_failure");
+    if (counts.notFound >= thresholds.notFound) reasons.push("not_found_scan");
+    if (counts.total >= thresholds.highVolume) reasons.push("high_volume");
     if (reasons.length > 0) suggestions.push({ ip, reasons, counts });
   }
 

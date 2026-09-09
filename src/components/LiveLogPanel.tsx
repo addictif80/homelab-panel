@@ -17,7 +17,7 @@ export default function LiveLogPanel({ sourceId }: { sourceId: string }) {
   const [status, setStatus] = useState<"connecting" | "live" | "error" | "closed">("connecting");
   const [errorMessage, setErrorMessage] = useState("");
   const [blocking, setBlocking] = useState<string | null>(null);
-  const [blocked, setBlocked] = useState<Set<string>>(new Set());
+  const [blocked, setBlocked] = useState<Map<string, string>>(new Map());
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -58,7 +58,7 @@ export default function LiveLogPanel({ sourceId }: { sourceId: string }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setBlocked((b) => new Set(b).add(ip));
+      setBlocked((b) => new Map(b).set(ip, data.message || "bloquée"));
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "Erreur de blocage.");
     } finally {
@@ -80,7 +80,9 @@ export default function LiveLogPanel({ sourceId }: { sourceId: string }) {
                 <span className="text-amber-500">— {s.reasons.map(reasonLabel).join(", ")}</span>
               </span>
               {blocked.has(s.ip) ? (
-                <span className="text-neutral-500">bloquée</span>
+                <span className="text-neutral-500" title={blocked.get(s.ip)}>
+                  bloquée
+                </span>
               ) : (
                 <button
                   onClick={() => blockIp(s.ip)}

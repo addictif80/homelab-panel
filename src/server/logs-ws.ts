@@ -6,6 +6,7 @@ import { parse } from "url";
 import { buildSshConfig, buildPrivilegedCommand, shellQuote } from "@/lib/ssh";
 import { getLogSource } from "@/lib/logSources";
 import { analyzeLogLines } from "@/lib/logAnalysis";
+import { getDetectionThresholds } from "@/lib/logAnalysisSettings";
 import { authenticateUpgrade } from "./wsAuth";
 
 const LOGS_WS_PATH = "/ws/logs";
@@ -90,7 +91,7 @@ function handleLogSession(ws: WebSocket, sourceId: string) {
 
         buffer = [...buffer, ...newLines].slice(-MAX_BUFFER_LINES);
         send({ type: "lines", lines: newLines });
-        send({ type: "suggestions", suggestions: analyzeLogLines(buffer) });
+        send({ type: "suggestions", suggestions: analyzeLogLines(buffer, getDetectionThresholds()) });
       };
 
       stream.on("data", handleChunk);

@@ -103,6 +103,11 @@ function migrate(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_update_jobs_host ON update_jobs(host_id, started_at DESC);
 
+    CREATE TABLE IF NOT EXISTS notified_findings (
+      finding_key TEXT PRIMARY KEY,
+      last_notified_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       action TEXT NOT NULL,

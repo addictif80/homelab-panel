@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import DetectionThresholdsPanel from "@/components/DetectionThresholdsPanel";
+import SmtpSettingsPanel from "@/components/SmtpSettingsPanel";
 
 type Severity = "critical" | "warning" | "info" | "good";
 
@@ -13,6 +15,7 @@ type Finding = {
   fixId?: string;
   fixLabel?: string;
   fixWarning?: string;
+  fixParams?: Record<string, string>;
 };
 
 type HostScanResult = {
@@ -76,7 +79,7 @@ export default function SecurityPage() {
       const res = await fetch(`/api/security/hosts/${hostId}/fix`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fixId: finding.fixId }),
+        body: JSON.stringify({ fixId: finding.fixId, params: finding.fixParams }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Échec du correctif.");
@@ -131,6 +134,11 @@ export default function SecurityPage() {
       )}
 
       {!results && loading && <div className="text-sm text-neutral-500">Analyse de toutes les machines en cours (SSH)...</div>}
+
+      <div className="space-y-3">
+        <DetectionThresholdsPanel />
+        <SmtpSettingsPanel />
+      </div>
 
       <div className="space-y-4">
         {results

@@ -2,6 +2,7 @@ import { createServer } from "http";
 import next from "next";
 import { attachSshWebSocketServer } from "./src/server/ssh-ws";
 import { attachLogsWebSocketServer } from "./src/server/logs-ws";
+import { startNotificationScheduler } from "./src/lib/notifications/scheduler";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOST || "0.0.0.0";
@@ -17,6 +18,7 @@ app.prepare().then(() => {
 
   attachSshWebSocketServer(server);
   attachLogsWebSocketServer(server);
+  startNotificationScheduler();
 
   server.listen(port, hostname, () => {
     console.log(`Homelab Panel prêt sur http://${hostname}:${port}`);

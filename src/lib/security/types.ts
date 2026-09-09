@@ -13,6 +13,8 @@ export type Finding = {
   fixLabel?: string;
   /** Shown in the confirmation step when the fix carries some risk worth flagging plainly. */
   fixWarning?: string;
+  /** Extra arguments a parameterized fix needs (e.g. which IP to block). */
+  fixParams?: Record<string, string>;
 };
 
 export type HostScanResult = {

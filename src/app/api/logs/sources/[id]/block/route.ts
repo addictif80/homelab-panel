@@ -12,9 +12,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!source) return NextResponse.json({ error: "Source de logs introuvable." }, { status: 404 });
 
   try {
-    await blockIp(source.hostId, ip);
+    const { message } = await blockIp(source.hostId, ip);
     logAudit("firewall.block", `${source.hostId}`, ip);
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, message });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Erreur." }, { status: 502 });
   }

@@ -6,13 +6,16 @@ import { scanSingleHost } from "@/lib/security/scan";
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const hostId = Number(id);
-  const { fixId } = (await req.json()) as { fixId?: string };
+  const { fixId, params: fixParams } = (await req.json()) as {
+    fixId?: string;
+    params?: Record<string, string>;
+  };
   if (!fixId) {
     return NextResponse.json({ error: "Correctif manquant." }, { status: 400 });
   }
 
   try {
-    const result = await applySecurityFix(hostId, fixId);
+    const result = await applySecurityFix(hostId, fixId, fixParams);
     logAudit("security.fix", String(hostId), fixId);
     const rescan = await scanSingleHost(hostId);
     return NextResponse.json({ result, rescan });

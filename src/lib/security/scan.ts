@@ -1,6 +1,7 @@
 import { getDb, logAudit } from "../db";
 import { collectHostFacts } from "./facts";
 import { analyzeHost } from "./analyze";
+import { historicalLogFindings } from "./logScan";
 import type { HostScanResult } from "./types";
 
 type HostRow = {
@@ -23,7 +24,14 @@ export async function scanHost(host: HostRow): Promise<HostScanResult> {
   try {
     const facts = await collectHostFacts(host.id);
     const findings = analyzeHost(host, facts);
-    return { hostId: host.id, hostName: host.name, hostKind: host.kind, hostOs: host.os, findings };
+    const logFindings = await historicalLogFindings(host.id).catch(() => []);
+    return {
+      hostId: host.id,
+      hostName: host.name,
+      hostKind: host.kind,
+      hostOs: host.os,
+      findings: [...findings, ...logFindings],
+    };
   } catch (err) {
     return {
       hostId: host.id,
