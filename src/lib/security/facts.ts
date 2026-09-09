@@ -33,6 +33,11 @@ echo '###LISTEN###'
 ss -tulpn 2>/dev/null || netstat -tulpn 2>/dev/null
 echo '###DOCKERPORTS###'
 command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}|{{.Ports}}' 2>/dev/null
+echo '###DHCP###'
+if command -v uci >/dev/null 2>&1; then
+  echo "uci_ignore=$(uci get dhcp.lan.ignore 2>/dev/null || echo 0)"
+fi
+pgrep -x dnsmasq >/dev/null 2>&1 && echo "dnsmasq=running" || echo "dnsmasq=stopped"
 echo '###END###'
 `.trim();
 

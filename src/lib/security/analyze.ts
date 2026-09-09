@@ -163,6 +163,30 @@ export function analyzeHost(host: HostForAnalysis, facts: HostFacts): Finding[] 
     });
   }
 
+  // --- Rogue DHCP (router only) ---
+  if (isRouter) {
+    const dhcp = line(facts, "DHCP");
+    const uciIgnore = dhcp.match(/uci_ignore=(\S+)/)?.[1];
+    const dnsmasqRunning = /dnsmasq=running/.test(dhcp);
+    if (dnsmasqRunning && uciIgnore !== "1") {
+      findings.push({
+        id: "router-dhcp-active",
+        category: "network",
+        severity: "warning",
+        title: "Le serveur DHCP de ce routeur est actif",
+        detail:
+          "Si un autre appareil de ton réseau distribue aussi des adresses IP (ta box internet, un autre routeur), les deux entrent en conflit : certains appareils reçoivent des adresses incohérentes et semblent se déconnecter/reconnecter en boucle. Si ce routeur ne doit pas gérer le DHCP ici (par exemple si ta box s'en charge déjà), désactive-le. Si c'est volontaire et qu'aucun autre appareil ne fait de DHCP sur ce réseau, tu peux ignorer cette alerte.",
+        howTo: [
+          "# Interface LuCI : Network > Interfaces > LAN > DHCP Server > cocher \"Ignore interface\"",
+          "# Ou en ligne de commande :",
+          "uci set dhcp.lan.ignore='1'",
+          "uci commit dhcp",
+          "/etc/init.d/dnsmasq restart",
+        ],
+      });
+    }
+  }
+
   // --- Accounts ---
   const uid0Users = line(facts, "UID0")
     .split("\n")
