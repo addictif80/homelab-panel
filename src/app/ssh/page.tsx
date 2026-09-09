@@ -130,7 +130,7 @@ function SshPageInner() {
             >
               {h.name}
               <div className="text-xs text-neutral-500">
-                {h.lan_ip || h.tailscale_ip || h.public_ip || "pas d'IP"}
+                {h.tailscale_ip || h.lan_ip || h.public_ip || "pas d'IP"}
               </div>
             </button>
           ))}

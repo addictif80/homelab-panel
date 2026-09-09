@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Socket } from "net";
 import { getDb } from "@/lib/db";
+import { resolveHostAddress } from "@/lib/ssh";
 import type { Host } from "../../route";
 
 function tcpProbe(host: string, port: number, timeoutMs = 2500): Promise<boolean> {
@@ -26,7 +27,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const host = getDb().prepare(`SELECT * FROM hosts WHERE id = ?`).get(id) as Host | undefined;
   if (!host) return NextResponse.json({ error: "Machine introuvable." }, { status: 404 });
 
-  const address = host.lan_ip || host.tailscale_ip || host.public_ip;
+  const address = resolveHostAddress(host);
   if (!address) {
     return NextResponse.json({ reachable: null, reason: "Aucune adresse IP renseignée." });
   }

@@ -24,8 +24,11 @@ export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+// The panel itself runs on a remote VM (not on the home LAN), so a Tailscale address — reachable
+// from anywhere on the tailnet — is tried before the LAN IP, which only works if the panel
+// happens to be colocated on the same local network as the target machine.
 export function resolveHostAddress(host: HostRow): string | null {
-  return host.lan_ip || host.tailscale_ip || host.public_ip || null;
+  return host.tailscale_ip || host.lan_ip || host.public_ip || null;
 }
 
 /** Builds an ssh2 ConnectConfig for a host, using its most recent SSH credential from the vault. */

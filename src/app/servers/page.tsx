@@ -87,7 +87,7 @@ export default function ServersPage() {
                 <td className="px-3 py-2 text-neutral-400">{KIND_LABELS[h.kind] ?? h.kind}</td>
                 <td className="px-3 py-2 text-neutral-400">{h.role}</td>
                 <td className="px-3 py-2 font-mono text-xs">
-                  {h.lan_ip ?? h.tailscale_ip ?? h.public_ip ?? "—"}
+                  {h.tailscale_ip ?? h.lan_ip ?? h.public_ip ?? "—"}
                 </td>
                 <td className="px-3 py-2">
                   <button
