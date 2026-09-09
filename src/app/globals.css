@@ -1,11 +1,13 @@
 @import "tailwindcss";
 
+/* This app is always dark — there is no light theme, so unlike the create-next-app default
+   there is no `prefers-color-scheme` toggle here. `color-scheme: dark` tells the browser to
+   render native form controls (inputs, selects, scrollbars) with dark, legible defaults.
+   Background/text color for the page come from Tailwind classes on <body> in layout.tsx —
+   deliberately not set again here, since a plain (unlayered) rule here would take priority
+   over Tailwind's utility classes (which Tailwind emits inside @layer) regardless of the
+   system's light/dark preference, which is exactly the bug this replaced. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-  /* The app is always dark (see body classes in layout.tsx) — tell the browser so native
-     form controls (inputs, selects, scrollbars) render with dark, legible defaults instead
-     of assuming a light page and drawing black-on-dark text. */
   color-scheme: dark;
 }
 
@@ -16,21 +18,6 @@ select {
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
 }
