@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 
 const NAV_ITEMS = [
   { href: "/", label: "Vue d'ensemble" },
+  { href: "/security", label: "Sécurité" },
   { href: "/servers", label: "Serveurs physiques" },
   { href: "/proxmox", label: "Serveurs VM" },
   { href: "/docker", label: "Docker" },
