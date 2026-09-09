@@ -154,6 +154,23 @@ function migrate(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_backup_runs_plan ON backup_runs(plan_id, started_at DESC);
 
+    CREATE TABLE IF NOT EXISTS sales (
+      id TEXT PRIMARY KEY,
+      stripe_session_id TEXT UNIQUE NOT NULL,
+      customer_email TEXT NOT NULL,
+      amount_cents INTEGER NOT NULL,
+      currency TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS download_tokens (
+      token TEXT PRIMARY KEY,
+      sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL,
+      used_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS security_ignored (
       finding_key TEXT PRIMARY KEY,
       host_id INTEGER NOT NULL,

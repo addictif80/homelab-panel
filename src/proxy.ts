@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth";
 
 const PUBLIC_PATHS = ["/login", "/setup"];
-const PUBLIC_API_PREFIXES = ["/api/auth/"];
+const PUBLIC_PATH_PREFIXES = ["/store"];
+const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/store/", "/api/download/"];
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   if (
     PUBLIC_PATHS.includes(pathname) ||
+    PUBLIC_PATH_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`)) ||
     PUBLIC_API_PREFIXES.some((p) => pathname.startsWith(p)) ||
     pathname.startsWith("/_next") ||
     pathname === "/favicon.ico"

@@ -37,7 +37,9 @@ export function setSmtpConfig(config: SmtpConfig, password?: string): void {
   if (password) setSetting(PASSWORD_KEY, vaultEncrypt(password));
 }
 
-export async function sendMail(subject: string, text: string): Promise<void> {
+/** Sends to the configured admin recipient by default (alerts, digests). Pass `to` to send
+ * somewhere else instead — e.g. a customer's own address for a transactional email. */
+export async function sendMail(subject: string, text: string, to?: string): Promise<void> {
   const config = getSmtpConfigWithPassword();
   if (!config) throw new Error("Aucun serveur SMTP configuré.");
   if (!config.enabled) throw new Error("Les notifications par email sont désactivées.");
@@ -51,7 +53,7 @@ export async function sendMail(subject: string, text: string): Promise<void> {
 
   await transporter.sendMail({
     from: config.from || config.user,
-    to: config.to,
+    to: to || config.to,
     subject,
     text,
   });

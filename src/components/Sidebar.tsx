@@ -18,6 +18,7 @@ const NAV_ITEMS = [
   { href: "/uptime", label: "Uptime Kuma" },
   { href: "/inventory", label: "Inventaire & topologie" },
   { href: "/audit", label: "Journal d'audit" },
+  ...(process.env.NEXT_PUBLIC_SELLER_MODE === "true" ? [{ href: "/seller", label: "Espace vendeur" }] : []),
 ];
 
 export default function Sidebar() {

@@ -7,7 +7,7 @@ const NO_SHELL_PATHS = ["/login", "/setup"];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  if (NO_SHELL_PATHS.includes(pathname)) {
+  if (NO_SHELL_PATHS.includes(pathname) || pathname.startsWith("/store")) {
     return <>{children}</>;
   }
   return (
