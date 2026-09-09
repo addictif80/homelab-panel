@@ -1,5 +1,7 @@
+import { randomUUID } from "crypto";
 import { Client as SshClient } from "ssh2";
 import { buildSshConfig, buildPrivilegedCommand } from "./ssh";
+import { getDb } from "./db";
 
 export type UpdateMethod = "apt" | "opkg" | "dsm";
 export type UpdateMode = "dry-run" | "apply";
@@ -59,59 +61,123 @@ export function buildUpdateCommand(
   return `${base}; reboot_check=$(${set.rebootCheck}); ${rebootAction}`;
 }
 
-export function streamSshCommand(hostId: number, rawCommand: string): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
+export type UpdateJobStatus = "running" | "success" | "failed";
 
-  return new ReadableStream({
-    start(controller) {
-      let config;
-      let command: string;
-      let stdinPassword: string | null;
-      try {
-        config = buildSshConfig(hostId);
-        ({ command, stdinPassword } = buildPrivilegedCommand(hostId, rawCommand));
-      } catch (err) {
-        controller.enqueue(
-          encoder.encode(`event: error\ndata: ${err instanceof Error ? err.message : "Erreur"}\n\n`)
-        );
-        controller.close();
+export type UpdateJob = {
+  id: string;
+  hostId: number;
+  mode: UpdateMode;
+  status: UpdateJobStatus;
+  log: string;
+  exitCode: number | null;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
+type UpdateJobRow = {
+  id: string;
+  host_id: number;
+  mode: UpdateMode;
+  status: UpdateJobStatus;
+  log: string;
+  exit_code: number | null;
+  started_at: string;
+  finished_at: string | null;
+};
+
+function rowToJob(row: UpdateJobRow): UpdateJob {
+  return {
+    id: row.id,
+    hostId: row.host_id,
+    mode: row.mode,
+    status: row.status,
+    log: row.log,
+    exitCode: row.exit_code,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+  };
+}
+
+export function getUpdateJob(jobId: string): UpdateJob | null {
+  const row = getDb().prepare(`SELECT * FROM update_jobs WHERE id = ?`).get(jobId) as
+    | UpdateJobRow
+    | undefined;
+  return row ? rowToJob(row) : null;
+}
+
+export function getLatestUpdateJob(hostId: number): UpdateJob | null {
+  const row = getDb()
+    .prepare(`SELECT * FROM update_jobs WHERE host_id = ? ORDER BY started_at DESC LIMIT 1`)
+    .get(hostId) as UpdateJobRow | undefined;
+  return row ? rowToJob(row) : null;
+}
+
+function appendJobLog(jobId: string, text: string) {
+  if (!text) return;
+  getDb().prepare(`UPDATE update_jobs SET log = log || ? WHERE id = ?`).run(text, jobId);
+}
+
+function finishJob(jobId: string, status: "success" | "failed", exitCode: number | null) {
+  getDb()
+    .prepare(
+      `UPDATE update_jobs SET status = ?, exit_code = ?, finished_at = datetime('now') WHERE id = ?`
+    )
+    .run(status, exitCode, jobId);
+}
+
+/**
+ * Starts an update job that runs to completion on the server independent of any browser
+ * connection — the caller gets a job id back immediately and can poll getUpdateJob/
+ * getLatestUpdateJob to follow progress, including after navigating away and back.
+ */
+export function startUpdateJob(hostId: number, mode: UpdateMode, rawCommand: string): string {
+  const jobId = randomUUID();
+  getDb()
+    .prepare(`INSERT INTO update_jobs (id, host_id, mode, status, log) VALUES (?, ?, ?, 'running', '')`)
+    .run(jobId, hostId, mode);
+
+  runJobInBackground(jobId, hostId, rawCommand);
+
+  return jobId;
+}
+
+function runJobInBackground(jobId: string, hostId: number, rawCommand: string) {
+  let config;
+  let command: string;
+  let stdinPassword: string | null;
+  try {
+    config = buildSshConfig(hostId);
+    ({ command, stdinPassword } = buildPrivilegedCommand(hostId, rawCommand));
+  } catch (err) {
+    appendJobLog(jobId, `Erreur: ${err instanceof Error ? err.message : "inconnue"}\n`);
+    finishJob(jobId, "failed", null);
+    return;
+  }
+
+  const conn = new SshClient();
+
+  conn.on("ready", () => {
+    conn.exec(command, (err, stream) => {
+      if (err) {
+        appendJobLog(jobId, `Erreur: ${err.message}\n`);
+        finishJob(jobId, "failed", null);
+        conn.end();
         return;
       }
-
-      const conn = new SshClient();
-
-      const sendLine = (text: string) => {
-        for (const line of text.split(/\r?\n/)) {
-          if (line.length === 0) continue;
-          controller.enqueue(encoder.encode(`data: ${line}\n\n`));
-        }
-      };
-
-      conn.on("ready", () => {
-        conn.exec(command, (err, stream) => {
-          if (err) {
-            controller.enqueue(encoder.encode(`event: error\ndata: ${err.message}\n\n`));
-            controller.close();
-            conn.end();
-            return;
-          }
-          if (stdinPassword) stream.write(`${stdinPassword}\n`);
-          stream.on("data", (data: Buffer) => sendLine(data.toString("utf8")));
-          stream.stderr.on("data", (data: Buffer) => sendLine(data.toString("utf8")));
-          stream.on("close", (code: number) => {
-            controller.enqueue(encoder.encode(`event: done\ndata: ${code}\n\n`));
-            controller.close();
-            conn.end();
-          });
-        });
+      if (stdinPassword) stream.write(`${stdinPassword}\n`);
+      stream.on("data", (data: Buffer) => appendJobLog(jobId, data.toString("utf8")));
+      stream.stderr.on("data", (data: Buffer) => appendJobLog(jobId, data.toString("utf8")));
+      stream.on("close", (code: number) => {
+        finishJob(jobId, code === 0 ? "success" : "failed", code);
+        conn.end();
       });
-
-      conn.on("error", (err) => {
-        controller.enqueue(encoder.encode(`event: error\ndata: ${err.message}\n\n`));
-        controller.close();
-      });
-
-      conn.connect(config);
-    },
+    });
   });
+
+  conn.on("error", (err) => {
+    appendJobLog(jobId, `Erreur: ${err.message}\n`);
+    finishJob(jobId, "failed", null);
+  });
+
+  conn.connect(config);
 }

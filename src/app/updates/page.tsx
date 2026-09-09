@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Host = {
   id: number;
@@ -9,9 +9,15 @@ type Host = {
   update_method: string | null;
 };
 
-type HostState = {
-  log: string[];
-  status: "idle" | "running" | "done" | "error";
+type UpdateJob = {
+  id: string;
+  hostId: number;
+  mode: "dry-run" | "apply";
+  status: "running" | "success" | "failed";
+  log: string;
+  exitCode: number | null;
+  startedAt: string;
+  finishedAt: string | null;
 };
 
 const METHOD_LABELS: Record<string, string> = {
@@ -20,76 +26,113 @@ const METHOD_LABELS: Record<string, string> = {
   dsm: "DSM (Synology)",
 };
 
-async function streamUpdate(
-  hostId: number,
-  mode: "dry-run" | "apply",
-  allowAutoReboot: boolean,
-  onLine: (line: string) => void
-): Promise<void> {
-  const res = await fetch(`/api/updates/${hostId}/run`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode, allowAutoReboot }),
-  });
-  if (!res.body) throw new Error("Flux indisponible.");
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const chunks = buffer.split("\n\n");
-    buffer = chunks.pop() ?? "";
-    for (const chunk of chunks) {
-      const lines = chunk.split("\n");
-      const eventLine = lines.find((l) => l.startsWith("event: "));
-      const dataLine = lines.find((l) => l.startsWith("data: "));
-      const event = eventLine?.slice(7) ?? "message";
-      const data = dataLine?.slice(6) ?? "";
-      if (event === "error") throw new Error(data);
-      if (event === "done") return;
-      onLine(data);
-    }
-  }
-}
+const POLL_INTERVAL_MS = 1500;
 
 export default function UpdatesPage() {
   const [hosts, setHosts] = useState<Host[]>([]);
-  const [states, setStates] = useState<Record<number, HostState>>({});
+  const [jobs, setJobs] = useState<Record<number, UpdateJob | null>>({});
   const [allowAutoReboot, setAllowAutoReboot] = useState(true);
   const [runningAll, setRunningAll] = useState(false);
   const logRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const pollTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
-  useEffect(() => {
-    fetch("/api/hosts")
-      .then((r) => r.json())
-      .then((d) => setHosts(d.hosts.filter((h: Host) => h.update_method)));
-  }, []);
-
-  function appendLine(hostId: number, line: string) {
-    setStates((s) => ({
-      ...s,
-      [hostId]: { ...s[hostId], log: [...(s[hostId]?.log ?? []), line], status: "running" },
-    }));
+  const scrollToBottom = useCallback((hostId: number) => {
     requestAnimationFrame(() => {
       const el = logRefs.current[hostId];
       if (el) el.scrollTop = el.scrollHeight;
     });
-  }
+  }, []);
 
-  async function runHost(hostId: number, mode: "dry-run" | "apply") {
-    setStates((s) => ({ ...s, [hostId]: { log: [], status: "running" } }));
+  // Polls a job until it's no longer running, updating state as it goes — resolves once
+  // finished so `runAll` can run hosts sequentially, same as before.
+  const pollJob = useCallback(
+    (hostId: number, jobId: string): Promise<void> => {
+      return new Promise((resolve) => {
+        const tick = async () => {
+          try {
+            const res = await fetch(`/api/updates/jobs/${jobId}`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error);
+            const job: UpdateJob = data.job;
+            setJobs((j) => ({ ...j, [hostId]: job }));
+            scrollToBottom(hostId);
+            if (job.status === "running") {
+              pollTimers.current[hostId] = setTimeout(tick, POLL_INTERVAL_MS);
+            } else {
+              resolve();
+            }
+          } catch {
+            resolve();
+          }
+        };
+        tick();
+      });
+    },
+    [scrollToBottom]
+  );
+
+  useEffect(() => {
+    fetch("/api/hosts")
+      .then((r) => r.json())
+      .then(async (d) => {
+        const withUpdates: Host[] = d.hosts.filter((h: Host) => h.update_method);
+        setHosts(withUpdates);
+
+        // Resume any job still running from before a navigation/refresh.
+        for (const h of withUpdates) {
+          const res = await fetch(`/api/updates/jobs/latest?hostId=${h.id}`);
+          const data = await res.json();
+          if (data.job) {
+            setJobs((j) => ({ ...j, [h.id]: data.job }));
+            scrollToBottom(h.id);
+            if (data.job.status === "running") pollJob(h.id, data.job.id);
+          }
+        }
+      });
+
+    return () => {
+      Object.values(pollTimers.current).forEach(clearTimeout);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function runHost(hostId: number, mode: "dry-run" | "apply"): Promise<void> {
     try {
-      await streamUpdate(hostId, mode, allowAutoReboot, (line) => appendLine(hostId, line));
-      setStates((s) => ({ ...s, [hostId]: { log: s[hostId]?.log ?? [], status: "done" } }));
+      const res = await fetch(`/api/updates/${hostId}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode, allowAutoReboot }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setJobs((j) => ({
+        ...j,
+        [hostId]: {
+          id: data.jobId,
+          hostId,
+          mode,
+          status: "running",
+          log: "",
+          exitCode: null,
+          startedAt: new Date().toISOString(),
+          finishedAt: null,
+        },
+      }));
+      await pollJob(hostId, data.jobId);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur inconnue";
-      setStates((s) => ({
-        ...s,
-        [hostId]: { log: [...(s[hostId]?.log ?? []), `Erreur: ${message}`], status: "error" },
+      setJobs((j) => ({
+        ...j,
+        [hostId]: {
+          id: "",
+          hostId,
+          mode,
+          status: "failed",
+          log: `Erreur: ${message}`,
+          exitCode: null,
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+        },
       }));
     }
   }
@@ -109,7 +152,8 @@ export default function UpdatesPage() {
           <h1 className="text-2xl font-semibold">Mises à jour</h1>
           <p className="text-sm text-neutral-400">
             {hosts.length} machine{hosts.length > 1 ? "s" : ""} avec une méthode de mise à jour
-            configurée.
+            configurée. Les mises à jour tournent sur le serveur — tu peux naviguer ailleurs et
+            revenir, la progression reprend automatiquement.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -140,7 +184,8 @@ export default function UpdatesPage() {
 
       <div className="space-y-3">
         {hosts.map((h) => {
-          const state = states[h.id];
+          const job = jobs[h.id];
+          const lines = job?.log ? job.log.split("\n").filter((l) => l.length > 0) : [];
           return (
             <div key={h.id} className="rounded border border-neutral-800">
               <div className="flex items-center justify-between px-4 py-2">
@@ -149,41 +194,43 @@ export default function UpdatesPage() {
                   <span className="ml-2 text-xs text-neutral-500">
                     {METHOD_LABELS[h.update_method ?? ""] ?? h.update_method}
                   </span>
-                  {state?.status === "running" && (
-                    <span className="ml-2 text-xs text-blue-400">en cours...</span>
+                  {job?.status === "running" && (
+                    <span className="ml-2 text-xs text-blue-400">
+                      en cours ({job.mode === "dry-run" ? "preview" : "apply"})...
+                    </span>
                   )}
-                  {state?.status === "done" && (
+                  {job?.status === "success" && (
                     <span className="ml-2 text-xs text-green-400">terminé</span>
                   )}
-                  {state?.status === "error" && (
+                  {job?.status === "failed" && (
                     <span className="ml-2 text-xs text-red-400">erreur</span>
                   )}
                 </div>
                 <div className="space-x-2">
                   <button
                     onClick={() => runHost(h.id, "dry-run")}
-                    disabled={state?.status === "running"}
+                    disabled={job?.status === "running"}
                     className="rounded border border-neutral-700 px-2 py-1 text-xs hover:bg-neutral-800 disabled:opacity-50"
                   >
                     Preview
                   </button>
                   <button
                     onClick={() => runHost(h.id, "apply")}
-                    disabled={state?.status === "running"}
+                    disabled={job?.status === "running"}
                     className="rounded bg-blue-600 px-2 py-1 text-xs font-medium hover:bg-blue-500 disabled:opacity-50"
                   >
                     Mettre à jour
                   </button>
                 </div>
               </div>
-              {state && state.log.length > 0 && (
+              {lines.length > 0 && (
                 <div
                   ref={(el) => {
                     logRefs.current[h.id] = el;
                   }}
                   className="max-h-64 overflow-auto border-t border-neutral-800 bg-black p-3 font-mono text-xs text-neutral-300"
                 >
-                  {state.log.map((line, i) => (
+                  {lines.map((line, i) => (
                     <div key={i}>{line}</div>
                   ))}
                 </div>

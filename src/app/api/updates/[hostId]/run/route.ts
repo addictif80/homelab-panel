@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb, logAudit } from "@/lib/db";
-import { buildUpdateCommand, streamSshCommand, type UpdateMethod, type UpdateMode } from "@/lib/updates";
+import { buildUpdateCommand, startUpdateJob, type UpdateMethod, type UpdateMode } from "@/lib/updates";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ hostId: string }> }) {
   const { hostId } = await params;
@@ -29,12 +29,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ hos
 
   logAudit(`update.${mode}`, hostId, command);
 
-  const stream = streamSshCommand(Number(hostId), command);
-  return new NextResponse(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    },
-  });
+  const jobId = startUpdateJob(Number(hostId), mode, command);
+  return NextResponse.json({ jobId }, { status: 202 });
 }
