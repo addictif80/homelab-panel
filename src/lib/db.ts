@@ -120,6 +120,40 @@ function migrate(db: Database.Database) {
       finished_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS backup_ssh_key (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      public_key TEXT NOT NULL,
+      private_key_encrypted TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS backup_plans (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      source_host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+      source_type TEXT NOT NULL CHECK (source_type IN ('paths','docker','database','proxmox_vm')),
+      source_config TEXT NOT NULL,
+      dest_host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+      dest_path TEXT NOT NULL,
+      schedule TEXT NOT NULL DEFAULT 'manual' CHECK (schedule IN ('manual','hourly','daily','weekly')),
+      retention_count INTEGER NOT NULL DEFAULT 7,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS backup_runs (
+      id TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL REFERENCES backup_plans(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','success','failed')),
+      log TEXT NOT NULL DEFAULT '',
+      snapshot_path TEXT,
+      paths_json TEXT,
+      started_at TEXT NOT NULL DEFAULT (datetime('now')),
+      finished_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_backup_runs_plan ON backup_runs(plan_id, started_at DESC);
+
     CREATE TABLE IF NOT EXISTS security_ignored (
       finding_key TEXT PRIMARY KEY,
       host_id INTEGER NOT NULL,

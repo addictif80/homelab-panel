@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: "/docker", label: "Docker" },
   { href: "/ssh", label: "Terminal SSH" },
   { href: "/updates", label: "Mises à jour" },
+  { href: "/backups", label: "Sauvegardes" },
   { href: "/files", label: "Explorateur de fichiers" },
   { href: "/tailscale", label: "Tailscale" },
   { href: "/uptime", label: "Uptime Kuma" },

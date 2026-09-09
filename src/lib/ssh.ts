@@ -31,6 +31,18 @@ export function resolveHostAddress(host: HostRow): string | null {
   return host.tailscale_ip || host.lan_ip || host.public_ip || null;
 }
 
+export type HostConnectionInfo = { address: string; port: number; user: string };
+
+/** Address/port/user for a host, for building remote targets (e.g. `user@host` for rsync)
+ * outside of ssh2's own ConnectConfig. */
+export function getHostConnectionInfo(hostId: number): HostConnectionInfo {
+  const host = getDb().prepare(`SELECT * FROM hosts WHERE id = ?`).get(hostId) as HostRow | undefined;
+  if (!host) throw new Error("Machine introuvable.");
+  const address = resolveHostAddress(host);
+  if (!address) throw new Error("Aucune adresse IP renseignée pour cette machine.");
+  return { address, port: host.ssh_port || 22, user: host.ssh_user || "root" };
+}
+
 /** Builds an ssh2 ConnectConfig for a host, using its most recent SSH credential from the vault. */
 export function buildSshConfig(hostId: number): ConnectConfig {
   const db = getDb();
@@ -155,6 +167,45 @@ export function runSshCommand(hostId: number, rawCommand: string, opts: { sudo?:
         stream.on("close", (code: number) => {
           conn.end();
           resolve({ stdout, stderr, code });
+        });
+      });
+    });
+    conn.on("error", reject);
+    conn.connect(config);
+  });
+}
+
+/**
+ * Like runSshCommand, but streams output chunk by chunk instead of buffering the whole thing —
+ * for long-running commands (rsync transfers, vzdump, database dumps) where the caller wants to
+ * append to a persisted job log incrementally rather than wait for the process to exit.
+ */
+export function runSshCommandStreaming(
+  hostId: number,
+  rawCommand: string,
+  onChunk: (chunk: string) => void,
+  opts: { sudo?: boolean } = {}
+): Promise<number> {
+  const config = buildSshConfig(hostId);
+  const { command, stdinPassword } = opts.sudo
+    ? buildPrivilegedCommand(hostId, rawCommand)
+    : { command: rawCommand, stdinPassword: null as string | null };
+  const conn = new SshClient();
+
+  return new Promise((resolve, reject) => {
+    conn.on("ready", () => {
+      conn.exec(command, (err, stream) => {
+        if (err) {
+          conn.end();
+          reject(err);
+          return;
+        }
+        if (stdinPassword) stream.write(`${stdinPassword}\n`);
+        stream.on("data", (d: Buffer) => onChunk(d.toString("utf8")));
+        stream.stderr.on("data", (d: Buffer) => onChunk(d.toString("utf8")));
+        stream.on("close", (code: number) => {
+          conn.end();
+          resolve(code);
         });
       });
     });
