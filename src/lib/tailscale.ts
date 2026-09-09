@@ -79,3 +79,41 @@ export async function setDeviceAuthorized(deviceId: string, authorized: boolean)
 export async function removeDevice(deviceId: string): Promise<void> {
   await tailscaleFetch(`/device/${deviceId}`, { method: "DELETE" });
 }
+
+/** Raw ACL policy file (HuJSON) for the tailnet — access rules, tags, auto-approvers, etc. */
+export async function getAcl(): Promise<string> {
+  const config = getTailscaleConfig();
+  if (!config) throw new Error("Tailscale n'est pas configuré.");
+  const res = await fetch(`${API_BASE}/tailnet/${encodeURIComponent(config.tailnet)}/acl`, {
+    headers: { Authorization: `Bearer ${config.apiKey}`, Accept: "application/hujson" },
+  });
+  if (!res.ok) throw new Error(`Tailscale API ${res.status}: ${await res.text().catch(() => res.statusText)}`);
+  return res.text();
+}
+
+export async function updateAcl(policy: string): Promise<void> {
+  const config = getTailscaleConfig();
+  if (!config) throw new Error("Tailscale n'est pas configuré.");
+  const res = await fetch(`${API_BASE}/tailnet/${encodeURIComponent(config.tailnet)}/acl`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/hujson" },
+    body: policy,
+  });
+  if (!res.ok) throw new Error(`Tailscale API ${res.status}: ${await res.text().catch(() => res.statusText)}`);
+}
+
+export type DeviceRoutes = { advertisedRoutes: string[]; enabledRoutes: string[] };
+
+export async function getDeviceRoutes(deviceId: string): Promise<DeviceRoutes> {
+  const data = await tailscaleFetch(`/device/${deviceId}/routes`);
+  return { advertisedRoutes: data.advertisedRoutes || [], enabledRoutes: data.enabledRoutes || [] };
+}
+
+/** Approves (or revokes) a subnet route a device advertises — this is what "enables" a route
+ * for the rest of the tailnet, distinct from the device merely advertising it. */
+export async function setDeviceRoutes(deviceId: string, enabledRoutes: string[]): Promise<void> {
+  await tailscaleFetch(`/device/${deviceId}/routes`, {
+    method: "POST",
+    body: JSON.stringify({ routes: enabledRoutes }),
+  });
+}

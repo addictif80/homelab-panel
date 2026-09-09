@@ -22,6 +22,12 @@ export default function TailscalePage() {
   const [showConfig, setShowConfig] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [tailnet, setTailnet] = useState("");
+  const [routesFor, setRoutesFor] = useState<string | null>(null);
+  const [routes, setRoutes] = useState<{ advertisedRoutes: string[]; enabledRoutes: string[] } | null>(null);
+  const [showAcl, setShowAcl] = useState(false);
+  const [aclPolicy, setAclPolicy] = useState("");
+  const [aclLoading, setAclLoading] = useState(false);
+  const [aclMessage, setAclMessage] = useState("");
 
   const loadConfig = useCallback(async () => {
     const res = await fetch("/api/tailscale/config");
@@ -85,6 +91,66 @@ export default function TailscalePage() {
     if (!confirm(`Retirer ${device.name} du tailnet ?`)) return;
     await fetch(`/api/tailscale/devices/${device.id}`, { method: "DELETE" });
     loadDevices();
+  }
+
+  async function toggleRoutes(device: Device) {
+    if (routesFor === device.id) {
+      setRoutesFor(null);
+      return;
+    }
+    setRoutesFor(device.id);
+    const res = await fetch(`/api/tailscale/devices/${device.id}/routes`);
+    const data = await res.json();
+    setRoutes(data);
+  }
+
+  async function setRouteEnabled(device: Device, route: string, enabled: boolean) {
+    if (!routes) return;
+    const nextEnabled = enabled
+      ? [...routes.enabledRoutes, route]
+      : routes.enabledRoutes.filter((r) => r !== route);
+    setRoutes({ ...routes, enabledRoutes: nextEnabled });
+    await fetch(`/api/tailscale/devices/${device.id}/routes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabledRoutes: nextEnabled }),
+    });
+  }
+
+  async function loadAcl() {
+    setShowAcl((s) => !s);
+    if (!aclPolicy) {
+      setAclLoading(true);
+      try {
+        const res = await fetch("/api/tailscale/acl");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        setAclPolicy(data.policy);
+      } catch (err) {
+        setAclMessage(err instanceof Error ? err.message : "Erreur.");
+      } finally {
+        setAclLoading(false);
+      }
+    }
+  }
+
+  async function saveAcl() {
+    setAclLoading(true);
+    setAclMessage("");
+    try {
+      const res = await fetch("/api/tailscale/acl", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ policy: aclPolicy }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setAclMessage("Politique ACL enregistrée.");
+    } catch (err) {
+      setAclMessage(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setAclLoading(false);
+    }
   }
 
   return (
@@ -170,6 +236,12 @@ export default function TailscalePage() {
                       {d.authorized ? "Révoquer" : "Autoriser"}
                     </button>
                     <button
+                      onClick={() => toggleRoutes(d)}
+                      className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+                    >
+                      Routes
+                    </button>
+                    <button
                       onClick={() => removeDevice(d)}
                       className="rounded border border-neutral-700 px-2 py-0.5 text-xs text-red-400 hover:bg-neutral-800"
                     >
@@ -180,6 +252,71 @@ export default function TailscalePage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {routesFor && routes && (
+        <div className="max-w-xl rounded border border-neutral-800 p-4">
+          <h2 className="mb-2 text-sm font-semibold text-neutral-100">
+            Routes annoncées par {devices.find((d) => d.id === routesFor)?.name}
+          </h2>
+          {routes.advertisedRoutes.length === 0 && (
+            <p className="text-xs text-neutral-500">Cet appareil n&apos;annonce aucune route de sous-réseau.</p>
+          )}
+          <ul className="space-y-1">
+            {routes.advertisedRoutes.map((route) => {
+              const device = devices.find((d) => d.id === routesFor)!;
+              const enabled = routes.enabledRoutes.includes(route);
+              return (
+                <li key={route} className="flex items-center justify-between rounded border border-neutral-800 px-2 py-1 text-sm">
+                  <span className="font-mono text-neutral-300">{route}</span>
+                  <label className="flex items-center gap-2 text-xs text-neutral-400">
+                    <input
+                      type="checkbox"
+                      checked={enabled}
+                      onChange={(e) => setRouteEnabled(device, route, e.target.checked)}
+                    />
+                    Approuvée
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {configured && (
+        <div className="rounded border border-neutral-800">
+          <button onClick={loadAcl} className="flex w-full items-center justify-between px-4 py-2.5 text-sm text-neutral-300">
+            <span>Politique ACL du tailnet</span>
+            <span className="text-neutral-500">{showAcl ? "▲" : "▼"}</span>
+          </button>
+          {showAcl && (
+            <div className="space-y-2 border-t border-neutral-800 p-4">
+              <p className="text-xs text-neutral-500">
+                Définit qui peut parler à qui sur le tailnet (tags, règles d&apos;accès, auto-approbation de routes...).
+                Format HuJSON — attention, une erreur ici peut couper l&apos;accès entre tes machines.
+              </p>
+              {aclLoading && <p className="text-xs text-neutral-500">Chargement...</p>}
+              <textarea
+                value={aclPolicy}
+                onChange={(e) => setAclPolicy(e.target.value)}
+                rows={16}
+                spellCheck={false}
+                className="w-full rounded border border-neutral-800 bg-black p-3 font-mono text-xs text-neutral-200"
+              />
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={saveAcl}
+                  disabled={aclLoading}
+                  className="rounded border border-amber-700 bg-amber-900/40 px-3 py-1.5 text-xs text-amber-200 hover:bg-amber-900/60 disabled:opacity-50"
+                >
+                  Enregistrer la politique ACL
+                </button>
+                {aclMessage && <span className="text-xs text-neutral-400">{aclMessage}</span>}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

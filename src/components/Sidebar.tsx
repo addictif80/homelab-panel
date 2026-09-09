@@ -14,8 +14,10 @@ const NAV_ITEMS = [
   { href: "/backups", label: "Sauvegardes" },
   { href: "/files", label: "Explorateur de fichiers" },
   { href: "/tailscale", label: "Tailscale" },
+  { href: "/proxy", label: "Reverse proxy" },
   { href: "/uptime", label: "Uptime Kuma" },
   { href: "/inventory", label: "Inventaire & topologie" },
+  { href: "/audit", label: "Journal d'audit" },
 ];
 
 export default function Sidebar() {

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import DetectionThresholdsPanel from "@/components/DetectionThresholdsPanel";
 import SmtpSettingsPanel from "@/components/SmtpSettingsPanel";
 import NotificationChannelsPanel from "@/components/NotificationChannelsPanel";
+import CertificateWatchPanel from "@/components/CertificateWatchPanel";
 
 type Severity = "critical" | "warning" | "info" | "good";
 
@@ -181,6 +182,7 @@ export default function SecurityPage() {
         <DetectionThresholdsPanel />
         <SmtpSettingsPanel />
         <NotificationChannelsPanel />
+        <CertificateWatchPanel onChanged={runScan} />
       </div>
 
       <div className="space-y-4">
