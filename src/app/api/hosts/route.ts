@@ -18,6 +18,7 @@ export type Host = {
   docker_enabled: number;
   update_method: string | null;
   needs_sudo: number;
+  proxmox_node: string | null;
   notes: string | null;
 };
 
@@ -54,6 +55,7 @@ export async function POST(req: NextRequest) {
     docker_enabled,
     update_method,
     needs_sudo,
+    proxmox_node,
     notes,
   } = body;
 
@@ -70,8 +72,8 @@ export async function POST(req: NextRequest) {
   try {
     const info = db
       .prepare(
-        `INSERT INTO hosts (name, slug, kind, role, os, cluster, lan_ip, tailscale_ip, public_ip, ssh_port, ssh_user, docker_enabled, update_method, needs_sudo, notes)
-         VALUES (@name, @slug, @kind, @role, @os, @cluster, @lan_ip, @tailscale_ip, @public_ip, @ssh_port, @ssh_user, @docker_enabled, @update_method, @needs_sudo, @notes)`
+        `INSERT INTO hosts (name, slug, kind, role, os, cluster, lan_ip, tailscale_ip, public_ip, ssh_port, ssh_user, docker_enabled, update_method, needs_sudo, proxmox_node, notes)
+         VALUES (@name, @slug, @kind, @role, @os, @cluster, @lan_ip, @tailscale_ip, @public_ip, @ssh_port, @ssh_user, @docker_enabled, @update_method, @needs_sudo, @proxmox_node, @notes)`
       )
       .run({
         name,
@@ -88,6 +90,7 @@ export async function POST(req: NextRequest) {
         docker_enabled: docker_enabled ? 1 : 0,
         update_method: update_method ?? null,
         needs_sudo: needs_sudo === undefined ? 1 : needs_sudo ? 1 : 0,
+        proxmox_node: proxmox_node ?? null,
         notes: notes ?? null,
       });
     logAudit("host.created", name);

@@ -13,6 +13,7 @@ type SeedHost = {
   update_method?: string;
   docker_enabled?: number;
   needs_sudo?: number;
+  proxmox_node?: string;
   notes?: string;
 };
 
@@ -27,6 +28,7 @@ const SEED_HOSTS: SeedHost[] = [
     lan_ip: "192.168.0.100",
     update_method: "apt",
     needs_sudo: 0,
+    proxmox_node: "pve1",
     notes: "pve1 / dell (connexion root)",
   },
   {
@@ -39,6 +41,7 @@ const SEED_HOSTS: SeedHost[] = [
     lan_ip: "192.168.0.200",
     update_method: "apt",
     needs_sudo: 0,
+    proxmox_node: "pve2",
     notes: "pve2 / fujitsu (connexion root)",
   },
   {
@@ -116,8 +119,8 @@ export function seedIfEmpty() {
   if (c > 0) return;
 
   const insertHost = db.prepare(`
-    INSERT INTO hosts (name, slug, kind, role, os, cluster, lan_ip, tailscale_ip, public_ip, update_method, docker_enabled, needs_sudo, notes)
-    VALUES (@name, @slug, @kind, @role, @os, @cluster, @lan_ip, @tailscale_ip, @public_ip, @update_method, @docker_enabled, @needs_sudo, @notes)
+    INSERT INTO hosts (name, slug, kind, role, os, cluster, lan_ip, tailscale_ip, public_ip, update_method, docker_enabled, needs_sudo, proxmox_node, notes)
+    VALUES (@name, @slug, @kind, @role, @os, @cluster, @lan_ip, @tailscale_ip, @public_ip, @update_method, @docker_enabled, @needs_sudo, @proxmox_node, @notes)
   `);
 
   const insertMany = db.transaction((hosts: SeedHost[]) => {
@@ -135,6 +138,7 @@ export function seedIfEmpty() {
         update_method: h.update_method ?? null,
         docker_enabled: h.docker_enabled ?? 0,
         needs_sudo: h.needs_sudo ?? 1,
+        proxmox_node: h.proxmox_node ?? null,
         notes: h.notes ?? null,
       });
     }

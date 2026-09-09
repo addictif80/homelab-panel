@@ -15,6 +15,7 @@ const EDITABLE_FIELDS = [
   "docker_enabled",
   "update_method",
   "needs_sudo",
+  "proxmox_node",
   "notes",
 ] as const;
 

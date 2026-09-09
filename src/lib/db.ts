@@ -63,6 +63,7 @@ function migrate(db: Database.Database) {
       docker_enabled INTEGER NOT NULL DEFAULT 0,
       update_method TEXT,
       needs_sudo INTEGER NOT NULL DEFAULT 1,
+      proxmox_node TEXT,
       notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -114,6 +115,9 @@ function migrate(db: Database.Database) {
   const hostColumns = db.prepare(`PRAGMA table_info(hosts)`).all() as { name: string }[];
   if (!hostColumns.some((c) => c.name === "needs_sudo")) {
     db.exec(`ALTER TABLE hosts ADD COLUMN needs_sudo INTEGER NOT NULL DEFAULT 1`);
+  }
+  if (!hostColumns.some((c) => c.name === "proxmox_node")) {
+    db.exec(`ALTER TABLE hosts ADD COLUMN proxmox_node TEXT`);
   }
 }
 

@@ -1,6 +1,7 @@
 import { getDb } from "./db";
 import { runSshCommand } from "./ssh";
 import { withTimeout } from "./timeout";
+import { findAnyProxmoxCredentialHostId, getNodeStatus, getNodeStorageTotals } from "./proxmox";
 
 const HOST_TIMEOUT_MS = 8000;
 
@@ -50,15 +51,58 @@ function parseStats(stdout: string): Omit<HostStats, "hostId" | "hostName" | "er
   return { cores, cpuUsedPercent, memTotalMb, memUsedMb, diskTotalGb, diskUsedGb };
 }
 
-export async function getHostStats(hostId: number, hostName: string): Promise<HostStats> {
+async function getHostStatsViaSsh(hostId: number, hostName: string): Promise<HostStats> {
+  const { stdout, code } = await withTimeout(
+    runSshCommand(hostId, STATS_COMMAND, { sudo: false }),
+    HOST_TIMEOUT_MS,
+    `Timeout: ${hostName} n'a pas répondu.`
+  );
+  if (code !== 0) throw new Error("Impossible de lire les statistiques.");
+  return { hostId, hostName, ...parseStats(stdout), error: null };
+}
+
+/**
+ * For a Proxmox node, `df` over SSH only sees the root filesystem — it's blind to LVM-thin or
+ * ZFS pools used for VM/LXC storage, since those aren't mounted filesystems on the host. Using
+ * Proxmox's own API instead gives the real total (and doesn't need SSH credentials on that
+ * specific node, since any cluster member's token can query it).
+ */
+async function getHostStatsViaProxmox(
+  hostId: number,
+  hostName: string,
+  node: string
+): Promise<HostStats> {
+  const credentialHostId = findAnyProxmoxCredentialHostId();
+  if (!credentialHostId) throw new Error("Aucun token API Proxmox configuré sur le cluster.");
+
+  const [status, storage] = await withTimeout(
+    Promise.all([getNodeStatus(credentialHostId, node), getNodeStorageTotals(credentialHostId, node)]),
+    HOST_TIMEOUT_MS,
+    `Timeout: ${hostName} (Proxmox) n'a pas répondu.`
+  );
+
+  return {
+    hostId,
+    hostName,
+    cores: status.cores,
+    cpuUsedPercent: status.cpuUsedPercent,
+    memTotalMb: status.memTotalMb,
+    memUsedMb: status.memUsedMb,
+    diskTotalGb: storage.totalBytes / 1024 / 1024 / 1024,
+    diskUsedGb: storage.usedBytes / 1024 / 1024 / 1024,
+    error: null,
+  };
+}
+
+export async function getHostStats(
+  hostId: number,
+  hostName: string,
+  proxmoxNode: string | null
+): Promise<HostStats> {
   try {
-    const { stdout, code } = await withTimeout(
-      runSshCommand(hostId, STATS_COMMAND, { sudo: false }),
-      HOST_TIMEOUT_MS,
-      `Timeout: ${hostName} n'a pas répondu.`
-    );
-    if (code !== 0) throw new Error("Impossible de lire les statistiques.");
-    return { hostId, hostName, ...parseStats(stdout), error: null };
+    return proxmoxNode
+      ? await getHostStatsViaProxmox(hostId, hostName, proxmoxNode)
+      : await getHostStatsViaSsh(hostId, hostName);
   } catch (err) {
     return {
       hostId,
@@ -77,8 +121,8 @@ export async function getHostStats(hostId: number, hostName: string): Promise<Ho
 /** Stats for every physical server + VPS — the machines "you SSH into", as opposed to Proxmox guests. */
 export async function getFleetStats(): Promise<HostStats[]> {
   const hosts = getDb()
-    .prepare(`SELECT id, name FROM hosts WHERE kind IN ('physical','vps') ORDER BY name`)
-    .all() as { id: number; name: string }[];
+    .prepare(`SELECT id, name, proxmox_node FROM hosts WHERE kind IN ('physical','vps') ORDER BY name`)
+    .all() as { id: number; name: string; proxmox_node: string | null }[];
 
-  return Promise.all(hosts.map((h) => getHostStats(h.id, h.name)));
+  return Promise.all(hosts.map((h) => getHostStats(h.id, h.name, h.proxmox_node)));
 }

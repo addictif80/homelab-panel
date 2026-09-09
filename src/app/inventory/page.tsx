@@ -18,6 +18,7 @@ type Host = {
   docker_enabled: number;
   update_method: string | null;
   needs_sudo: number;
+  proxmox_node: string | null;
   notes: string | null;
 };
 
@@ -51,6 +52,7 @@ type FormState = {
   docker_enabled: boolean;
   update_method: string;
   needs_sudo: boolean;
+  proxmox_node: string;
   notes: string;
 };
 
@@ -68,6 +70,7 @@ const EMPTY_FORM: FormState = {
   docker_enabled: false,
   update_method: "",
   needs_sudo: true,
+  proxmox_node: "",
   notes: "",
 };
 
@@ -86,6 +89,7 @@ function hostToForm(h: Host): FormState {
     docker_enabled: !!h.docker_enabled,
     update_method: h.update_method ?? "",
     needs_sudo: !!h.needs_sudo,
+    proxmox_node: h.proxmox_node ?? "",
     notes: h.notes ?? "",
   };
 }
@@ -105,6 +109,7 @@ function formToPayload(f: FormState) {
     docker_enabled: f.docker_enabled,
     update_method: f.update_method || null,
     needs_sudo: f.needs_sudo,
+    proxmox_node: f.proxmox_node || null,
     notes: f.notes || null,
   };
 }
@@ -354,6 +359,22 @@ export default function InventoryPage() {
                   onChange={(e) => setForm({ ...form, cluster: e.target.value })}
                   className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
                 />
+              </div>
+              <div>
+                <label className="block text-xs mb-1">
+                  Nom du nœud Proxmox <span className="text-neutral-500">(si applicable)</span>
+                </label>
+                <input
+                  value={form.proxmox_node}
+                  onChange={(e) => setForm({ ...form, proxmox_node: e.target.value })}
+                  placeholder="ex: pve1"
+                  className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm font-mono"
+                />
+                <p className="mt-1 text-xs text-neutral-500">
+                  Renseigne le nom exact du nœud (visible dans Proxmox) pour un calcul de
+                  CPU/RAM/stockage exact via l&apos;API Proxmox — sinon le panel utilise SSH, qui ne
+                  voit pas le stockage LVM-thin/ZFS des VM.
+                </p>
               </div>
               <div>
                 <label className="block text-xs mb-1">IP LAN</label>
