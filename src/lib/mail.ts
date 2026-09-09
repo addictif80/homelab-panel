@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import { getSetting, setSetting } from "./db";
 import { vaultEncrypt, vaultDecrypt } from "./crypto";
+import { simpleEmailHtml } from "./emailTemplates";
 
 export type SmtpConfig = {
   host: string;
@@ -38,8 +39,10 @@ export function setSmtpConfig(config: SmtpConfig, password?: string): void {
 }
 
 /** Sends to the configured admin recipient by default (alerts, digests). Pass `to` to send
- * somewhere else instead — e.g. a customer's own address for a transactional email. */
-export async function sendMail(subject: string, text: string, to?: string): Promise<void> {
+ * somewhere else instead — e.g. a customer's own address for a transactional email. Pass `html`
+ * for a purpose-built layout (a button, etc.); otherwise `text` is wrapped in the standard
+ * branded template automatically. */
+export async function sendMail(subject: string, text: string, to?: string, html?: string): Promise<void> {
   const config = getSmtpConfigWithPassword();
   if (!config) throw new Error("Aucun serveur SMTP configuré.");
   if (!config.enabled) throw new Error("Les notifications par email sont désactivées.");
@@ -56,5 +59,6 @@ export async function sendMail(subject: string, text: string, to?: string): Prom
     to: to || config.to,
     subject,
     text,
+    html: html || simpleEmailHtml(text),
   });
 }

@@ -4,6 +4,7 @@ import { constructWebhookEvent } from "@/lib/seller/stripe";
 import { recordSale, saleExistsForSession } from "@/lib/seller/sales";
 import { createDownloadToken } from "@/lib/seller/downloadTokens";
 import { sendMail } from "@/lib/mail";
+import { buttonEmailHtml } from "@/lib/emailTemplates";
 import { logAudit } from "@/lib/db";
 
 export async function POST(req: NextRequest) {
@@ -38,7 +39,13 @@ export async function POST(req: NextRequest) {
         await sendMail(
           "Ton lien de téléchargement — Homelab Panel",
           `Merci pour ton achat !\n\nTélécharge ton exemplaire ici (lien à usage unique, valable 7 jours) :\n${downloadUrl}\n\nSi le lien a expiré ou a déjà été utilisé par erreur, réponds à cet email.`,
-          email
+          email,
+          buttonEmailHtml({
+            intro: "Merci pour ton achat ! Ton exemplaire de Homelab Panel est prêt à télécharger.",
+            buttonLabel: "Télécharger mon exemplaire",
+            buttonUrl: downloadUrl,
+            footerNote: "Lien à usage unique, valable 7 jours. S'il a expiré ou déjà été utilisé par erreur, réponds à cet email.",
+          })
         );
       } catch {
         // The sale and token are recorded either way — worst case, resend manually from /seller.

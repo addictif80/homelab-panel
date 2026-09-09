@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSale } from "@/lib/seller/sales";
 import { createDownloadToken } from "@/lib/seller/downloadTokens";
 import { sendMail } from "@/lib/mail";
+import { buttonEmailHtml } from "@/lib/emailTemplates";
 import { logAudit } from "@/lib/db";
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -17,7 +18,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     await sendMail(
       "Ton lien de téléchargement — Homelab Panel",
       `Voici un nouveau lien de téléchargement (à usage unique, valable 7 jours) :\n${downloadUrl}`,
-      sale.customerEmail
+      sale.customerEmail,
+      buttonEmailHtml({
+        intro: "Voici un nouveau lien de téléchargement pour Homelab Panel.",
+        buttonLabel: "Télécharger mon exemplaire",
+        buttonUrl: downloadUrl,
+        footerNote: "Lien à usage unique, valable 7 jours.",
+      })
     );
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Échec de l'envoi." }, { status: 502 });

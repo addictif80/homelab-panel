@@ -63,19 +63,20 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex flex-1 items-center justify-center p-6">
-      <div className="w-full max-w-sm space-y-6">
-        <div>
-          <h1 className="text-xl font-semibold">Homelab Panel</h1>
-          <p className="text-sm text-neutral-400">Connexion sécurisée</p>
+    <main className="flex flex-1 items-center justify-center bg-neutral-950 p-6">
+      <div className="w-full max-w-sm rounded-xl border border-neutral-800 bg-neutral-900 p-8 shadow-xl">
+        <div className="mb-6 text-center">
+          <div className="mb-2 text-2xl">🏠</div>
+          <h1 className="text-lg font-semibold text-neutral-100">Homelab Panel</h1>
+          <p className="mt-1 text-sm text-neutral-500">Connexion sécurisée</p>
         </div>
 
         {step === "password" && (
           <form onSubmit={handlePassword} className="space-y-4">
             <div>
-              <label className="block text-sm mb-1">Nom d&apos;utilisateur</label>
+              <label className="mb-1 block text-sm text-neutral-300">Nom d&apos;utilisateur</label>
               <input
-                className="w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+                className="input"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 required
@@ -84,10 +85,10 @@ export default function LoginPage() {
               />
             </div>
             <div>
-              <label className="block text-sm mb-1">Mot de passe</label>
+              <label className="mb-1 block text-sm text-neutral-300">Mot de passe</label>
               <input
                 type="password"
-                className="w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+                className="input"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -95,11 +96,7 @@ export default function LoginPage() {
               />
             </div>
             {error && <p className="text-sm text-red-400">{error}</p>}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded bg-blue-600 py-2 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
-            >
+            <button type="submit" disabled={loading} className="btn-primary w-full py-2">
               Continuer
             </button>
           </form>
@@ -108,9 +105,9 @@ export default function LoginPage() {
         {step === "totp" && (
           <form onSubmit={handleTotp} className="space-y-4">
             <div>
-              <label className="block text-sm mb-1">Code d&apos;authentification (2FA)</label>
+              <label className="mb-1 block text-sm text-neutral-300">Code d&apos;authentification (2FA)</label>
               <input
-                className="w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm tracking-widest"
+                className="input tracking-widest"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 required
@@ -121,11 +118,7 @@ export default function LoginPage() {
               />
             </div>
             {error && <p className="text-sm text-red-400">{error}</p>}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded bg-blue-600 py-2 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
-            >
+            <button type="submit" disabled={loading} className="btn-primary w-full py-2">
               Se connecter
             </button>
           </form>
