@@ -108,6 +108,13 @@ function migrate(db: Database.Database) {
       last_notified_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS security_ignored (
+      finding_key TEXT PRIMARY KEY,
+      host_id INTEGER NOT NULL,
+      finding_id TEXT NOT NULL,
+      ignored_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       action TEXT NOT NULL,

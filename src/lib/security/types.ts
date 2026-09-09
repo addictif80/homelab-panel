@@ -15,6 +15,10 @@ export type Finding = {
   fixWarning?: string;
   /** Extra arguments a parameterized fix needs (e.g. which IP to block). */
   fixParams?: Record<string, string>;
+  /** Commands to run by hand on the host, shown when there's no safe one-click fix. */
+  howTo?: string[];
+  /** Set by the scan layer when this finding was dismissed by the user. */
+  ignored?: boolean;
 };
 
 export type HostScanResult = {

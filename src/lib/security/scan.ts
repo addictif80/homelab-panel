@@ -2,6 +2,7 @@ import { getDb, logAudit } from "../db";
 import { collectHostFacts } from "./facts";
 import { analyzeHost } from "./analyze";
 import { historicalLogFindings } from "./logScan";
+import { listIgnoredKeys } from "./ignore";
 import type { HostScanResult } from "./types";
 
 type HostRow = {
@@ -25,12 +26,16 @@ export async function scanHost(host: HostRow): Promise<HostScanResult> {
     const facts = await collectHostFacts(host.id);
     const findings = analyzeHost(host, facts);
     const logFindings = await historicalLogFindings(host.id).catch(() => []);
+    const ignoredKeys = listIgnoredKeys();
+    const allFindings = [...findings, ...logFindings].map((f) =>
+      ignoredKeys.has(`${host.id}:${f.id}`) ? { ...f, ignored: true } : f
+    );
     return {
       hostId: host.id,
       hostName: host.name,
       hostKind: host.kind,
       hostOs: host.os,
-      findings: [...findings, ...logFindings],
+      findings: allFindings,
     };
   } catch (err) {
     return {

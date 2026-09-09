@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import DetectionThresholdsPanel from "@/components/DetectionThresholdsPanel";
 import SmtpSettingsPanel from "@/components/SmtpSettingsPanel";
+import NotificationChannelsPanel from "@/components/NotificationChannelsPanel";
 
 type Severity = "critical" | "warning" | "info" | "good";
 
@@ -16,6 +17,8 @@ type Finding = {
   fixLabel?: string;
   fixWarning?: string;
   fixParams?: Record<string, string>;
+  howTo?: string[];
+  ignored?: boolean;
 };
 
 type HostScanResult = {
@@ -36,11 +39,16 @@ const SEVERITY_STYLES: Record<Severity, { dot: string; badge: string; label: str
   good: { dot: "bg-emerald-500", badge: "border-emerald-900 bg-emerald-950/30 text-emerald-300", label: "OK" },
 };
 
+function activeFindings(host: HostScanResult): Finding[] {
+  return host.findings.filter((f) => !f.ignored);
+}
+
 function hostScore(host: HostScanResult): Severity {
   if (host.error) return "warning";
-  if (host.findings.some((f) => f.severity === "critical")) return "critical";
-  if (host.findings.some((f) => f.severity === "warning")) return "warning";
-  if (host.findings.some((f) => f.severity === "info")) return "info";
+  const active = activeFindings(host);
+  if (active.some((f) => f.severity === "critical")) return "critical";
+  if (active.some((f) => f.severity === "warning")) return "warning";
+  if (active.some((f) => f.severity === "info")) return "info";
   return "good";
 }
 
@@ -51,6 +59,8 @@ export default function SecurityPage() {
   const [confirming, setConfirming] = useState<{ hostId: number; finding: Finding } | null>(null);
   const [applying, setApplying] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string>("");
+  const [expandedHowTo, setExpandedHowTo] = useState<Set<string>>(new Set());
+  const [ignoring, setIgnoring] = useState<string | null>(null);
 
   const runScan = useCallback(async () => {
     setLoading(true);
@@ -84,9 +94,7 @@ export default function SecurityPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Échec du correctif.");
       setStatusMsg(data.result.message);
-      setResults((prev) =>
-        prev ? prev.map((h) => (h.hostId === hostId ? data.rescan : h)) : prev
-      );
+      setResults((prev) => (prev ? prev.map((h) => (h.hostId === hostId ? data.rescan : h)) : prev));
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : "Erreur.");
     } finally {
@@ -95,8 +103,42 @@ export default function SecurityPage() {
     }
   }
 
-  const totalCritical = results?.reduce((n, h) => n + h.findings.filter((f) => f.severity === "critical").length, 0) ?? 0;
-  const totalWarning = results?.reduce((n, h) => n + h.findings.filter((f) => f.severity === "warning").length, 0) ?? 0;
+  async function setIgnored(hostId: number, findingId: string, ignore: boolean) {
+    const key = `${hostId}:${findingId}`;
+    setIgnoring(key);
+    try {
+      await fetch(`/api/security/hosts/${hostId}/ignore`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ findingId, ignore }),
+      });
+      setResults((prev) =>
+        prev
+          ? prev.map((h) =>
+              h.hostId !== hostId
+                ? h
+                : { ...h, findings: h.findings.map((f) => (f.id === findingId ? { ...f, ignored: ignore } : f)) }
+            )
+          : prev
+      );
+    } finally {
+      setIgnoring(null);
+    }
+  }
+
+  function toggleHowTo(key: string) {
+    setExpandedHowTo((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  const totalCritical =
+    results?.reduce((n, h) => n + activeFindings(h).filter((f) => f.severity === "critical").length, 0) ?? 0;
+  const totalWarning =
+    results?.reduce((n, h) => n + activeFindings(h).filter((f) => f.severity === "warning").length, 0) ?? 0;
 
   return (
     <div className="space-y-6">
@@ -138,6 +180,7 @@ export default function SecurityPage() {
       <div className="space-y-3">
         <DetectionThresholdsPanel />
         <SmtpSettingsPanel />
+        <NotificationChannelsPanel />
       </div>
 
       <div className="space-y-4">
@@ -172,29 +215,68 @@ export default function SecurityPage() {
                     <ul className="space-y-3">
                       {host.findings
                         .slice()
-                        .sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity))
+                        .sort((a, b) => {
+                          if (!!a.ignored !== !!b.ignored) return a.ignored ? 1 : -1;
+                          return SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity);
+                        })
                         .map((finding) => {
                           const fStyle = SEVERITY_STYLES[finding.severity];
+                          const howToKey = `${host.hostId}:${finding.id}`;
+                          const busy = ignoring === howToKey;
                           return (
-                            <li key={finding.id} className="rounded border border-neutral-800 p-3">
+                            <li
+                              key={finding.id}
+                              className={`rounded border border-neutral-800 p-3 ${finding.ignored ? "opacity-50" : ""}`}
+                            >
                               <div className="flex items-start justify-between gap-3">
                                 <div>
                                   <div className="flex items-center gap-2">
                                     <span className={`rounded border px-1.5 py-0 text-[10px] ${fStyle.badge}`}>
                                       {fStyle.label}
                                     </span>
+                                    {finding.ignored && (
+                                      <span className="rounded border border-neutral-700 px-1.5 py-0 text-[10px] text-neutral-500">
+                                        Ignorée
+                                      </span>
+                                    )}
                                     <span className="text-sm font-medium text-neutral-100">{finding.title}</span>
                                   </div>
                                   <p className="mt-1 text-xs leading-relaxed text-neutral-400">{finding.detail}</p>
+
+                                  {finding.howTo && finding.howTo.length > 0 && (
+                                    <div className="mt-2">
+                                      <button
+                                        onClick={() => toggleHowTo(howToKey)}
+                                        className="text-xs text-blue-400 hover:underline"
+                                      >
+                                        {expandedHowTo.has(howToKey) ? "Masquer" : "Comment corriger (commandes)"}
+                                      </button>
+                                      {expandedHowTo.has(howToKey) && (
+                                        <pre className="mt-2 overflow-x-auto rounded border border-neutral-800 bg-black p-2 text-[11px] text-neutral-300">
+                                          {finding.howTo.join("\n")}
+                                        </pre>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
-                                {finding.fixId && (
+
+                                <div className="flex shrink-0 flex-col items-end gap-1">
+                                  {finding.fixId && !finding.ignored && (
+                                    <button
+                                      onClick={() => setConfirming({ hostId: host.hostId, finding })}
+                                      className="rounded border border-neutral-600 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+                                    >
+                                      {finding.fixLabel || "Corriger"}
+                                    </button>
+                                  )}
                                   <button
-                                    onClick={() => setConfirming({ hostId: host.hostId, finding })}
-                                    className="shrink-0 rounded border border-neutral-600 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+                                    onClick={() => setIgnored(host.hostId, finding.id, !finding.ignored)}
+                                    disabled={busy}
+                                    className="text-xs text-neutral-500 hover:text-neutral-300 disabled:opacity-50"
                                   >
-                                    {finding.fixLabel || "Corriger"}
+                                    {finding.ignored ? "Réactiver" : "Ignorer"}
                                   </button>
-                                )}
+                                </div>
                               </div>
                             </li>
                           );

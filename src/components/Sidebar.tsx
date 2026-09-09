@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { href: "/updates", label: "Mises à jour" },
   { href: "/files", label: "Explorateur de fichiers" },
   { href: "/tailscale", label: "Tailscale" },
+  { href: "/uptime", label: "Uptime Kuma" },
   { href: "/inventory", label: "Inventaire & topologie" },
 ];
 

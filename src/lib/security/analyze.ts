@@ -39,6 +39,11 @@ export function analyzeHost(host: HostForAnalysis, facts: HostFacts): Finding[] 
         title: "La connexion root par mot de passe est autorisée en SSH",
         detail:
           "N'importe qui qui devine ou trouve le mot de passe root peut prendre le contrôle total de cette machine. C'est l'une des cibles préférées des robots qui scannent Internet en continu.",
+        howTo: [
+          "# Vérifie d'abord qu'une connexion par clé SSH fonctionne pour ce compte, sinon tu vas te bloquer l'accès !",
+          "sudo bash -c \"echo 'PermitRootLogin prohibit-password' > /etc/ssh/sshd_config.d/99-homelab-panel.conf\"",
+          "sudo sshd -t && sudo systemctl reload sshd",
+        ],
       });
     }
     const passwordAuth = sshdValue(sshd, "passwordauthentication");
@@ -50,6 +55,11 @@ export function analyzeHost(host: HostForAnalysis, facts: HostFacts): Finding[] 
         title: "La connexion SSH par mot de passe est activée",
         detail:
           "Se connecter avec une clé SSH (plutôt qu'un mot de passe) rend le piratage par force brute quasiment impossible, même avec un mot de passe faible. À ne désactiver qu'une fois qu'une clé fonctionne, sinon tu perds l'accès à la machine.",
+        howTo: [
+          "# Teste d'abord une connexion par clé depuis un autre terminal (`ssh -i ta_cle ...`) avant de continuer !",
+          "sudo bash -c \"echo 'PasswordAuthentication no' > /etc/ssh/sshd_config.d/99-homelab-panel-password.conf\"",
+          "sudo sshd -t && sudo systemctl reload sshd",
+        ],
       });
     }
   }
@@ -134,6 +144,12 @@ export function analyzeHost(host: HostForAnalysis, facts: HostFacts): Finding[] 
         title: `${pending} paquet${pending > 1 ? "s" : ""} du routeur en attente de mise à jour`,
         detail:
           "Ton routeur est la porte d'entrée de tout ton réseau : le garder à jour est particulièrement important. Mets-le à jour depuis la page Mises à jour (liste basée sur le dernier `opkg update`, pense à le relancer si ça fait longtemps).",
+        howTo: [
+          "opkg update",
+          "opkg list-upgradable",
+          "# Mets à jour un paquet précis (recommandé, plus sûr qu'une mise à jour groupée sur un routeur) :",
+          "opkg upgrade <nom-du-paquet>",
+        ],
       });
     }
   } else if (isDsm) {
@@ -160,6 +176,12 @@ export function analyzeHost(host: HostForAnalysis, facts: HostFacts): Finding[] 
       title: `Compte(s) avec les droits root en plus de "root" : ${uid0Users.join(", ")}`,
       detail:
         "Normalement, un seul compte (root) a le niveau d'accès maximal. Un autre compte avec le même niveau peut être une porte dérobée laissée par une intrusion, ou un compte oublié. À vérifier toi-même : cette action n'est pas automatisable en toute sécurité.",
+      howTo: [
+        `# Vérifie qui est ce compte et depuis quand il existe :`,
+        ...uid0Users.map((u) => `getent passwd ${u}; sudo grep ${u} /var/log/auth.log 2>/dev/null | tail -20`),
+        `# Si tu ne le reconnais pas, bloque-le immédiatement (ne le supprime pas tout de suite, pour garder les traces) :`,
+        ...uid0Users.map((u) => `sudo passwd -l ${u}`),
+      ],
     });
   }
 
@@ -175,6 +197,12 @@ export function analyzeHost(host: HostForAnalysis, facts: HostFacts): Finding[] 
       title: `Compte(s) sans mot de passe : ${emptyPassAccounts.join(", ")}`,
       detail:
         "N'importe qui ayant un accès local (ou parfois distant) peut se connecter à ce compte sans rien taper. Il faut lui définir un mot de passe (`passwd <utilisateur>`) ou le désactiver.",
+      howTo: [
+        `# Pour chaque compte listé, définis un mot de passe :`,
+        ...emptyPassAccounts.map((u) => `sudo passwd ${u}`),
+        `# Ou, si le compte ne doit servir à personne pour se connecter :`,
+        ...emptyPassAccounts.map((u) => `sudo passwd -l ${u}`),
+      ],
     });
   }
 
@@ -189,6 +217,13 @@ export function analyzeHost(host: HostForAnalysis, facts: HostFacts): Finding[] 
       title: "Au moins un utilisateur peut devenir root sans mot de passe (sudo NOPASSWD)",
       detail:
         "Si le compte de cet utilisateur est compromis (mot de passe volé, clé SSH copiée...), l'attaquant obtient directement les droits root sans effort supplémentaire. À restreindre aux seules commandes qui en ont vraiment besoin si possible.",
+      howTo: [
+        "# Repère la ligne concernée :",
+        "sudo grep -RhE 'NOPASSWD' /etc/sudoers /etc/sudoers.d/",
+        "# Puis édite le fichier concerné avec visudo (jamais un éditeur classique, pour éviter de casser sudo) :",
+        "sudo visudo -f /etc/sudoers.d/<fichier-concerné>",
+        "# Remplace 'NOPASSWD:' par rien, ou limite la ligne à une commande précise plutôt qu'à ALL.",
+      ],
     });
   }
 
@@ -210,6 +245,13 @@ export function analyzeHost(host: HostForAnalysis, facts: HostFacts): Finding[] 
         title: `Service sensible accessible depuis l'extérieur (port ${[...exposedDbPorts].join(", ")})`,
         detail:
           "Un port de base de données écoute sur toutes les interfaces réseau au lieu de rester local (127.0.0.1) ou d'être derrière un pare-feu. Ces services sont des cibles fréquentes pour le vol de données quand ils sont directement accessibles depuis Internet.",
+        howTo: [
+          "# Vérifie qui écoute et sur quelle interface :",
+          `sudo ss -tulpn | grep -E ':(${[...exposedDbPorts].join("|")})\\b'`,
+          "# Dans la config du service concerné (ex: /etc/mysql/mariadb.conf.d/50-server.cnf pour MySQL/MariaDB,",
+          "# /etc/postgresql/*/main/postgresql.conf pour PostgreSQL, /etc/redis/redis.conf pour Redis...),",
+          "# remplace l'adresse d'écoute (bind-address / listen_addresses) par 127.0.0.1, puis redémarre le service.",
+        ],
       });
     }
   }
@@ -232,6 +274,14 @@ export function analyzeHost(host: HostForAnalysis, facts: HostFacts): Finding[] 
         title: `Conteneur(s) Docker exposés sur des ports inhabituels : ${risky.join(", ")}`,
         detail:
           "Ces conteneurs publient un port directement sur toutes les interfaces réseau. Vérifie que ce service est bien censé être accessible depuis l'extérieur ; sinon, publie-le uniquement sur 127.0.0.1 ou retire le mappage de port.",
+        howTo: [
+          "# Dans le docker-compose.yml ou la commande `docker run` du conteneur concerné, remplace :",
+          '#   ports: ["1234:1234"]',
+          "# par :",
+          '#   ports: ["127.0.0.1:1234:1234"]',
+          "# puis recrée le conteneur :",
+          "docker compose up -d   # ou : docker restart <conteneur> après avoir changé sa config",
+        ],
       });
     }
   }

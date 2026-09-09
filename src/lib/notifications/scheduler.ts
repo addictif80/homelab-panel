@@ -1,6 +1,6 @@
 import { getDb } from "../db";
-import { getSmtpConfig, sendMail } from "../mail";
 import { scanAllHosts } from "../security/scan";
+import { hasAnyNotificationChannel, notifyAll } from "./notify";
 import type { Finding } from "../security/types";
 
 const CHECK_INTERVAL_MS = 60 * 60 * 1000; // hourly
@@ -25,8 +25,7 @@ function markNotified(key: string) {
 }
 
 async function runCheck() {
-  const config = getSmtpConfig();
-  if (!config?.enabled) return;
+  if (!hasAnyNotificationChannel()) return;
 
   try {
     const results = await scanAllHosts();
@@ -35,6 +34,7 @@ async function runCheck() {
     for (const host of results) {
       if (host.error) continue;
       for (const finding of host.findings) {
+        if (finding.ignored) continue;
         if (finding.severity !== "critical" && finding.severity !== "warning") continue;
         const key = `${host.hostId}:${finding.id}`;
         if (shouldNotify(key)) toNotify.push({ hostName: host.hostName, finding, key });
@@ -47,12 +47,12 @@ async function runCheck() {
       (n) => `- [${n.finding.severity.toUpperCase()}] ${n.hostName} : ${n.finding.title}\n  ${n.finding.detail}`
     );
     const subject = `[Homelab Panel] ${toNotify.length} alerte${toNotify.length > 1 ? "s" : ""} de sécurité`;
-    const text = `Le Centre de sécurité a détecté ce qui suit :\n\n${lines.join("\n\n")}\n\nConnecte-toi au panel (page Sécurité) pour appliquer les correctifs proposés.`;
+    const text = `Le Centre de sécurité a détecté ce qui suit :\n\n${lines.join("\n\n")}\n\nConnecte-toi au panel (page Sécurité) pour appliquer les correctifs proposés, ou ignorer une alerte si elle n'est pas pertinente.`;
 
-    await sendMail(subject, text);
+    await notifyAll(subject, text);
     for (const n of toNotify) markNotified(n.key);
   } catch {
-    // Best-effort: a failed scan or SMTP send shouldn't crash the server, just skip this round.
+    // Best-effort: a failed scan or notification send shouldn't crash the server, just skip this round.
   }
 }
 
