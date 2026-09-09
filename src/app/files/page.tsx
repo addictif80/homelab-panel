@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import CopyToHostModal from "@/components/CopyToHostModal";
 
 type Host = { id: number; name: string };
 type FileEntry = { name: string; type: "file" | "directory" | "symlink" | "other"; size: number; modifiedAt: number };
@@ -26,6 +27,9 @@ export default function FilesPage() {
   const [editingContent, setEditingContent] = useState("");
   const [newFolderName, setNewFolderName] = useState("");
   const [showNewFolder, setShowNewFolder] = useState(false);
+  const [copySource, setCopySource] = useState<string | null>(null);
+  const [copyJobId, setCopyJobId] = useState<string | null>(null);
+  const [copyJob, setCopyJob] = useState<{ status: string; log: string } | null>(null);
 
   useEffect(() => {
     fetch("/api/hosts")
@@ -59,6 +63,31 @@ export default function FilesPage() {
   useEffect(() => {
     if (hostId) load(hostId, currentPath);
   }, [hostId, currentPath, load]);
+
+  const logRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!copyJobId) return;
+    let cancelled = false;
+    const poll = async () => {
+      const res = await fetch(`/api/files/copy/${copyJobId}`);
+      const data = await res.json();
+      if (cancelled || !data.job) return;
+      setCopyJob(data.job);
+      requestAnimationFrame(() => {
+        if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+      });
+      if (data.job.status === "running") {
+        setTimeout(poll, 1500);
+      } else if (hostId) {
+        load(hostId, currentPath);
+      }
+    };
+    poll();
+    return () => {
+      cancelled = true;
+    };
+  }, [copyJobId, hostId, currentPath, load]);
 
   function goUp() {
     const parent = currentPath.split("/").slice(0, -1).join("/") || "/";
@@ -253,6 +282,12 @@ export default function FilesPage() {
                       </button>
                     )}
                     <button
+                      onClick={() => setCopySource(joinPath(currentPath, entry.name))}
+                      className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+                    >
+                      Copier vers...
+                    </button>
+                    <button
                       onClick={() => deleteEntry(entry)}
                       className="rounded border border-neutral-700 px-2 py-0.5 text-xs text-red-400 hover:bg-neutral-800"
                     >
@@ -288,6 +323,42 @@ export default function FilesPage() {
               className="flex-1 resize-none rounded border border-neutral-800 bg-black p-3 font-mono text-xs"
               spellCheck={false}
             />
+          </div>
+        </div>
+      )}
+
+      {copySource && hostId && (
+        <CopyToHostModal
+          hosts={hosts}
+          sourceHostId={hostId}
+          sourcePath={copySource}
+          onClose={() => setCopySource(null)}
+          onStarted={(jobId) => {
+            setCopySource(null);
+            setCopyJobId(jobId);
+            setCopyJob({ status: "running", log: "" });
+          }}
+        />
+      )}
+
+      {copyJobId && copyJob && (
+        <div className="fixed bottom-4 right-4 z-40 w-full max-w-md rounded border border-neutral-700 bg-neutral-950 shadow-xl">
+          <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
+            <span className="text-sm text-neutral-200">
+              {copyJob.status === "running" ? "Copie en cours..." : copyJob.status === "success" ? "Copie terminée" : "Échec de la copie"}
+            </span>
+            <button
+              onClick={() => {
+                setCopyJobId(null);
+                setCopyJob(null);
+              }}
+              className="text-xs text-neutral-500 hover:text-neutral-300"
+            >
+              Fermer
+            </button>
+          </div>
+          <div ref={logRef} className="max-h-48 overflow-auto bg-black p-2 font-mono text-[11px] text-neutral-300">
+            <pre className="whitespace-pre-wrap">{copyJob.log || "Démarrage..."}</pre>
           </div>
         </div>
       )}

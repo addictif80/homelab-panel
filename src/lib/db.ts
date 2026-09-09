@@ -108,6 +108,18 @@ function migrate(db: Database.Database) {
       last_notified_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS copy_jobs (
+      id TEXT PRIMARY KEY,
+      source_host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+      source_path TEXT NOT NULL,
+      dest_host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+      dest_path TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','success','failed')),
+      log TEXT NOT NULL DEFAULT '',
+      started_at TEXT NOT NULL DEFAULT (datetime('now')),
+      finished_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS security_ignored (
       finding_key TEXT PRIMARY KEY,
       host_id INTEGER NOT NULL,

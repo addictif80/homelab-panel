@@ -110,3 +110,69 @@ export function makeDirectory(hostId: number, path: string): Promise<void> {
     });
   });
 }
+
+// --- Lower-level helpers for copying between two hosts, where a connection needs to stay
+// open across many operations instead of one-shot per call like withSftp() above. ---
+
+/** Opens an SSH+SFTP session and hands back the raw handles — caller owns closing `conn`. */
+export function openSftp(hostId: number): Promise<{ conn: SshClient; sftp: SFTPWrapper }> {
+  const config = buildSshConfig(hostId);
+  const conn = new SshClient();
+  return new Promise((resolve, reject) => {
+    conn.on("ready", () => {
+      conn.sftp((err, sftp) => (err ? reject(err) : resolve({ conn, sftp })));
+    });
+    conn.on("error", reject);
+    conn.connect(config);
+  });
+}
+
+export function statPath(sftp: SFTPWrapper, path: string): Promise<{ isDirectory: boolean; size: number }> {
+  return new Promise((resolve, reject) => {
+    sftp.stat(path, (err, stats) => {
+      if (err) return reject(err);
+      resolve({ isDirectory: stats.isDirectory(), size: stats.size });
+    });
+  });
+}
+
+export function readdirEntries(sftp: SFTPWrapper, path: string): Promise<FileEntry[]> {
+  return new Promise((resolve, reject) => {
+    sftp.readdir(path, (err, list) => {
+      if (err) return reject(err);
+      resolve(
+        list.map((item) => ({
+          name: item.filename,
+          type: modeToType(item.attrs.mode),
+          size: item.attrs.size,
+          modifiedAt: item.attrs.mtime * 1000,
+        }))
+      );
+    });
+  });
+}
+
+/** Best-effort: a directory that already exists (or can't be created for another reason we
+ * can't easily distinguish over SFTP) is not treated as fatal — the copy just continues into it. */
+export function mkdirIfMissing(sftp: SFTPWrapper, path: string): Promise<void> {
+  return new Promise((resolve) => {
+    sftp.mkdir(path, () => resolve());
+  });
+}
+
+/** Streams one file from `sourceSftp` straight into `destSftp` without buffering it in memory. */
+export function streamCopy(
+  sourceSftp: SFTPWrapper,
+  sourcePath: string,
+  destSftp: SFTPWrapper,
+  destPath: string
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const readStream = sourceSftp.createReadStream(sourcePath);
+    const writeStream = destSftp.createWriteStream(destPath);
+    readStream.on("error", reject);
+    writeStream.on("error", reject);
+    writeStream.on("close", () => resolve());
+    readStream.pipe(writeStream);
+  });
+}
