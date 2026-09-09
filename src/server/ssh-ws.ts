@@ -3,20 +3,11 @@ import type { Duplex } from "stream";
 import { WebSocketServer, WebSocket } from "ws";
 import { Client as SshClient } from "ssh2";
 import { parse } from "url";
-import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth";
 import { buildSshConfig, buildPrivilegedCommand, getAutoElevatePassword, shellQuote } from "@/lib/ssh";
 import { logAudit } from "@/lib/db";
+import { authenticateUpgrade } from "./wsAuth";
 
 const SSH_WS_PATH = "/ws/ssh";
-
-function parseCookie(header: string | undefined, name: string): string | null {
-  if (!header) return null;
-  for (const part of header.split(";")) {
-    const [k, ...v] = part.trim().split("=");
-    if (k === name) return decodeURIComponent(v.join("="));
-  }
-  return null;
-}
 
 type ClientMessage =
   | { type: "input"; data: string }
@@ -30,8 +21,7 @@ export function attachSshWebSocketServer(server: import("http").Server) {
     if (pathname !== SSH_WS_PATH) return;
 
     (async () => {
-      const token = parseCookie(req.headers.cookie, SESSION_COOKIE_NAME);
-      const username = token ? await verifySessionToken(token) : null;
+      const username = await authenticateUpgrade(req.headers.cookie);
       if (!username) {
         socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
         socket.destroy();

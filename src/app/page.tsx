@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
+
+const LiveLogPanel = dynamic(() => import("@/components/LiveLogPanel"), { ssr: false });
 
 const MODULES = [
   { name: "Serveurs physiques", href: "/servers" },
@@ -65,9 +68,6 @@ export default function Home() {
   const [formCategory, setFormCategory] = useState<LogCategory>("web-access");
   const [logError, setLogError] = useState("");
 
-  const [viewing, setViewing] = useState<LogSource | null>(null);
-  const [viewLines, setViewLines] = useState("");
-
   useEffect(() => {
     fetch("/api/monitoring/stats")
       .then((r) => r.json())
@@ -125,19 +125,6 @@ export default function Home() {
   async function deleteSource(id: string) {
     await fetch(`/api/logs/sources/${id}`, { method: "DELETE" });
     loadSources();
-  }
-
-  async function viewSource(source: LogSource) {
-    setViewing(source);
-    setViewLines("Chargement...");
-    try {
-      const res = await fetch(`/api/logs/sources/${source.id}/tail?tail=300`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setViewLines(data.lines || "(vide)");
-    } catch (err) {
-      setViewLines(`Erreur: ${err instanceof Error ? err.message : "inconnue"}`);
-    }
   }
 
   const reachable = stats.filter((s) => s.error === null);
@@ -332,26 +319,21 @@ export default function Home() {
           const items = sources.filter((s) => s.category === cat);
           if (items.length === 0) return null;
           return (
-            <div key={cat} className="space-y-1">
+            <div key={cat} className="space-y-2">
               <div className="text-xs font-medium text-neutral-500">{CATEGORY_LABELS[cat]}</div>
-              <div className="flex flex-wrap gap-2">
-                {items.map((s) => (
-                  <div
-                    key={s.id}
-                    className="flex items-center gap-2 rounded border border-neutral-800 px-3 py-1.5 text-xs"
-                  >
+              {items.map((s) => (
+                <div key={s.id} className="rounded border border-neutral-800">
+                  <div className="flex items-center justify-between px-3 py-1.5 text-xs">
                     <span>
                       {s.label} <span className="text-neutral-500">({s.hostName})</span>
                     </span>
-                    <button onClick={() => viewSource(s)} className="text-blue-400 hover:underline">
-                      Voir
-                    </button>
                     <button onClick={() => deleteSource(s.id)} className="text-red-400 hover:underline">
                       suppr.
                     </button>
                   </div>
-                ))}
-              </div>
+                  <LiveLogPanel sourceId={s.id} />
+                </div>
+              ))}
             </div>
           );
         })}
@@ -379,34 +361,6 @@ export default function Home() {
         </div>
       </section>
 
-      {viewing && (
-        <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/60 p-8">
-          <div className="flex h-full w-full max-w-3xl flex-col rounded border border-neutral-700 bg-neutral-950 p-4">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm font-medium">
-                {viewing.label} — {viewing.hostName}
-              </span>
-              <div className="space-x-2">
-                <button
-                  onClick={() => viewSource(viewing)}
-                  className="rounded border border-neutral-700 px-3 py-1 text-sm hover:bg-neutral-800"
-                >
-                  Rafraîchir
-                </button>
-                <button
-                  onClick={() => setViewing(null)}
-                  className="rounded border border-neutral-700 px-3 py-1 text-sm hover:bg-neutral-800"
-                >
-                  Fermer
-                </button>
-              </div>
-            </div>
-            <pre className="flex-1 overflow-auto rounded border border-neutral-800 bg-black p-3 font-mono text-xs text-neutral-300">
-              {viewLines}
-            </pre>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
