@@ -89,6 +89,18 @@ export function resolveSudoPassword(hostId: number): string | null {
 }
 
 /**
+ * Password to auto-type into an interactive shell right after connecting, so a host marked
+ * "needs sudo" drops the user straight into a root session instead of making them run
+ * `sudo -i` and retype a password we already have in the vault. Null when the host doesn't
+ * need it or no password is on file.
+ */
+export function getAutoElevatePassword(hostId: number): string | null {
+  const host = getHostRow(hostId);
+  if (!host.needs_sudo) return null;
+  return resolveSudoPassword(hostId);
+}
+
+/**
  * Wraps a command with `sudo -S` when the host is configured to need it (the common case here:
  * password-only SSH login, then `sudo -i` for anything privileged like apt or docker). Returns
  * the password to feed on the exec channel's stdin right after starting it, since `sudo -S`

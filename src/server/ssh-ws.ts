@@ -4,7 +4,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { Client as SshClient } from "ssh2";
 import { parse } from "url";
 import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth";
-import { buildSshConfig, buildPrivilegedCommand, shellQuote } from "@/lib/ssh";
+import { buildSshConfig, buildPrivilegedCommand, getAutoElevatePassword, shellQuote } from "@/lib/ssh";
 import { logAudit } from "@/lib/db";
 
 const SSH_WS_PATH = "/ws/ssh";
@@ -128,6 +128,14 @@ function handleSshSession(ws: WebSocket, hostId: number, username: string, conta
         return;
       }
       wireChannel(stream);
+
+      // Host needs sudo for anything privileged: drop the user straight into a root shell
+      // instead of making them type `sudo -i` and a password we already hold in the vault.
+      const sudoPassword = getAutoElevatePassword(hostId);
+      if (sudoPassword) {
+        stream.write("sudo -i\n");
+        stream.write(`${sudoPassword}\n`);
+      }
     });
   });
 

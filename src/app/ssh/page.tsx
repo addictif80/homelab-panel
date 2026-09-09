@@ -140,8 +140,9 @@ function SshPageInner() {
           <div className="space-y-2 border-t border-neutral-800 pt-4">
             <label className="flex items-center gap-2 text-xs text-neutral-400">
               <input type="checkbox" checked={!!selectedHost.needs_sudo} onChange={toggleNeedsSudo} />
-              Nécessite <code className="text-neutral-300">sudo -i</code> pour les commandes
-              privilégiées (apt, docker...)
+              Nécessite <code className="text-neutral-300">sudo -i</code> — élève automatiquement
+              le terminal en root à la connexion, et pour les commandes privilégiées (apt,
+              docker...)
             </label>
 
             <div className="flex items-center justify-between pt-2">
