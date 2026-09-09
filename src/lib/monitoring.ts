@@ -1,5 +1,8 @@
 import { getDb } from "./db";
 import { runSshCommand } from "./ssh";
+import { withTimeout } from "./timeout";
+
+const HOST_TIMEOUT_MS = 8000;
 
 export type HostStats = {
   hostId: number;
@@ -49,7 +52,11 @@ function parseStats(stdout: string): Omit<HostStats, "hostId" | "hostName" | "er
 
 export async function getHostStats(hostId: number, hostName: string): Promise<HostStats> {
   try {
-    const { stdout, code } = await runSshCommand(hostId, STATS_COMMAND, { sudo: false });
+    const { stdout, code } = await withTimeout(
+      runSshCommand(hostId, STATS_COMMAND, { sudo: false }),
+      HOST_TIMEOUT_MS,
+      `Timeout: ${hostName} n'a pas répondu.`
+    );
     if (code !== 0) throw new Error("Impossible de lire les statistiques.");
     return { hostId, hostName, ...parseStats(stdout), error: null };
   } catch (err) {
