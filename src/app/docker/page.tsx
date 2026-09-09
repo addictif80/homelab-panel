@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 
 const Terminal = dynamic(() => import("@/components/Terminal"), { ssr: false });
 
@@ -172,6 +173,12 @@ export default function DockerPage() {
           >
             + Lancer un conteneur
           </button>
+          <Link
+            href="/inventory"
+            className="rounded border border-neutral-700 px-3 py-1.5 text-sm hover:bg-neutral-800"
+          >
+            Gérer les machines
+          </Link>
         </div>
       </div>
 

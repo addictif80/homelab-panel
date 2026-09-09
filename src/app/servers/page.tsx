@@ -52,12 +52,20 @@ export default function ServersPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Serveurs physiques</h1>
-        <p className="text-sm text-neutral-400">
-          Machines auxquelles tu te connectes directement en SSH (serveurs, NAS, VPS, routeur) —
-          par opposition aux VM Proxmox et aux conteneurs Docker.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Serveurs physiques</h1>
+          <p className="text-sm text-neutral-400">
+            Machines auxquelles tu te connectes directement en SSH (serveurs, NAS, VPS, routeur) —
+            par opposition aux VM Proxmox et aux conteneurs Docker.
+          </p>
+        </div>
+        <Link
+          href="/inventory"
+          className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium hover:bg-blue-500"
+        >
+          + Ajouter / modifier une machine
+        </Link>
       </div>
 
       <div className="overflow-auto rounded border border-neutral-800">

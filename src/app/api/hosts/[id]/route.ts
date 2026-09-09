@@ -3,6 +3,7 @@ import { getDb, logAudit } from "@/lib/db";
 
 const EDITABLE_FIELDS = [
   "name",
+  "kind",
   "role",
   "os",
   "cluster",

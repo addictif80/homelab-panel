@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 
 type Host = { id: number; name: string; kind: string };
 type Resource = {
@@ -137,12 +138,20 @@ export default function ProxmoxPage() {
             VM et conteneurs LXC de tous les nœuds Proxmox configurés, en une seule vue.
           </p>
         </div>
-        <button
-          onClick={() => setShowConfig((s) => !s)}
-          className="rounded border border-neutral-700 px-3 py-1 text-sm hover:bg-neutral-800"
-        >
-          Gérer les connexions API
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowConfig((s) => !s)}
+            className="rounded border border-neutral-700 px-3 py-1 text-sm hover:bg-neutral-800"
+          >
+            Gérer les connexions API
+          </button>
+          <Link
+            href="/inventory"
+            className="rounded border border-neutral-700 px-3 py-1 text-sm hover:bg-neutral-800"
+          >
+            Ajouter un nœud Proxmox
+          </Link>
+        </div>
       </div>
 
       {showConfig && (
