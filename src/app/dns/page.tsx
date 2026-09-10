@@ -404,7 +404,7 @@ export default function DnsPage() {
                     <tr key={r.id} className="border-t border-neutral-800">
                       <td className="px-3 py-2 font-medium">{r.type}</td>
                       <td className="px-3 py-2 font-mono text-xs">{r.name}</td>
-                      <td className="px-3 py-2 font-mono text-xs text-neutral-400">
+                      <td className="max-w-xs truncate px-3 py-2 font-mono text-xs text-neutral-400" title={r.content}>
                         {r.content} {r.proxied && <span className="text-amber-400">(proxifié)</span>}
                       </td>
                       <td className="px-3 py-2 text-neutral-400">{r.ttl === 1 ? "Auto" : r.ttl}</td>
