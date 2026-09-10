@@ -159,7 +159,8 @@ function migrate(db: Database.Database) {
       status TEXT NOT NULL DEFAULT 'trial' CHECK (status IN ('trial','activated')),
       trial_started_at TEXT NOT NULL DEFAULT (datetime('now')),
       activation_key TEXT,
-      activated_at TEXT
+      activated_at TEXT,
+      certificate_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS sales (
@@ -177,6 +178,13 @@ function migrate(db: Database.Database) {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       expires_at TEXT NOT NULL,
       used_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS license_signing_key (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      public_key_pem TEXT NOT NULL,
+      private_key_pem_encrypted TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS license_keys (
@@ -213,6 +221,11 @@ function migrate(db: Database.Database) {
   }
   if (!hostColumns.some((c) => c.name === "proxmox_node")) {
     db.exec(`ALTER TABLE hosts ADD COLUMN proxmox_node TEXT`);
+  }
+
+  const licenseColumns = db.prepare(`PRAGMA table_info(license)`).all() as { name: string }[];
+  if (!licenseColumns.some((c) => c.name === "certificate_json")) {
+    db.exec(`ALTER TABLE license ADD COLUMN certificate_json TEXT`);
   }
 }
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { redeemDownloadToken } from "@/lib/seller/downloadTokens";
 import { buildClientArchive, readArchive } from "@/lib/seller/exportBuild";
 import { getLicenseKeyForSale } from "@/lib/seller/licenseKeys";
+import { getSigningPublicKeyPem } from "@/lib/seller/licenseSigning";
 import { getTrialDays } from "@/lib/seller/trialConfig";
 import { logAudit } from "@/lib/db";
 
@@ -16,6 +17,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   const { zipPath, cleanup } = await buildClientArchive({
     trialDays: getTrialDays(),
     licenseServerUrl: req.nextUrl.origin,
+    licensePublicKey: getSigningPublicKeyPem(),
     preActivatedKey: licenseKey?.key,
   });
   try {

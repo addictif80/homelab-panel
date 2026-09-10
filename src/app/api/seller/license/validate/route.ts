@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateAndConsumeKey } from "@/lib/seller/licenseKeys";
+import { signLicensePayload } from "@/lib/seller/licenseSigning";
 import { logAudit } from "@/lib/db";
 
 /**
@@ -17,5 +18,7 @@ export async function POST(req: NextRequest) {
   if (!result.valid) {
     return NextResponse.json({ valid: false, error: result.error }, { status: 400 });
   }
-  return NextResponse.json({ valid: true });
+
+  const certificate = signLicensePayload({ key, activatedAt: new Date().toISOString() });
+  return NextResponse.json({ valid: true, certificate });
 }

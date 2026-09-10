@@ -1,18 +1,20 @@
 import { readFileSync } from "fs";
 import path from "path";
+import { verify, createPublicKey } from "crypto";
 import { getDb } from "./db";
 
-type LicenseConfig = { trialDays: number; licenseServerUrl: string };
+type LicenseConfig = { trialDays: number; licenseServerUrl: string; licensePublicKey: string };
 
 let cachedConfig: LicenseConfig | null = null;
 
-/**
- * Read once per process from license.json at the project root. The seller's export builder
- * overwrites this file's contents in every zip it produces (trial length + where to validate a
- * key) — the version checked into the seller's own repo is just a harmless default.
- */
 type RawLicenseFile = LicenseConfig & { preActivatedKey?: string };
 
+/**
+ * Read once per process from license.json at the project root. The seller's export builder
+ * overwrites this file's contents in every zip it produces (trial length, where to validate a
+ * key, and the public key used to check an activation's signature) — the version checked into
+ * the seller's own repo is just a harmless default.
+ */
 function readLicenseFile(): RawLicenseFile {
   try {
     const raw = readFileSync(path.join(process.cwd(), "license.json"), "utf8");
@@ -20,17 +22,18 @@ function readLicenseFile(): RawLicenseFile {
     return {
       trialDays: Number(parsed.trialDays) || 14,
       licenseServerUrl: typeof parsed.licenseServerUrl === "string" ? parsed.licenseServerUrl : "",
+      licensePublicKey: typeof parsed.licensePublicKey === "string" ? parsed.licensePublicKey : "",
       preActivatedKey: typeof parsed.preActivatedKey === "string" ? parsed.preActivatedKey : undefined,
     };
   } catch {
-    return { trialDays: 14, licenseServerUrl: "" };
+    return { trialDays: 14, licenseServerUrl: "", licensePublicKey: "" };
   }
 }
 
 function getLicenseConfig(): LicenseConfig {
   if (!cachedConfig) {
-    const { trialDays, licenseServerUrl } = readLicenseFile();
-    cachedConfig = { trialDays, licenseServerUrl };
+    const { trialDays, licenseServerUrl, licensePublicKey } = readLicenseFile();
+    cachedConfig = { trialDays, licenseServerUrl, licensePublicKey };
   }
   return cachedConfig;
 }
@@ -58,10 +61,40 @@ type LicenseRow = {
   trial_started_at: string;
   activation_key: string | null;
   activated_at: string | null;
+  certificate_json: string | null;
 };
 
 function getLicenseRow(): LicenseRow {
   return getDb().prepare(`SELECT * FROM license WHERE id = 1`).get() as LicenseRow;
+}
+
+type Certificate = { payload: string; signature: string };
+
+/**
+ * The `status = 'activated'` column is convenient but not trusted on its own — anyone with a
+ * copy of this app also has a copy of its SQLite file, and could flip that column by hand. What
+ * actually grants activation is a signature over the certificate, made with a private key that
+ * never leaves the seller's server; this only returns true when that signature checks out
+ * against the public key embedded in license.json.
+ */
+function hasValidCertificate(row: LicenseRow): boolean {
+  if (!row.certificate_json) return false;
+  const { licensePublicKey } = getLicenseConfig();
+  if (!licensePublicKey) return false;
+
+  let cert: Certificate;
+  try {
+    cert = JSON.parse(row.certificate_json);
+  } catch {
+    return false;
+  }
+
+  try {
+    const publicKey = createPublicKey({ key: licensePublicKey, format: "pem" });
+    return verify(null, Buffer.from(cert.payload, "utf8"), publicKey, Buffer.from(cert.signature, "base64"));
+  } catch {
+    return false;
+  }
 }
 
 export type LicenseStatus = {
@@ -79,7 +112,7 @@ export function getLicenseStatus(): LicenseStatus {
   const row = getLicenseRow();
   const { trialDays } = getLicenseConfig();
 
-  if (row.status === "activated") {
+  if (row.status === "activated" && hasValidCertificate(row)) {
     return { activated: true, trialDays, daysRemaining: Infinity, expired: false };
   }
 
@@ -102,7 +135,7 @@ export async function activateWithKey(key: string): Promise<{ ok: true } | { ok:
     return { ok: false, error: "Aucun serveur de licence configuré dans cette version." };
   }
 
-  let data: { valid?: boolean; error?: string };
+  let data: { valid?: boolean; error?: string; certificate?: Certificate };
   try {
     const res = await fetch(`${config.licenseServerUrl.replace(/\/$/, "")}/api/seller/license/validate`, {
       method: "POST",
@@ -110,7 +143,7 @@ export async function activateWithKey(key: string): Promise<{ ok: true } | { ok:
       body: JSON.stringify({ key: trimmed }),
     });
     data = await res.json();
-    if (!res.ok || !data.valid) {
+    if (!res.ok || !data.valid || !data.certificate) {
       return { ok: false, error: data.error || "Clé invalide ou déjà utilisée." };
     }
   } catch {
@@ -118,7 +151,9 @@ export async function activateWithKey(key: string): Promise<{ ok: true } | { ok:
   }
 
   getDb()
-    .prepare(`UPDATE license SET status = 'activated', activation_key = ?, activated_at = datetime('now') WHERE id = 1`)
-    .run(trimmed);
+    .prepare(
+      `UPDATE license SET status = 'activated', activation_key = ?, activated_at = datetime('now'), certificate_json = ? WHERE id = 1`
+    )
+    .run(trimmed, JSON.stringify(data.certificate));
   return { ok: true };
 }

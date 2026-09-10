@@ -1,4 +1,5 @@
 {
   "trialDays": 14,
-  "licenseServerUrl": ""
+  "licenseServerUrl": "",
+  "licensePublicKey": ""
 }

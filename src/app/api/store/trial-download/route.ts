@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildClientArchive, readArchive } from "@/lib/seller/exportBuild";
 import { getTrialDays } from "@/lib/seller/trialConfig";
+import { getSigningPublicKeyPem } from "@/lib/seller/licenseSigning";
 import { logAudit } from "@/lib/db";
 
 /** No payment, no token — anyone can grab a trial copy. Its trial clock starts the moment its
@@ -9,6 +10,7 @@ export async function GET(req: NextRequest) {
   const { zipPath, cleanup } = await buildClientArchive({
     trialDays: getTrialDays(),
     licenseServerUrl: req.nextUrl.origin,
+    licensePublicKey: getSigningPublicKeyPem(),
   });
   try {
     const buffer = readArchive(zipPath);

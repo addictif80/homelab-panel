@@ -27,6 +27,9 @@ const IGNORE_FILES = [".env", ".env.local", ".env*.local", "license.json"];
 export type ExportLicenseConfig = {
   trialDays: number;
   licenseServerUrl: string;
+  /** Public half of the seller's Ed25519 signing keypair — lets the client verify an activation
+   * certificate locally without being able to forge one (the private key never ships). */
+  licensePublicKey: string;
   /** Present only for a paid download — the app auto-activates with it on first boot. */
   preActivatedKey?: string;
 };
