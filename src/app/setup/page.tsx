@@ -95,7 +95,7 @@ export default function SetupPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full rounded bg-blue-600 py-2 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
+              className="w-full rounded bg-blue-600 text-white py-2 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
             >
               Continuer
             </button>
@@ -130,7 +130,7 @@ export default function SetupPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full rounded bg-blue-600 py-2 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
+              className="w-full rounded bg-blue-600 text-white py-2 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
             >
               Activer la 2FA
             </button>

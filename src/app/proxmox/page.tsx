@@ -409,7 +409,7 @@ export default function ProxmoxPage() {
           <button
             type="submit"
             disabled={creating}
-            className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
+            className="rounded bg-blue-600 text-white px-3 py-1.5 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
           >
             {creating ? "Création..." : "Créer la VM"}
           </button>
@@ -460,7 +460,7 @@ export default function ProxmoxPage() {
             <input type="checkbox" checked={verifySsl} onChange={(e) => setVerifySsl(e.target.checked)} />
             Vérifier le certificat TLS
           </label>
-          <button type="submit" className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium hover:bg-blue-500">
+          <button type="submit" className="rounded bg-blue-600 text-white px-3 py-1.5 text-sm font-medium hover:bg-blue-500">
             Enregistrer
           </button>
         </form>
@@ -594,7 +594,7 @@ export default function ProxmoxPage() {
               <button
                 type="submit"
                 disabled={snapBusy === "create"}
-                className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium hover:bg-blue-500 disabled:opacity-50"
+                className="rounded bg-blue-600 text-white px-3 py-1.5 text-xs font-medium hover:bg-blue-500 disabled:opacity-50"
               >
                 {snapBusy === "create" ? "Création..." : "Créer un snapshot"}
               </button>

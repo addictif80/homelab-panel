@@ -220,7 +220,7 @@ export default function DockerPage() {
           </button>
           <button
             onClick={() => setShowRunForm((s) => !s)}
-            className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium hover:bg-blue-500"
+            className="rounded bg-blue-600 text-white px-3 py-1.5 text-sm font-medium hover:bg-blue-500"
           >
             + Lancer un conteneur
           </button>
@@ -326,7 +326,7 @@ export default function DockerPage() {
               <option value="no">no</option>
             </select>
           </div>
-          <button type="submit" className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium hover:bg-blue-500">
+          <button type="submit" className="rounded bg-blue-600 text-white px-3 py-1.5 text-sm font-medium hover:bg-blue-500">
             Lancer
           </button>
         </form>

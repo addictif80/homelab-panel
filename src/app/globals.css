@@ -1,14 +1,13 @@
 @import "tailwindcss";
 
-/* This app is always dark — there is no light theme, so unlike the create-next-app default
-   there is no `prefers-color-scheme` toggle here. `color-scheme: dark` tells the browser to
-   render native form controls (inputs, selects, scrollbars) with dark, legible defaults.
-   Background/text color for the page come from Tailwind classes on <body> in layout.tsx —
-   deliberately not set again here, since a plain (unlayered) rule here would take priority
-   over Tailwind's utility classes (which Tailwind emits inside @layer) regardless of the
-   system's light/dark preference, which is exactly the bug this replaced. */
+/* Dark is the default; [data-theme="light"] (set by ThemeInit before paint, toggled by
+   ThemeToggle) flips color-scheme so native form controls (inputs, selects, scrollbars) render
+   with the right defaults for each theme. */
 :root {
   color-scheme: dark;
+}
+[data-theme="light"] {
+  color-scheme: light;
 }
 
 input,
@@ -18,8 +17,16 @@ select {
 }
 
 @theme inline {
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-plex-sans);
+  --font-mono: var(--font-plex-mono);
+  --font-display: var(--font-space-grotesk);
+}
+
+@layer base {
+  h1, h2, h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
 }
 
 /* Rebrands every existing blue-* utility (buttons, active nav state, badges, links) across the
@@ -37,21 +44,48 @@ select {
   --color-blue-950: #131b3d;
 }
 
+/* Light theme: mirrors the neutral scale (950<->50, 900<->100, ...) so every existing
+   bg-neutral-900 / text-neutral-400 / border-neutral-800 utility across the whole app renders
+   correctly in both themes without having to touch each of the ~30 pages that already use them.
+   The three surface shades (800/900/950 — borders, cards, page background) carry a hint of warmth
+   instead of flat gray, which is the only deliberate departure from a pure mirror. */
+[data-theme="light"] {
+  /* Same story for every status badge/alert box across the app: light red/amber/emerald text on
+     a translucent tinted background (security findings, error boxes, update badges...) — legible
+     on dark surfaces, too low-contrast on light ones. Darkened here instead of at each call site. */
+  --color-blue-300: #2a3fae;
+  --color-red-300: #b91c1c;
+  --color-amber-300: #b45309;
+  --color-emerald-300: #047857;
+
+  --color-neutral-50: oklch(14.5% 0 none);
+  --color-neutral-100: oklch(20.5% 0 none);
+  --color-neutral-200: oklch(26.9% 0 none);
+  --color-neutral-300: oklch(37.1% 0 none);
+  --color-neutral-400: oklch(43.9% 0 none);
+  --color-neutral-500: oklch(55.6% 0 none);
+  --color-neutral-600: oklch(70.8% 0 none);
+  --color-neutral-700: oklch(87% 0 none);
+  --color-neutral-800: oklch(92.2% 0.004 75);
+  --color-neutral-900: oklch(97% 0.004 75);
+  --color-neutral-950: oklch(98.5% 0.004 75);
+}
+
 @layer components {
   .card {
     @apply rounded-lg border border-neutral-800 bg-neutral-900;
   }
   .btn-primary {
-    @apply rounded border border-transparent bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply rounded-md border border-transparent bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-secondary {
-    @apply rounded border border-neutral-700 px-3 py-1.5 text-sm font-medium text-neutral-200 transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply rounded-md border border-neutral-800 px-3 py-1.5 text-sm font-medium text-neutral-200 transition-colors hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-danger {
-    @apply rounded border border-red-900 px-3 py-1.5 text-sm font-medium text-red-300 transition-colors hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply rounded-md border border-red-900 px-3 py-1.5 text-sm font-medium text-red-300 transition-colors hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .input {
-    @apply w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100;
+    @apply w-full rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100;
   }
   .page-title {
     @apply text-lg font-semibold text-neutral-100;

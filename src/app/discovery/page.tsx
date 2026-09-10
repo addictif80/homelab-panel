@@ -85,7 +85,7 @@ export default function DiscoveryPage() {
         <button
           onClick={runScan}
           disabled={scanning || !scannerId}
-          className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
+          className="rounded bg-blue-600 text-white px-3 py-1.5 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
         >
           {scanning ? "Scan en cours (~5s)..." : "Lancer le scan"}
         </button>

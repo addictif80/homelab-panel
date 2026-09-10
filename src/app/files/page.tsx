@@ -228,7 +228,7 @@ export default function FilesPage() {
             className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
             autoFocus
           />
-          <button type="submit" className="rounded bg-blue-600 px-3 py-1 text-sm hover:bg-blue-500">
+          <button type="submit" className="rounded bg-blue-600 text-white px-3 py-1 text-sm hover:bg-blue-500">
             Créer
           </button>
         </form>
@@ -306,7 +306,7 @@ export default function FilesPage() {
             <div className="mb-2 flex items-center justify-between">
               <span className="font-mono text-sm">{editingFile}</span>
               <div className="space-x-2">
-                <button onClick={saveFile} className="rounded bg-blue-600 px-3 py-1 text-sm hover:bg-blue-500">
+                <button onClick={saveFile} className="rounded bg-blue-600 text-white px-3 py-1 text-sm hover:bg-blue-500">
                   Enregistrer
                 </button>
                 <button

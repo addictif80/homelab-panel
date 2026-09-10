@@ -237,7 +237,7 @@ export default function InventoryPage() {
           </div>
           <button
             onClick={openCreate}
-            className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium hover:bg-blue-500"
+            className="rounded bg-blue-600 text-white px-3 py-1.5 text-sm font-medium hover:bg-blue-500"
           >
             + Ajouter une machine
           </button>
@@ -489,7 +489,7 @@ export default function InventoryPage() {
               </button>
               <button
                 type="submit"
-                className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium hover:bg-blue-500"
+                className="rounded bg-blue-600 text-white px-3 py-1.5 text-sm font-medium hover:bg-blue-500"
               >
                 {editingId === "new" ? "Créer" : "Enregistrer"}
               </button>

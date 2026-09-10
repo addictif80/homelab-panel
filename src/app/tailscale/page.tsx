@@ -194,7 +194,7 @@ export default function TailscalePage() {
               required
             />
           </div>
-          <button type="submit" className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium hover:bg-blue-500">
+          <button type="submit" className="rounded bg-blue-600 text-white px-3 py-1.5 text-sm font-medium hover:bg-blue-500">
             Enregistrer
           </button>
         </form>

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import ThemeToggle from "./ThemeToggle";
 
 const NAV_SECTIONS: { label: string; items: { href: string; label: string }[] }[] = [
   { label: "", items: [{ href: "/", label: "Vue d'ensemble" }] },
@@ -58,9 +59,17 @@ export default function Sidebar() {
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-neutral-800 bg-neutral-900 p-4">
-      <div className="mb-6 flex items-center gap-2 px-1">
-        <span className="text-base">🏠</span>
-        <span className="text-sm font-semibold tracking-wide text-neutral-100">Homelab Panel</span>
+      <div className="mb-6 flex items-center justify-between px-1">
+        <div className="flex items-center gap-2">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <rect x="3" y="3" width="18" height="18" rx="5" stroke="currentColor" strokeWidth="1.6" className="text-blue-600" />
+            <path d="M7.5 9H16.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="text-blue-600" />
+            <path d="M7.5 12.5H16.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="text-blue-600" />
+            <path d="M7.5 16H12.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="text-blue-600" />
+          </svg>
+          <span className="font-display text-sm font-semibold tracking-wide text-neutral-100">Homelab Panel</span>
+        </div>
+        <ThemeToggle />
       </div>
       <nav className="flex-1 space-y-5 overflow-auto">
         {NAV_SECTIONS.map((section) => (

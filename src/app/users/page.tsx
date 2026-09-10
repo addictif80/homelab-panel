@@ -102,7 +102,7 @@ export default function UsersPage() {
         </div>
         <button
           onClick={() => setShowCreate((s) => !s)}
-          className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium hover:bg-blue-500"
+          className="rounded bg-blue-600 text-white px-3 py-1.5 text-sm font-medium hover:bg-blue-500"
         >
           + Ajouter un compte
         </button>
@@ -146,7 +146,7 @@ export default function UsersPage() {
           <button
             type="submit"
             disabled={creating}
-            className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
+            className="rounded bg-blue-600 text-white px-3 py-1.5 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
           >
             {creating ? "Création..." : "Créer le compte"}
           </button>

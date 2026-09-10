@@ -199,7 +199,7 @@ function SshPageInner() {
                 {credError && <p className="text-xs text-red-400">{credError}</p>}
                 <button
                   type="submit"
-                  className="w-full rounded bg-blue-600 py-1 text-xs font-medium hover:bg-blue-500"
+                  className="w-full rounded bg-blue-600 text-white py-1 text-xs font-medium hover:bg-blue-500"
                 >
                   Enregistrer (chiffré)
                 </button>

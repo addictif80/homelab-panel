@@ -176,7 +176,7 @@ export default function UpdatesPage() {
           <button
             onClick={() => runAll("apply")}
             disabled={runningAll}
-            className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
+            className="rounded bg-blue-600 text-white px-3 py-1.5 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
           >
             Tout mettre à jour
           </button>
@@ -220,7 +220,7 @@ export default function UpdatesPage() {
                   <button
                     onClick={() => runHost(h.id, "apply")}
                     disabled={job?.status === "running"}
-                    className="rounded bg-blue-600 px-2 py-1 text-xs font-medium hover:bg-blue-500 disabled:opacity-50"
+                    className="rounded bg-blue-600 text-white px-2 py-1 text-xs font-medium hover:bg-blue-500 disabled:opacity-50"
                   >
                     Mettre à jour
                   </button>
