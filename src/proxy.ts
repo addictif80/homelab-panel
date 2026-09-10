@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifySessionToken, getUserRole, SESSION_COOKIE_NAME } from "@/lib/auth";
+import { verifySessionToken, createSessionToken, getUserRole, SESSION_COOKIE_NAME, SESSION_MAX_AGE } from "@/lib/auth";
 import { isMutationBlocked } from "@/lib/license";
 
 const PUBLIC_PATHS = ["/login", "/setup"];
@@ -62,6 +62,22 @@ export async function proxy(req: NextRequest) {
 
   const res = NextResponse.next();
   res.headers.set("x-panel-user", username);
+
+  // Sliding session: every authenticated request pushes the expiry back out, so someone actively
+  // using the panel is never logged out mid-session — only real inactivity for the full TTL ends
+  // it. Re-signing on every request is cheap (HS256, no DB hit) and avoids a stale cookie being
+  // the difference between "still logged in" and a confusing failure somewhere else (e.g. the SSH
+  // terminal's websocket upgrade, which checks this same cookie directly and has no login redirect
+  // of its own).
+  const freshToken = await createSessionToken(username);
+  res.cookies.set(SESSION_COOKIE_NAME, freshToken, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    maxAge: SESSION_MAX_AGE,
+    path: "/",
+  });
+
   return res;
 }
 

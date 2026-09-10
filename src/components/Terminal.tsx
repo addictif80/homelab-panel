@@ -36,8 +36,10 @@ export default function Terminal({
     const ws = new WebSocket(`${protocol}://${window.location.host}/ws/ssh?${params.toString()}`);
     wsRef.current = ws;
     onStatusChange?.("connecting");
+    let connectedOnce = false;
 
     ws.onopen = () => {
+      connectedOnce = true;
       onStatusChange?.("connected");
       ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
     };
@@ -53,7 +55,16 @@ export default function Terminal({
       }
     };
 
-    ws.onclose = () => onStatusChange?.("closed");
+    ws.onclose = () => {
+      // The browser WebSocket API doesn't expose the HTTP status of a rejected handshake — but a
+      // close that fires without onopen ever having fired means the upgrade itself was refused
+      // (most likely an expired session cookie), not a normal end-of-session close.
+      if (!connectedOnce) {
+        onStatusChange?.("error", "Connexion refusée — ta session a peut-être expiré, recharge la page.");
+      } else {
+        onStatusChange?.("closed");
+      }
+    };
     ws.onerror = () => onStatusChange?.("error", "Connexion WebSocket interrompue.");
 
     const dataDisposable = term.onData((data) => {
