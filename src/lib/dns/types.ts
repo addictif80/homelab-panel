@@ -56,8 +56,9 @@ export const DNS_PROVIDERS: DnsProviderMeta[] = [
     id: "ovh",
     name: "OVH",
     helpText:
-      "Crée une application sur https://api.ovh.com/createApp puis un consumer key autorisé sur /domain/zone/*/** " +
-      "via https://api.ovh.com/createToken (endpoint ovh-eu pour la France).",
+      "Crée une application sur https://eu.api.ovh.com/createApp/ (remplace eu par ca ou us selon ton endpoint) " +
+      "puis un consumer key autorisé sur GET/POST/PUT/DELETE /domain/zone/*/** via " +
+      "https://eu.api.ovh.com/createToken/ (endpoint ovh-eu pour la France).",
     configFields: [
       { key: "zoneName", label: "Nom de domaine", placeholder: "exemple.fr" },
       { key: "endpoint", label: "Endpoint OVH", placeholder: "ovh-eu" },
