@@ -136,6 +136,22 @@ export default function InventoryPage() {
     load();
   }, [load]);
 
+  // A device found by /discovery can hand off here to pre-fill the "add machine" form instead of
+  // duplicating host-creation logic in two places.
+  useEffect(() => {
+    const raw = sessionStorage.getItem("discoveryPrefillHost");
+    if (!raw) return;
+    sessionStorage.removeItem("discoveryPrefillHost");
+    try {
+      const prefill = JSON.parse(raw) as Partial<FormState>;
+      setForm({ ...EMPTY_FORM, ...prefill });
+      setFormError("");
+      setEditingId("new");
+    } catch {
+      // ignore malformed prefill
+    }
+  }, []);
+
   async function checkHost(id: number) {
     setPingState((s) => ({ ...s, [id]: "checking" }));
     try {

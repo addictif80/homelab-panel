@@ -22,7 +22,9 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string }[] }[
     items: [
       { href: "/tailscale", label: "Tailscale" },
       { href: "/proxy", label: "Reverse proxy" },
+      { href: "/dns", label: "DNS" },
       { href: "/uptime", label: "Uptime Kuma" },
+      { href: "/discovery", label: "Découverte réseau" },
     ],
   },
   {

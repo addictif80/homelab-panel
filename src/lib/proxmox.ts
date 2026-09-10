@@ -209,3 +209,59 @@ export async function createVm(hostId: number, node: string, input: CreateVmInpu
   if (input.isoSpec) params.set("ide2", `${input.isoSpec},media=cdrom`);
   return proxmoxRequest(hostId, `/nodes/${node}/qemu`, "POST", params);
 }
+
+export type ProxmoxSnapshot = {
+  name: string;
+  description?: string;
+  snaptime?: number;
+  vmstate?: number;
+  parent?: string;
+};
+
+export async function listSnapshots(
+  hostId: number,
+  node: string,
+  type: "qemu" | "lxc",
+  vmid: number
+): Promise<ProxmoxSnapshot[]> {
+  const data = (await proxmoxRequest(hostId, `/nodes/${node}/${type}/${vmid}/snapshot`)) as ProxmoxSnapshot[];
+  // Proxmox always includes a synthetic "current" pseudo-snapshot marking HEAD — not a real
+  // snapshot a user can roll back to or delete, so it's filtered out here.
+  return data.filter((s) => s.name !== "current").sort((a, b) => (b.snaptime || 0) - (a.snaptime || 0));
+}
+
+export async function createSnapshot(
+  hostId: number,
+  node: string,
+  type: "qemu" | "lxc",
+  vmid: number,
+  name: string,
+  description?: string,
+  includeRamState?: boolean
+) {
+  const params = new URLSearchParams();
+  params.set("snapname", name);
+  if (description) params.set("description", description);
+  if (type === "qemu" && includeRamState) params.set("vmstate", "1");
+  return proxmoxRequest(hostId, `/nodes/${node}/${type}/${vmid}/snapshot`, "POST", params);
+}
+
+export async function rollbackSnapshot(
+  hostId: number,
+  node: string,
+  type: "qemu" | "lxc",
+  vmid: number,
+  name: string
+) {
+  return proxmoxRequest(hostId, `/nodes/${node}/${type}/${vmid}/snapshot/${encodeURIComponent(name)}/rollback`, "POST");
+}
+
+export async function deleteSnapshot(
+  hostId: number,
+  node: string,
+  type: "qemu" | "lxc",
+  vmid: number,
+  name: string
+) {
+  return proxmoxRequest(hostId, `/nodes/${node}/${type}/${vmid}/snapshot/${encodeURIComponent(name)}`, "DELETE");
+}

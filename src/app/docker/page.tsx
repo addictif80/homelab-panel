@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { APP_TEMPLATES } from "@/lib/appTemplates";
 
 const Terminal = dynamic(() => import("@/components/Terminal"), { ssr: false });
 
@@ -39,6 +40,9 @@ export default function DockerPage() {
   const [runVolumes, setRunVolumes] = useState("");
   const [runEnv, setRunEnv] = useState("");
   const [runRestart, setRunRestart] = useState("unless-stopped");
+  const [updatesAvailable, setUpdatesAvailable] = useState<Set<string>>(new Set());
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -141,6 +145,40 @@ export default function DockerPage() {
     }
   }
 
+  async function checkUpdates() {
+    setCheckingUpdates(true);
+    setError("");
+    try {
+      const targetHosts = hostStatuses.filter((h) => !h.error);
+      const results = await Promise.all(
+        targetHosts.map(async (h) => {
+          const res = await fetch(`/api/docker/${h.hostId}/check-updates`, { method: "POST" });
+          const data = await res.json();
+          if (!res.ok) return [];
+          return data.statuses as { containerId: string; updateAvailable: boolean }[];
+        })
+      );
+      const ids = new Set<string>();
+      for (const list of results) for (const s of list) if (s.updateAvailable) ids.add(s.containerId);
+      setUpdatesAvailable(ids);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur");
+    } finally {
+      setCheckingUpdates(false);
+    }
+  }
+
+  function useTemplate(t: (typeof APP_TEMPLATES)[number]) {
+    setRunImage(t.image);
+    setRunName(t.id);
+    setRunPorts(t.ports.join("\n"));
+    setRunVolumes(t.volumes.join("\n"));
+    setRunEnv(t.env.join("\n"));
+    setRunRestart(t.restartPolicy);
+    setShowTemplates(false);
+    setShowRunForm(true);
+  }
+
   const visibleContainers = containers.filter((c) => hostFilter === "all" || c.hostId === hostFilter);
   const erroredHosts = hostStatuses.filter((h) => h.error);
 
@@ -168,6 +206,19 @@ export default function DockerPage() {
             ))}
           </select>
           <button
+            onClick={checkUpdates}
+            disabled={checkingUpdates}
+            className="rounded border border-neutral-700 px-3 py-1.5 text-sm hover:bg-neutral-800 disabled:opacity-50"
+          >
+            {checkingUpdates ? "Vérification..." : "Vérifier les mises à jour"}
+          </button>
+          <button
+            onClick={() => setShowTemplates((s) => !s)}
+            className="rounded border border-neutral-700 px-3 py-1.5 text-sm hover:bg-neutral-800"
+          >
+            Modèles d&apos;applications
+          </button>
+          <button
             onClick={() => setShowRunForm((s) => !s)}
             className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium hover:bg-blue-500"
           >
@@ -181,6 +232,22 @@ export default function DockerPage() {
           </Link>
         </div>
       </div>
+
+      {showTemplates && (
+        <div className="grid grid-cols-1 gap-3 rounded border border-neutral-800 p-4 sm:grid-cols-2 lg:grid-cols-3">
+          {APP_TEMPLATES.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => useTemplate(t)}
+              className="rounded border border-neutral-700 p-3 text-left hover:border-blue-600 hover:bg-blue-900/10"
+            >
+              <p className="font-medium text-neutral-100">{t.name}</p>
+              <p className="mt-1 text-xs text-neutral-400">{t.description}</p>
+              <p className="mt-2 font-mono text-[11px] text-neutral-500">{t.image}</p>
+            </button>
+          ))}
+        </div>
+      )}
 
       {showRunForm && (
         <form onSubmit={submitRun} className="max-w-lg space-y-3 rounded border border-neutral-800 p-4">
@@ -291,7 +358,14 @@ export default function DockerPage() {
                 <tr key={`${c.hostId}-${c.id}`} className="border-t border-neutral-800">
                   <td className="px-3 py-2 font-medium">{c.name}</td>
                   <td className="px-3 py-2 text-neutral-400">{c.hostName}</td>
-                  <td className="px-3 py-2 font-mono text-xs text-neutral-400">{c.image}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-neutral-400">
+                    {c.image}
+                    {updatesAvailable.has(c.id) && (
+                      <span className="ml-2 rounded bg-amber-900/40 px-1.5 py-0.5 text-[10px] font-sans text-amber-300">
+                        Mise à jour dispo
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2">
                     <span className={c.state === "running" ? "text-green-400" : "text-neutral-500"}>
                       {c.status}

@@ -16,6 +16,7 @@ type Resource = {
   uptime: number;
 };
 type AggregatedResource = Resource & { hostId: number };
+type Snapshot = { name: string; description?: string; snaptime?: number; vmstate?: number };
 
 function formatUptime(seconds: number): string {
   if (!seconds) return "—";
@@ -50,6 +51,15 @@ export default function ProxmoxPage() {
     bridge: "vmbr0",
   });
   const [creating, setCreating] = useState(false);
+
+  const [snapTarget, setSnapTarget] = useState<AggregatedResource | null>(null);
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [snapLoading, setSnapLoading] = useState(false);
+  const [snapError, setSnapError] = useState("");
+  const [newSnapName, setNewSnapName] = useState("");
+  const [newSnapDesc, setNewSnapDesc] = useState("");
+  const [newSnapRam, setNewSnapRam] = useState(false);
+  const [snapBusy, setSnapBusy] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -166,6 +176,97 @@ export default function ProxmoxPage() {
       setError(err instanceof Error ? err.message : "Erreur");
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function openSnapshots(r: AggregatedResource) {
+    setSnapTarget(r);
+    setSnapError("");
+    setNewSnapName("");
+    setNewSnapDesc("");
+    setNewSnapRam(false);
+    setSnapLoading(true);
+    try {
+      const res = await fetch(
+        `/api/proxmox/${r.hostId}/snapshots?node=${r.node}&type=${r.type}&vmid=${r.vmid}`
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setSnapshots(data.snapshots);
+    } catch (err) {
+      setSnapError(err instanceof Error ? err.message : "Erreur");
+    } finally {
+      setSnapLoading(false);
+    }
+  }
+
+  async function createSnapshot(e: React.FormEvent) {
+    e.preventDefault();
+    if (!snapTarget) return;
+    setSnapBusy("create");
+    setSnapError("");
+    try {
+      const res = await fetch(`/api/proxmox/${snapTarget.hostId}/snapshots`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          node: snapTarget.node,
+          type: snapTarget.type,
+          vmid: snapTarget.vmid,
+          name: newSnapName,
+          description: newSnapDesc || undefined,
+          includeRamState: newSnapRam,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      await openSnapshots(snapTarget);
+    } catch (err) {
+      setSnapError(err instanceof Error ? err.message : "Erreur");
+    } finally {
+      setSnapBusy(null);
+    }
+  }
+
+  async function rollbackSnapshot(name: string) {
+    if (!snapTarget) return;
+    if (!confirm(`Revenir à l'état du snapshot « ${name} » ? Les changements depuis seront perdus.`)) return;
+    setSnapBusy(`rollback-${name}`);
+    setSnapError("");
+    try {
+      const res = await fetch(`/api/proxmox/${snapTarget.hostId}/snapshots/${encodeURIComponent(name)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ node: snapTarget.node, type: snapTarget.type, vmid: snapTarget.vmid, action: "rollback" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      await openSnapshots(snapTarget);
+      loadAll();
+    } catch (err) {
+      setSnapError(err instanceof Error ? err.message : "Erreur");
+    } finally {
+      setSnapBusy(null);
+    }
+  }
+
+  async function deleteSnapshot(name: string) {
+    if (!snapTarget) return;
+    if (!confirm(`Supprimer le snapshot « ${name} » ?`)) return;
+    setSnapBusy(`delete-${name}`);
+    setSnapError("");
+    try {
+      const res = await fetch(
+        `/api/proxmox/${snapTarget.hostId}/snapshots/${encodeURIComponent(name)}?node=${snapTarget.node}&type=${snapTarget.type}&vmid=${snapTarget.vmid}`,
+        { method: "DELETE" }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      await openSnapshots(snapTarget);
+    } catch (err) {
+      setSnapError(err instanceof Error ? err.message : "Erreur");
+    } finally {
+      setSnapBusy(null);
     }
   }
 
@@ -431,6 +532,12 @@ export default function ProxmoxPage() {
                       </>
                     )}
                     <button
+                      onClick={() => openSnapshots(r)}
+                      className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+                    >
+                      Snapshots
+                    </button>
+                    <button
                       onClick={() => deleteVm(r)}
                       disabled={pending === `${r.vmid}-delete`}
                       className="rounded border border-red-900 px-2 py-0.5 text-xs text-red-300 hover:bg-red-950/40"
@@ -442,6 +549,95 @@ export default function ProxmoxPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {snapTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setSnapTarget(null)}>
+          <div
+            className="max-h-[85vh] w-full max-w-lg overflow-auto rounded border border-neutral-800 bg-neutral-900 p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">
+                Snapshots — {snapTarget.name || `#${snapTarget.vmid}`}
+              </h2>
+              <button onClick={() => setSnapTarget(null)} className="text-neutral-400 hover:text-neutral-200">
+                ✕
+              </button>
+            </div>
+
+            {snapError && <p className="mb-2 text-sm text-red-400">{snapError}</p>}
+
+            <form onSubmit={createSnapshot} className="mb-4 space-y-2 rounded border border-neutral-800 p-3">
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  value={newSnapName}
+                  onChange={(e) => setNewSnapName(e.target.value)}
+                  placeholder="Nom du snapshot"
+                  required
+                  className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm"
+                />
+                <input
+                  value={newSnapDesc}
+                  onChange={(e) => setNewSnapDesc(e.target.value)}
+                  placeholder="Description (optionnel)"
+                  className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm"
+                />
+              </div>
+              {snapTarget.type === "qemu" && (
+                <label className="flex items-center gap-2 text-xs text-neutral-400">
+                  <input type="checkbox" checked={newSnapRam} onChange={(e) => setNewSnapRam(e.target.checked)} />
+                  Inclure l&apos;état de la RAM (VM en cours d&apos;exécution)
+                </label>
+              )}
+              <button
+                type="submit"
+                disabled={snapBusy === "create"}
+                className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium hover:bg-blue-500 disabled:opacity-50"
+              >
+                {snapBusy === "create" ? "Création..." : "Créer un snapshot"}
+              </button>
+            </form>
+
+            {snapLoading ? (
+              <p className="text-sm text-neutral-500">Chargement...</p>
+            ) : snapshots.length === 0 ? (
+              <p className="text-sm text-neutral-500">Aucun snapshot pour cette machine.</p>
+            ) : (
+              <ul className="divide-y divide-neutral-800">
+                {snapshots.map((s) => (
+                  <li key={s.name} className="flex items-center justify-between gap-3 py-2 text-sm">
+                    <div className="min-w-0">
+                      <p className="truncate text-neutral-200">
+                        {s.name} {s.vmstate ? <span className="text-xs text-neutral-500">(avec RAM)</span> : null}
+                      </p>
+                      {s.description && <p className="truncate text-xs text-neutral-500">{s.description}</p>}
+                      {s.snaptime && (
+                        <p className="text-xs text-neutral-500">{new Date(s.snaptime * 1000).toLocaleString()}</p>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      <button
+                        onClick={() => rollbackSnapshot(s.name)}
+                        disabled={!!snapBusy}
+                        className="rounded border border-neutral-600 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800 disabled:opacity-50"
+                      >
+                        {snapBusy === `rollback-${s.name}` ? "..." : "Restaurer"}
+                      </button>
+                      <button
+                        onClick={() => deleteSnapshot(s.name)}
+                        disabled={!!snapBusy}
+                        className="rounded border border-red-900 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50"
+                      >
+                        {snapBusy === `delete-${s.name}` ? "..." : "Supprimer"}
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       )}
     </div>

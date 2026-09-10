@@ -149,3 +149,9 @@ export async function deleteProxyHost(id: number): Promise<void> {
 export async function setProxyHostEnabled(id: number, enabled: boolean): Promise<void> {
   await npmFetch(`/api/nginx/proxy-hosts/${id}/${enabled ? "enable" : "disable"}`, { method: "POST" });
 }
+
+/** Triggers NPM's own Let's Encrypt renewal for a certificate it manages — a no-op if the
+ * certificate isn't due yet, since NPM/certbot only actually renews within ~30 days of expiry. */
+export async function renewCertificate(certificateId: number): Promise<void> {
+  await npmFetch(`/api/nginx/certificates/${certificateId}/renew`, { method: "POST" });
+}

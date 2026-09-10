@@ -10,6 +10,7 @@ type ProxyHost = {
   forwardPort: number;
   sslForced: boolean;
   enabled: boolean;
+  certificateId: number | null;
 };
 
 const INPUT_CLASS = "w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100";
@@ -29,6 +30,7 @@ export default function ProxyPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [renewing, setRenewing] = useState<number | null>(null);
 
   function loadConfig() {
     fetch("/api/settings/npm")
@@ -118,6 +120,21 @@ export default function ProxyPage() {
     if (!confirm(`Supprimer la redirection pour ${host.domainNames.join(", ")} ?`)) return;
     await fetch(`/api/npm/hosts/${host.id}`, { method: "DELETE" });
     loadHosts();
+  }
+
+  async function renewCert(host: ProxyHost) {
+    if (!host.certificateId) return;
+    setRenewing(host.certificateId);
+    setError("");
+    try {
+      const res = await fetch(`/api/npm/certificates/${host.certificateId}/renew`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setRenewing(null);
+    }
   }
 
   return (
@@ -256,6 +273,15 @@ export default function ProxyPage() {
                       >
                         {h.enabled ? "Désactiver" : "Activer"}
                       </button>
+                      {!!h.certificateId && (
+                        <button
+                          onClick={() => renewCert(h)}
+                          disabled={renewing === h.certificateId}
+                          className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800 disabled:opacity-50"
+                        >
+                          {renewing === h.certificateId ? "Renouvellement..." : "Renouveler le certificat"}
+                        </button>
+                      )}
                       <button
                         onClick={() => removeHost(h)}
                         className="rounded border border-neutral-700 px-2 py-0.5 text-xs text-red-400 hover:bg-neutral-800"

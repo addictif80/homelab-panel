@@ -141,6 +141,44 @@ export type NewContainerSpec = {
   restartPolicy: string;
 };
 
+export type ImageUpdateStatus = { containerId: string; name: string; image: string; updateAvailable: boolean };
+
+/**
+ * Pulls each running container's image fresh (grouped so a shared image is only pulled once)
+ * and compares the resulting image ID against the one the container actually started from —
+ * a `:latest`-style tag can't be compared to itself, so the "before" ID has to be captured from
+ * the running container, not from the tag, before the pull overwrites what the tag points to.
+ * Non-destructive: pulling never touches the running container, only a later recreate does.
+ */
+export async function checkForUpdates(hostId: number): Promise<ImageUpdateStatus[]> {
+  const containers = (await listContainers(hostId)).filter((c) => c.state === "running");
+  const byImage = new Map<string, DockerContainer[]>();
+  for (const c of containers) {
+    if (!byImage.has(c.image)) byImage.set(c.image, []);
+    byImage.get(c.image)!.push(c);
+  }
+
+  const results: ImageUpdateStatus[] = [];
+  for (const [image, group] of byImage) {
+    try {
+      const currentRes = await execOnHost(hostId, `docker inspect --format '{{.Image}}' ${shellQuote(group[0].id)}`);
+      const currentId = currentRes.stdout.trim();
+
+      const pullRes = await execOnHost(hostId, `docker pull ${shellQuote(image)}`);
+      if (pullRes.code !== 0) throw new Error(pullRes.stderr || "Échec du pull.");
+
+      const latestRes = await execOnHost(hostId, `docker inspect --format '{{.Id}}' ${shellQuote(image)}`);
+      const latestId = latestRes.stdout.trim();
+
+      const updateAvailable = !!currentId && !!latestId && currentId !== latestId;
+      for (const c of group) results.push({ containerId: c.id, name: c.name, image, updateAvailable });
+    } catch {
+      for (const c of group) results.push({ containerId: c.id, name: c.name, image, updateAvailable: false });
+    }
+  }
+  return results;
+}
+
 export async function runNewContainer(hostId: number, spec: NewContainerSpec): Promise<string> {
   const args = ["run", "-d"];
   if (spec.name) args.push("--name", shellQuote(spec.name));
