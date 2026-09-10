@@ -155,9 +155,9 @@ export function createFreeboxClient(config: Record<string, string>, secret: Reco
   return {
     async getStatus(): Promise<RouterStatus> {
       const conn = (await api("/connection/")) as { ipv4?: string; state?: string };
-      const lanInterfaces = (await api("/lan/browser/pub/")) as { name: string }[];
+      const interfaces = (await api("/lan/browser/interfaces/")) as { name: string }[];
       let deviceCount = 0;
-      for (const iface of lanInterfaces) {
+      for (const iface of interfaces) {
         const hosts = (await api(`/lan/browser/${encodeURIComponent(iface.name)}/`)) as { active?: boolean }[];
         deviceCount += hosts.filter((h) => h.active).length;
       }
@@ -165,9 +165,13 @@ export function createFreeboxClient(config: Record<string, string>, secret: Reco
     },
 
     async listDevices(): Promise<ConnectedDevice[]> {
-      const lanInterfaces = (await api("/lan/browser/pub/")) as { name: string }[];
+      // /lan/browser/interfaces/ lists the actual LAN interfaces (e.g. "pub", "wifi") — each
+      // one's own /lan/browser/{name}/ then returns its connected hosts. (A previous version of
+      // this code treated "pub" itself as if it were that interface list, then tried to re-query
+      // using host names as interface names, which the Freebox rightly rejected.)
+      const interfaces = (await api("/lan/browser/interfaces/")) as { name: string }[];
       const devices: ConnectedDevice[] = [];
-      for (const iface of lanInterfaces) {
+      for (const iface of interfaces) {
         const hosts = (await api(`/lan/browser/${encodeURIComponent(iface.name)}/`)) as {
           id: string;
           primary_name?: string;
