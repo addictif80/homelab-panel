@@ -9,6 +9,7 @@ export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
+  const [trustDevice, setTrustDevice] = useState(false);
   const [pendingToken, setPendingToken] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -50,7 +51,7 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/login/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pendingToken, code }),
+        body: JSON.stringify({ pendingToken, code, trustDevice }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Erreur");
@@ -117,6 +118,15 @@ export default function LoginPage() {
                 autoFocus
               />
             </div>
+            <label className="flex items-center gap-2 text-sm text-neutral-300">
+              <input
+                type="checkbox"
+                checked={trustDevice}
+                onChange={(e) => setTrustDevice(e.target.checked)}
+                className="h-4 w-4 rounded border-neutral-700 bg-neutral-800"
+              />
+              Se souvenir de cet appareil pendant 30 jours
+            </label>
             {error && <p className="text-sm text-red-400">{error}</p>}
             <button type="submit" disabled={loading} className="btn-primary w-full py-2">
               Se connecter

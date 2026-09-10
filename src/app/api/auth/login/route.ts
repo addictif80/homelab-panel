@@ -5,7 +5,11 @@ import {
   isLockedOut,
   recordLoginAttempt,
   createPending2faToken,
+  createSessionToken,
+  SESSION_COOKIE_NAME,
+  SESSION_MAX_AGE,
 } from "@/lib/auth";
+import { isTrustedDevice, TRUSTED_DEVICE_COOKIE_NAME } from "@/lib/trustedDevices";
 import { logAudit } from "@/lib/db";
 
 function clientIp(req: NextRequest): string {
@@ -44,6 +48,21 @@ export async function POST(req: NextRequest) {
         { error: "La 2FA n'est pas encore configurée pour ce compte." },
         { status: 403 }
       );
+    }
+
+    const trustedToken = req.cookies.get(TRUSTED_DEVICE_COOKIE_NAME)?.value;
+    if (isTrustedDevice(username, trustedToken)) {
+      const sessionToken = await createSessionToken(username);
+      logAudit("login.success_trusted_device", username, ip);
+      const res = NextResponse.json({ ok: true, trustedDevice: true });
+      res.cookies.set(SESSION_COOKIE_NAME, sessionToken, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "lax",
+        maxAge: SESSION_MAX_AGE,
+        path: "/",
+      });
+      return res;
     }
 
     const pendingToken = await createPending2faToken(username);

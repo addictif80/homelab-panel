@@ -9,6 +9,7 @@ import {
   recordLoginAttempt,
 } from "@/lib/auth";
 import { decryptTotpSecret, verifyTotpCode } from "@/lib/totp";
+import { createTrustedDevice, TRUSTED_DEVICE_COOKIE_NAME, TRUSTED_DEVICE_MAX_AGE } from "@/lib/trustedDevices";
 import { logAudit } from "@/lib/db";
 
 function clientIp(req: NextRequest): string {
@@ -18,7 +19,7 @@ function clientIp(req: NextRequest): string {
 export async function POST(req: NextRequest) {
   try {
     const ip = clientIp(req);
-    const { pendingToken, code } = await req.json();
+    const { pendingToken, code, trustDevice } = await req.json();
 
     const username = pendingToken ? await verifyPending2faToken(pendingToken) : null;
     if (!username) {
@@ -58,6 +59,19 @@ export async function POST(req: NextRequest) {
       maxAge: SESSION_MAX_AGE,
       path: "/",
     });
+
+    if (trustDevice) {
+      const label = req.headers.get("user-agent")?.slice(0, 80);
+      const trustToken = createTrustedDevice(username, label);
+      res.cookies.set(TRUSTED_DEVICE_COOKIE_NAME, trustToken, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "lax",
+        maxAge: TRUSTED_DEVICE_MAX_AGE,
+        path: "/",
+      });
+    }
+
     return res;
   } catch (err) {
     console.error("POST /api/auth/login/verify failed:", err);
