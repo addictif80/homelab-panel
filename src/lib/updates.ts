@@ -130,18 +130,33 @@ function finishJob(jobId: string, status: "success" | "failed", exitCode: number
  * connection — the caller gets a job id back immediately and can poll getUpdateJob/
  * getLatestUpdateJob to follow progress, including after navigating away and back.
  */
-export function startUpdateJob(hostId: number, mode: UpdateMode, rawCommand: string): string {
+export function startUpdateJob(
+  hostId: number,
+  mode: UpdateMode,
+  rawCommand: string,
+  onFinished?: (status: "success" | "failed") => void
+): string {
   const jobId = randomUUID();
   getDb()
     .prepare(`INSERT INTO update_jobs (id, host_id, mode, status, log) VALUES (?, ?, ?, 'running', '')`)
     .run(jobId, hostId, mode);
 
-  runJobInBackground(jobId, hostId, rawCommand);
+  runJobInBackground(jobId, hostId, rawCommand, onFinished);
 
   return jobId;
 }
 
-function runJobInBackground(jobId: string, hostId: number, rawCommand: string) {
+function runJobInBackground(
+  jobId: string,
+  hostId: number,
+  rawCommand: string,
+  onFinished?: (status: "success" | "failed") => void
+) {
+  const finish = (status: "success" | "failed", exitCode: number | null) => {
+    finishJob(jobId, status, exitCode);
+    onFinished?.(status);
+  };
+
   let config;
   let command: string;
   let stdinPassword: string | null;
@@ -150,7 +165,7 @@ function runJobInBackground(jobId: string, hostId: number, rawCommand: string) {
     ({ command, stdinPassword } = buildPrivilegedCommand(hostId, rawCommand));
   } catch (err) {
     appendJobLog(jobId, `Erreur: ${err instanceof Error ? err.message : "inconnue"}\n`);
-    finishJob(jobId, "failed", null);
+    finish("failed", null);
     return;
   }
 
@@ -160,7 +175,7 @@ function runJobInBackground(jobId: string, hostId: number, rawCommand: string) {
     conn.exec(command, (err, stream) => {
       if (err) {
         appendJobLog(jobId, `Erreur: ${err.message}\n`);
-        finishJob(jobId, "failed", null);
+        finish("failed", null);
         conn.end();
         return;
       }
@@ -168,7 +183,7 @@ function runJobInBackground(jobId: string, hostId: number, rawCommand: string) {
       stream.on("data", (data: Buffer) => appendJobLog(jobId, data.toString("utf8")));
       stream.stderr.on("data", (data: Buffer) => appendJobLog(jobId, data.toString("utf8")));
       stream.on("close", (code: number) => {
-        finishJob(jobId, code === 0 ? "success" : "failed", code);
+        finish(code === 0 ? "success" : "failed", code);
         conn.end();
       });
     });
@@ -176,7 +191,7 @@ function runJobInBackground(jobId: string, hostId: number, rawCommand: string) {
 
   conn.on("error", (err) => {
     appendJobLog(jobId, `Erreur: ${err.message}\n`);
-    finishJob(jobId, "failed", null);
+    finish("failed", null);
   });
 
   conn.connect(config);

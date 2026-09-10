@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import MaintenancePlansPanel from "@/components/MaintenancePlansPanel";
 
 type Host = {
   id: number;
@@ -181,6 +182,8 @@ export default function UpdatesPage() {
           </button>
         </div>
       </div>
+
+      <MaintenancePlansPanel />
 
       <div className="space-y-3">
         {hosts.map((h) => {

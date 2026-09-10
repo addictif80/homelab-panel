@@ -214,6 +214,28 @@ function migrate(db: Database.Database) {
       ignored_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS maintenance_plans (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      host_ids_json TEXT NOT NULL,
+      mode TEXT NOT NULL DEFAULT 'apply' CHECK (mode IN ('dry-run','apply')),
+      allow_auto_reboot INTEGER NOT NULL DEFAULT 0,
+      delay_seconds INTEGER NOT NULL DEFAULT 60,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS maintenance_runs (
+      id TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL REFERENCES maintenance_plans(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','success','failed')),
+      current_index INTEGER NOT NULL DEFAULT 0,
+      job_ids_json TEXT NOT NULL DEFAULT '[]',
+      started_at TEXT NOT NULL DEFAULT (datetime('now')),
+      finished_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_maintenance_runs_plan ON maintenance_runs(plan_id, started_at DESC);
+
     CREATE TABLE IF NOT EXISTS audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       action TEXT NOT NULL,
