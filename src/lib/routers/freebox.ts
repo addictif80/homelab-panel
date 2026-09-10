@@ -1,4 +1,6 @@
 import { createHmac } from "crypto";
+import https from "https";
+import http from "http";
 import { getCurrentVersion } from "../version";
 import type {
   RouterProviderClient,
@@ -13,12 +15,64 @@ const APP_ID = "fr.homelabpanel.app";
 const APP_NAME = "Homelab Panel";
 const DEVICE_NAME = "Homelab Panel";
 
+/**
+ * Freebox OS serves its API over HTTPS with a certificate chained to Freebox's own root CA,
+ * which isn't in Node's (or most systems') default trust store — Node's global `fetch` rejects
+ * it outright before any response comes back, surfacing as an opaque "fetch failed". Using
+ * `https.request` directly with `rejectUnauthorized: false` sidesteps that, the same way
+ * lib/proxmox.ts and lib/cyberpanel.ts already do for their own self-signed certs.
+ */
+function requestJson(url: string, options: { method?: string; headers?: Record<string, string>; body?: string } = {}): Promise<unknown> {
+  const parsed = new URL(url);
+  const transport = parsed.protocol === "http:" ? http : https;
+
+  return new Promise((resolve, reject) => {
+    const req = transport.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port || (parsed.protocol === "http:" ? 80 : 443),
+        path: `${parsed.pathname}${parsed.search}`,
+        method: options.method || "GET",
+        rejectUnauthorized: false,
+        headers: {
+          ...(options.body
+            ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(options.body) }
+            : {}),
+          ...options.headers,
+        },
+        timeout: 15_000,
+      },
+      (res) => {
+        let raw = "";
+        res.on("data", (chunk) => (raw += chunk));
+        res.on("end", () => {
+          if ((res.statusCode ?? 500) >= 400 && !raw) {
+            reject(new Error(`La Freebox a répondu ${res.statusCode}.`));
+            return;
+          }
+          try {
+            resolve(JSON.parse(raw));
+          } catch {
+            reject(new Error("Réponse Freebox invalide."));
+          }
+        });
+      }
+    );
+    req.on("timeout", () => req.destroy(new Error("Timeout de connexion à la Freebox.")));
+    req.on("error", (err) => reject(new Error(`Connexion à la Freebox impossible : ${err.message}`)));
+    if (options.body) req.write(options.body);
+    req.end();
+  });
+}
+
 async function apiBase(baseUrl: string): Promise<string> {
-  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api_version`);
-  if (!res.ok) throw new Error("Impossible de contacter la Freebox — vérifie l'URL.");
-  const data = (await res.json()) as { api_base_url: string; api_domain: string; https_port: number };
-  // Freebox OS serves its API over HTTPS on its own domain/port even when baseUrl was entered
-  // as the plain LAN address — api_version tells us the real one to use from here on.
+  const data = (await requestJson(`${baseUrl.replace(/\/$/, "")}/api_version`)) as {
+    api_base_url: string;
+    api_domain: string;
+    https_port: number;
+  };
+  // api_version tells us the box's real HTTPS domain/port to use for everything else, even when
+  // baseUrl was entered as the plain LAN address.
   return `https://${data.api_domain}:${data.https_port}${data.api_base_url}v8`;
 }
 
@@ -29,20 +83,19 @@ export type PairingHandle = { apiUrl: string; trackId: number; appToken: string 
  * presses the check button there within the next ~30s (checked via pollPairing). */
 export async function startPairing(baseUrl: string): Promise<PairingHandle> {
   const apiUrl = await apiBase(baseUrl);
-  const res = await fetch(`${apiUrl}/login/authorize/`, {
+  const data = (await requestJson(`${apiUrl}/login/authorize/`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ app_id: APP_ID, app_name: APP_NAME, app_version: getCurrentVersion(), device_name: DEVICE_NAME }),
-  });
-  const data = await res.json();
+  })) as { success: boolean; msg?: string; result: { track_id: number; app_token: string } };
   if (!data.success) throw new Error(data.msg || "Échec de la demande d'appairage.");
   return { apiUrl, trackId: data.result.track_id, appToken: data.result.app_token };
 }
 
 export async function pollPairing(handle: PairingHandle): Promise<"pending" | "granted" | "denied" | "timeout"> {
-  const res = await fetch(`${handle.apiUrl}/login/authorize/${handle.trackId}`);
-  const data = await res.json();
-  return (data.result?.status as "pending" | "granted" | "denied" | "timeout") || "pending";
+  const data = (await requestJson(`${handle.apiUrl}/login/authorize/${handle.trackId}`)) as {
+    result?: { status?: "pending" | "granted" | "denied" | "timeout" };
+  };
+  return data.result?.status || "pending";
 }
 
 /** Holds in-flight pairing attempts between the "start" and "poll" API calls — short-lived (the
@@ -64,20 +117,20 @@ export function discardPairingHandle(sessionId: string): void {
 }
 
 async function openSession(apiUrl: string, appToken: string): Promise<string> {
-  const challengeRes = await fetch(`${apiUrl}/login/`);
-  const challengeData = await challengeRes.json();
+  const challengeData = (await requestJson(`${apiUrl}/login/`)) as {
+    success: boolean;
+    result: { challenge: string };
+  };
   if (!challengeData.success) throw new Error("Impossible d'ouvrir une session Freebox.");
-  const challenge = challengeData.result.challenge as string;
+  const challenge = challengeData.result.challenge;
   const password = createHmac("sha1", appToken).update(challenge).digest("hex");
 
-  const sessionRes = await fetch(`${apiUrl}/login/session/`, {
+  const sessionData = (await requestJson(`${apiUrl}/login/session/`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ app_id: APP_ID, password }),
-  });
-  const sessionData = await sessionRes.json();
+  })) as { success: boolean; msg?: string; result: { session_token: string } };
   if (!sessionData.success) throw new Error(sessionData.msg || "Authentification Freebox refusée.");
-  return sessionData.result.session_token as string;
+  return sessionData.result.session_token;
 }
 
 /**
@@ -88,18 +141,13 @@ async function openSession(apiUrl: string, appToken: string): Promise<string> {
 export function createFreeboxClient(config: Record<string, string>, secret: Record<string, string>): RouterProviderClient {
   const appToken = secret.appToken;
 
-  async function api(path: string, options: RequestInit = {}): Promise<unknown> {
+  async function api(path: string, options: { method?: string; body?: string } = {}): Promise<unknown> {
     const apiUrl = await apiBase(config.baseUrl);
     const sessionToken = await openSession(apiUrl, appToken);
-    const res = await fetch(`${apiUrl}${path}`, {
+    const data = (await requestJson(`${apiUrl}${path}`, {
       ...options,
-      headers: {
-        "X-Fbx-App-Auth": sessionToken,
-        ...(options.body ? { "Content-Type": "application/json" } : {}),
-        ...options.headers,
-      },
-    });
-    const data = await res.json();
+      headers: { "X-Fbx-App-Auth": sessionToken },
+    })) as { success: boolean; msg?: string; result: unknown };
     if (!data.success) throw new Error(data.msg || `Freebox API : erreur sur ${path}`);
     return data.result;
   }
