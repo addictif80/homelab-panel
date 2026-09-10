@@ -126,6 +126,19 @@ export function isMutationBlocked(): boolean {
   return getLicenseStatus().expired;
 }
 
+/** Where this instance's self-update check/download calls go — the same server it activated
+ * against, embedded in license.json at export time. Empty for a seller's own instance/a raw repo
+ * checkout, which have no such server. */
+export function getLicenseServerUrl(): string {
+  return getLicenseConfig().licenseServerUrl;
+}
+
+/** The license key this instance activated with — needed to authenticate an update download the
+ * same way a fresh purchase would, without making the buyer re-enter anything. */
+export function getActivationKey(): string | null {
+  return getLicenseRow().activation_key;
+}
+
 export async function activateWithKey(key: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const trimmed = key.trim();
   if (!trimmed) return { ok: false, error: "Clé requise." };

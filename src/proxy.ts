@@ -7,7 +7,11 @@ const PUBLIC_PATH_PREFIXES = ["/store"];
 const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/store/", "/api/download/"];
 // Carved out of the otherwise auth-gated /api/seller/ prefix: every buyer's own self-hosted
 // instance calls this one endpoint from the outside to activate, with no session of ours.
-const PUBLIC_API_EXACT = ["/api/seller/license/validate"];
+const PUBLIC_API_EXACT = [
+  "/api/seller/license/validate",
+  "/api/seller/releases/latest",
+  "/api/seller/releases/download",
+];
 // Always reachable regardless of trial state — activating (or just checking status) can't
 // itself be blocked by the thing it's meant to unblock.
 const LICENSE_API_PREFIX = "/api/license/";

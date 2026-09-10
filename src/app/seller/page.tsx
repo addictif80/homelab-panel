@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import ReleasesPanel from "@/components/ReleasesPanel";
 
 type Pricing = {
   amountCents: number;
@@ -359,6 +360,8 @@ export default function SellerPage() {
           </table>
         </div>
       </section>
+
+      <ReleasesPanel />
     </div>
   );
 }

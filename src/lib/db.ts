@@ -237,6 +237,23 @@ function migrate(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_maintenance_runs_plan ON maintenance_runs(plan_id, started_at DESC);
 
+    CREATE TABLE IF NOT EXISTS releases (
+      id TEXT PRIMARY KEY,
+      version TEXT NOT NULL,
+      changelog TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS self_update_jobs (
+      id TEXT PRIMARY KEY,
+      from_version TEXT NOT NULL,
+      to_version TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','success','failed')),
+      log TEXT NOT NULL DEFAULT '',
+      started_at TEXT NOT NULL DEFAULT (datetime('now')),
+      finished_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       action TEXT NOT NULL,

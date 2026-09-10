@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import Sidebar from "./Sidebar";
 import TrialBanner from "./TrialBanner";
+import SelfUpdateBanner from "./SelfUpdateBanner";
 
 const NO_SHELL_PATHS = ["/login", "/setup"];
 
@@ -14,6 +15,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex flex-1 flex-col">
       <TrialBanner />
+      <SelfUpdateBanner />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         <main className="flex-1 overflow-auto p-6">{children}</main>
