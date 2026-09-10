@@ -19,6 +19,7 @@ export type Host = {
   update_method: string | null;
   needs_sudo: number;
   proxmox_node: string | null;
+  router_provider: string | null;
   notes: string | null;
 };
 

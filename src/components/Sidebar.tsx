@@ -21,6 +21,7 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string }[] }[
   {
     label: "Réseau",
     items: [
+      { href: "/routers", label: "Box & routeurs" },
       { href: "/tailscale", label: "Tailscale" },
       { href: "/proxy", label: "Reverse proxy" },
       { href: "/dns", label: "DNS" },

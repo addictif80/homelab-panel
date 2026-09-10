@@ -16,6 +16,7 @@ const EDITABLE_FIELDS = [
   "update_method",
   "needs_sudo",
   "proxmox_node",
+  "router_provider",
   "notes",
 ] as const;
 

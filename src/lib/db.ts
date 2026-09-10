@@ -77,6 +77,7 @@ function migrate(db: Database.Database) {
       update_method TEXT,
       needs_sudo INTEGER NOT NULL DEFAULT 1,
       proxmox_node TEXT,
+      router_provider TEXT,
       notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -280,6 +281,9 @@ function migrate(db: Database.Database) {
   }
   if (!hostColumns.some((c) => c.name === "proxmox_node")) {
     db.exec(`ALTER TABLE hosts ADD COLUMN proxmox_node TEXT`);
+  }
+  if (!hostColumns.some((c) => c.name === "router_provider")) {
+    db.exec(`ALTER TABLE hosts ADD COLUMN router_provider TEXT`);
   }
 
   const licenseColumns = db.prepare(`PRAGMA table_info(license)`).all() as { name: string }[];
