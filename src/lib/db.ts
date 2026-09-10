@@ -154,6 +154,14 @@ function migrate(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_backup_runs_plan ON backup_runs(plan_id, started_at DESC);
 
+    CREATE TABLE IF NOT EXISTS license (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      status TEXT NOT NULL DEFAULT 'trial' CHECK (status IN ('trial','activated')),
+      trial_started_at TEXT NOT NULL DEFAULT (datetime('now')),
+      activation_key TEXT,
+      activated_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS sales (
       id TEXT PRIMARY KEY,
       stripe_session_id TEXT UNIQUE NOT NULL,
@@ -171,6 +179,14 @@ function migrate(db: Database.Database) {
       used_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS license_keys (
+      key TEXT PRIMARY KEY,
+      sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      used_at TEXT,
+      used_by_info TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS security_ignored (
       finding_key TEXT PRIMARY KEY,
       host_id INTEGER NOT NULL,
@@ -186,6 +202,10 @@ function migrate(db: Database.Database) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  // Trial clock starts the instant the database is first created — not on some later "first
+  // visit", which would let someone stall the countdown by just not opening the app.
+  db.exec(`INSERT OR IGNORE INTO license (id, status) VALUES (1, 'trial')`);
 
   const hostColumns = db.prepare(`PRAGMA table_info(hosts)`).all() as { name: string }[];
   if (!hostColumns.some((c) => c.name === "needs_sudo")) {

@@ -10,6 +10,7 @@ type Pricing = {
 };
 
 type Sale = { id: string; customerEmail: string; amountCents: number; currency: string; createdAt: string };
+type LicenseKeyRow = { key: string; saleId: string; createdAt: string; usedAt: string | null; usedByInfo: string | null };
 
 const INPUT_CLASS = "w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100";
 
@@ -36,12 +37,16 @@ export default function SellerPage() {
   const [amount, setAmount] = useState("29.00");
   const [productName, setProductName] = useState("Homelab Panel");
   const [productDescription, setProductDescription] = useState("");
+  const [trialDays, setTrialDaysInput] = useState("14");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
   const [sales, setSales] = useState<Sale[] | null>(null);
   const [totalCents, setTotalCents] = useState(0);
   const [resending, setResending] = useState<string | null>(null);
+
+  const [licenseKeys, setLicenseKeys] = useState<LicenseKeyRow[] | null>(null);
+  const [keyTotals, setKeyTotals] = useState({ totalIssued: 0, totalUsed: 0 });
 
   function loadConfig() {
     fetch("/api/seller/config")
@@ -56,6 +61,7 @@ export default function SellerPage() {
           setProductName(d.pricing.productName);
           setProductDescription(d.pricing.productDescription);
         }
+        if (d.trialDays) setTrialDaysInput(String(d.trialDays));
       });
   }
 
@@ -68,9 +74,19 @@ export default function SellerPage() {
       });
   }
 
+  function loadLicenseKeys() {
+    fetch("/api/seller/license-keys")
+      .then((r) => r.json())
+      .then((d) => {
+        setLicenseKeys(d.keys);
+        setKeyTotals({ totalIssued: d.totalIssued, totalUsed: d.totalUsed });
+      });
+  }
+
   useEffect(() => {
     loadConfig();
     loadSales();
+    loadLicenseKeys();
   }, []);
 
   async function saveConfig() {
@@ -87,6 +103,7 @@ export default function SellerPage() {
           currency: "eur",
           productName,
           productDescription,
+          trialDays: Number(trialDays) || undefined,
         }),
       });
       const data = await res.json();
@@ -177,6 +194,16 @@ export default function SellerPage() {
               value={productDescription}
               onChange={(e) => setProductDescription(e.target.value)}
               rows={2}
+              className={INPUT_CLASS}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs text-neutral-400">Durée d&apos;essai (jours)</span>
+            <input
+              type="number"
+              min={1}
+              value={trialDays}
+              onChange={(e) => setTrialDaysInput(e.target.value)}
               className={INPUT_CLASS}
             />
           </label>
@@ -275,6 +302,59 @@ export default function SellerPage() {
                   </td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="space-y-3 rounded border border-neutral-800 bg-neutral-900 p-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-neutral-100">Clés d&apos;activation</h2>
+          <span className="text-sm text-neutral-300">
+            {keyTotals.totalUsed} activée{keyTotals.totalUsed !== 1 ? "s" : ""} / {keyTotals.totalIssued} émise
+            {keyTotals.totalIssued !== 1 ? "s" : ""}
+          </span>
+        </div>
+        <p className="text-xs text-neutral-500">
+          Une clé est générée automatiquement à chaque vente et n&apos;est utilisable qu&apos;une seule fois — la
+          validation se fait côté serveur (une clé déjà consommée est refusée même si elle est réessayée ailleurs).
+        </p>
+        <div className="overflow-hidden rounded border border-neutral-800">
+          <table className="w-full text-sm">
+            <thead className="bg-neutral-950 text-left text-xs text-neutral-500">
+              <tr>
+                <th className="px-3 py-2 font-medium">Clé</th>
+                <th className="px-3 py-2 font-medium">Émise</th>
+                <th className="px-3 py-2 font-medium">Statut</th>
+                <th className="px-3 py-2 font-medium">Utilisée le</th>
+              </tr>
+            </thead>
+            <tbody>
+              {licenseKeys?.map((k) => (
+                <tr key={k.key} className="border-t border-neutral-900">
+                  <td className="px-3 py-2 font-mono text-xs text-neutral-200">{k.key}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-neutral-500">
+                    {new Date(`${k.createdAt}Z`).toLocaleString("fr-FR")}
+                  </td>
+                  <td className="px-3 py-2">
+                    {k.usedAt ? (
+                      <span className="text-emerald-400">Activée</span>
+                    ) : (
+                      <span className="text-neutral-500">Non utilisée</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-neutral-500">
+                    {k.usedAt ? new Date(`${k.usedAt}Z`).toLocaleString("fr-FR") : "—"}
+                  </td>
+                </tr>
+              ))}
+              {licenseKeys?.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-3 py-6 text-center text-neutral-600">
+                    Aucune clé émise pour l&apos;instant.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

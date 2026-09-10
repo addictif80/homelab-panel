@@ -14,7 +14,7 @@ export function createDownloadToken(saleId: string): string {
 
 type TokenRow = { token: string; sale_id: string; expires_at: string; used_at: string | null };
 
-export type RedeemResult = { ok: true } | { ok: false; error: string };
+export type RedeemResult = { ok: true; saleId: string } | { ok: false; error: string };
 
 /** Single-use by design: the very first successful check marks it used, so a second visit to
  * the same link (even the legitimate buyer refreshing the page) is refused. */
@@ -26,5 +26,5 @@ export function redeemDownloadToken(token: string): RedeemResult {
     return { ok: false, error: "Ce lien a expiré." };
   }
   getDb().prepare(`UPDATE download_tokens SET used_at = datetime('now') WHERE token = ?`).run(token);
-  return { ok: true };
+  return { ok: true, saleId: row.sale_id };
 }

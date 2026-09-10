@@ -65,6 +65,7 @@ function formatPrice(pricing: Pricing): string {
 
 export default function StorePage() {
   const [pricing, setPricing] = useState<Pricing | null>(null);
+  const [trialDays, setTrialDays] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("security");
@@ -72,7 +73,10 @@ export default function StorePage() {
   useEffect(() => {
     fetch("/api/store/pricing")
       .then((r) => r.json())
-      .then((d) => setPricing(d.pricing));
+      .then((d) => {
+        setPricing(d.pricing);
+        setTrialDays(d.trialDays);
+      });
   }, []);
 
   async function buy() {
@@ -136,11 +140,11 @@ export default function StorePage() {
                 {loading ? "Redirection..." : "Acheter maintenant"}
               </button>
               <a
-                href="#fonctionnalites"
+                href="/api/store/trial-download"
                 className="rounded border px-6 py-3 text-sm font-semibold"
                 style={{ borderColor: BORDER, color: INK }}
               >
-                Voir les fonctionnalités
+                Essayer gratuitement{trialDays ? ` (${trialDays} jours)` : ""}
               </a>
             </div>
             {error && <p className="mt-3 text-sm text-red-600">{error}</p>}

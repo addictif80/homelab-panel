@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildClientArchive, readArchive } from "@/lib/seller/exportBuild";
 import { getTrialDays } from "@/lib/seller/trialConfig";
+import { logAudit } from "@/lib/db";
 
-/** Lets the owner download the exact archive a buyer would get, without going through Stripe —
- * for verifying the export before actually selling anything. Ships as a trial copy (no key),
- * same as the free trial download. */
+/** No payment, no token — anyone can grab a trial copy. Its trial clock starts the moment its
+ * own database is first created (see db.ts), not at download time. */
 export async function GET(req: NextRequest) {
   const { zipPath, cleanup } = await buildClientArchive({
     trialDays: getTrialDays(),
@@ -12,10 +12,11 @@ export async function GET(req: NextRequest) {
   });
   try {
     const buffer = readArchive(zipPath);
+    logAudit("seller.trial_download");
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
         "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="homelab-panel-test-export.zip"`,
+        "Content-Disposition": `attachment; filename="homelab-panel-essai.zip"`,
       },
     });
   } finally {

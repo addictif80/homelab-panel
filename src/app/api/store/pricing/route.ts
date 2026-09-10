@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { getPricing } from "@/lib/seller/stripe";
+import { getTrialDays } from "@/lib/seller/trialConfig";
 
-/** Public, unauthenticated: the landing page needs the price and product copy, nothing else. */
+/** Public, unauthenticated: the landing page needs the price, product copy, and trial length. */
 export async function GET() {
   const pricing = getPricing();
-  if (!pricing) return NextResponse.json({ pricing: null });
+  const trialDays = getTrialDays();
+  if (!pricing) return NextResponse.json({ pricing: null, trialDays });
   const { amountCents, currency, productName, productDescription } = pricing;
-  return NextResponse.json({ pricing: { amountCents, currency, productName, productDescription } });
+  return NextResponse.json({ pricing: { amountCents, currency, productName, productDescription }, trialDays });
 }

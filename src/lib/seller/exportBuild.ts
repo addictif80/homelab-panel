@@ -20,12 +20,21 @@ const SKIP_DIRS = [
 
 // Everything seller-only (payment, download delivery, the landing page, the URSSAF report) is
 // excluded via SKIP_DIRS above; these are individual files that must never ship either.
-const IGNORE_FILES = [".env", ".env.local", ".env*.local"];
+// license.json is excluded from the plain glob because it's re-written below with this
+// specific export's real trial length / activation key instead of the repo's placeholder.
+const IGNORE_FILES = [".env", ".env.local", ".env*.local", "license.json"];
+
+export type ExportLicenseConfig = {
+  trialDays: number;
+  licenseServerUrl: string;
+  /** Present only for a paid download — the app auto-activates with it on first boot. */
+  preActivatedKey?: string;
+};
 
 /** Zips the project source (minus seller-only code, secrets, and build artifacts) into a temp
  * file and returns its path — caller is responsible for deleting it (and its parent temp dir)
  * once the response has been sent. */
-export async function buildClientArchive(): Promise<{ zipPath: string; cleanup: () => void }> {
+export async function buildClientArchive(license: ExportLicenseConfig): Promise<{ zipPath: string; cleanup: () => void }> {
   const projectRoot = process.cwd();
   const dir = mkdtempSync(path.join(tmpdir(), "homelab-panel-export-"));
   const zipPath = path.join(dir, "homelab-panel.zip");
@@ -45,6 +54,8 @@ export async function buildClientArchive(): Promise<{ zipPath: string; cleanup: 
       ignore: IGNORE_FILES,
       nodir: false,
     });
+
+    archive.append(JSON.stringify(license, null, 2), { name: "license.json" });
 
     archive.finalize();
   });

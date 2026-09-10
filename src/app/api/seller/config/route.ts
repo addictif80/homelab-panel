@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hasStripeSecretKey, hasWebhookSecret, setStripeSecretKey, setWebhookSecret, getPricing, syncPricing } from "@/lib/seller/stripe";
+import { getTrialDays, setTrialDays } from "@/lib/seller/trialConfig";
 
 export async function GET(req: NextRequest) {
   return NextResponse.json({
@@ -7,6 +8,7 @@ export async function GET(req: NextRequest) {
     hasWebhookSecret: hasWebhookSecret(),
     pricing: getPricing(),
     webhookUrl: `${req.nextUrl.origin}/api/store/webhook`,
+    trialDays: getTrialDays(),
   });
 }
 
@@ -18,10 +20,12 @@ export async function PUT(req: NextRequest) {
     currency?: string;
     productName?: string;
     productDescription?: string;
+    trialDays?: number;
   };
 
   if (body.secretKey) setStripeSecretKey(body.secretKey);
   if (body.webhookSecret) setWebhookSecret(body.webhookSecret);
+  if (body.trialDays) setTrialDays(body.trialDays);
 
   if (body.amountCents && body.currency && body.productName) {
     try {

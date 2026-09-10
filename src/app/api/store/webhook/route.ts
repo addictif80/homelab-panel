@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { constructWebhookEvent } from "@/lib/seller/stripe";
 import { recordSale, saleExistsForSession } from "@/lib/seller/sales";
 import { createDownloadToken } from "@/lib/seller/downloadTokens";
+import { createLicenseKey } from "@/lib/seller/licenseKeys";
 import { sendMail } from "@/lib/mail";
 import { buttonEmailHtml } from "@/lib/emailTemplates";
 import { logAudit } from "@/lib/db";
@@ -34,21 +35,22 @@ export async function POST(req: NextRequest) {
       });
       const token = createDownloadToken(sale.id);
       const downloadUrl = `${req.nextUrl.origin}/api/download/${token}`;
+      const license = createLicenseKey(sale.id);
 
       try {
         await sendMail(
           "Ton lien de téléchargement — Homelab Panel",
-          `Merci pour ton achat !\n\nTélécharge ton exemplaire ici (lien à usage unique, valable 7 jours) :\n${downloadUrl}\n\nSi le lien a expiré ou a déjà été utilisé par erreur, réponds à cet email.`,
+          `Merci pour ton achat !\n\nTélécharge ton exemplaire ici (lien à usage unique, valable 7 jours) :\n${downloadUrl}\n\nTa clé d'activation (déjà incluse dans ce téléchargement, mais garde-la de côté) :\n${license.key}\n\nSi tu as déjà une version d'essai en cours ailleurs, tu peux coller cette clé directement dans le panel au lieu de retélécharger.\n\nSi le lien a expiré ou a déjà été utilisé par erreur, réponds à cet email.`,
           email,
           buttonEmailHtml({
-            intro: "Merci pour ton achat ! Ton exemplaire de Homelab Panel est prêt à télécharger.",
+            intro: `Merci pour ton achat ! Ton exemplaire de Homelab Panel est prêt à télécharger.<br><br>Ta clé d'activation (déjà incluse dans ce téléchargement, garde-la de côté) : <strong>${license.key}</strong><br>Si tu as déjà une version d'essai en cours ailleurs, colle cette clé directement dans le panel au lieu de retélécharger.`,
             buttonLabel: "Télécharger mon exemplaire",
             buttonUrl: downloadUrl,
             footerNote: "Lien à usage unique, valable 7 jours. S'il a expiré ou déjà été utilisé par erreur, réponds à cet email.",
           })
         );
       } catch {
-        // The sale and token are recorded either way — worst case, resend manually from /seller.
+        // The sale, token and key are recorded either way — worst case, resend manually from /seller.
       }
 
       logAudit("seller.sale_recorded", sale.id, email);

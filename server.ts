@@ -4,6 +4,7 @@ import { attachSshWebSocketServer } from "./src/server/ssh-ws";
 import { attachLogsWebSocketServer } from "./src/server/logs-ws";
 import { startNotificationScheduler } from "./src/lib/notifications/scheduler";
 import { startBackupScheduler } from "./src/lib/backup/scheduler";
+import { autoActivateFromBundledKey } from "./src/lib/license";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOST || "0.0.0.0";
@@ -21,6 +22,7 @@ app.prepare().then(() => {
   attachLogsWebSocketServer(server);
   startNotificationScheduler();
   startBackupScheduler();
+  autoActivateFromBundledKey().catch(() => {});
 
   server.listen(port, hostname, () => {
     console.log(`Homelab Panel prêt sur http://${hostname}:${port}`);

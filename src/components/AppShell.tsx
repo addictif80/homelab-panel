@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import Sidebar from "./Sidebar";
+import TrialBanner from "./TrialBanner";
 
 const NO_SHELL_PATHS = ["/login", "/setup"];
 
@@ -11,9 +12,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
   return (
-    <div className="flex flex-1">
-      <Sidebar />
-      <main className="flex-1 overflow-auto p-6">{children}</main>
+    <div className="flex flex-1 flex-col">
+      <TrialBanner />
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar />
+        <main className="flex-1 overflow-auto p-6">{children}</main>
+      </div>
     </div>
   );
 }
