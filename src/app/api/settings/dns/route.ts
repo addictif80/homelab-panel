@@ -1,17 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDnsConfig, setDnsConfig, hasDnsToken } from "@/lib/dns";
+import { listZones, addZone } from "@/lib/dns";
+import { DNS_PROVIDERS, type DnsProviderType } from "@/lib/dns/types";
 
 export async function GET() {
-  return NextResponse.json({ config: getDnsConfig(), hasToken: hasDnsToken() });
+  return NextResponse.json({ zones: listZones(), providers: DNS_PROVIDERS });
 }
 
-export async function PUT(req: NextRequest) {
-  const { zoneId, zoneName, token } = (await req.json()) as {
-    zoneId?: string;
-    zoneName?: string;
-    token?: string;
+export async function POST(req: NextRequest) {
+  const { provider, label, config, secret } = (await req.json()) as {
+    provider?: DnsProviderType;
+    label?: string;
+    config?: Record<string, string>;
+    secret?: Record<string, string>;
   };
-  if (!zoneId || !zoneName) return NextResponse.json({ error: "Zone ID et nom de domaine requis." }, { status: 400 });
-  setDnsConfig({ zoneId, zoneName }, token);
-  return NextResponse.json({ ok: true });
+
+  if (!provider || !label || !config || !secret) {
+    return NextResponse.json({ error: "Fournisseur, nom et identifiants requis." }, { status: 400 });
+  }
+  const meta = DNS_PROVIDERS.find((p) => p.id === provider);
+  if (!meta) return NextResponse.json({ error: "Fournisseur inconnu." }, { status: 400 });
+
+  const zone = addZone({ provider, label, config, secret });
+  return NextResponse.json({ zone });
 }
