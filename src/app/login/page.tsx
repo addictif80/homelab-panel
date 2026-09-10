@@ -34,6 +34,12 @@ export default function LoginPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Erreur");
+      if (data.ok && data.trustedDevice) {
+        // This browser already has a valid "remember this device" cookie — the server just
+        // created the session directly, there's no 2FA step to show.
+        router.push("/");
+        return;
+      }
       setPendingToken(data.pendingToken);
       setStep("totp");
     } catch (err) {
