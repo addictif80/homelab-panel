@@ -62,18 +62,28 @@ export function recordLoginAttempt(ip: string, username: string, success: boolea
     .run(ip, username, success ? 1 : 0);
 }
 
+export type UserRole = "admin" | "viewer";
+
 export type AppUser = {
   id: number;
   username: string;
   password_hash: string;
   totp_secret_encrypted: string | null;
   totp_enabled: number;
+  role: UserRole;
 };
 
 export function getUserByUsername(username: string): AppUser | undefined {
   return getDb()
     .prepare(`SELECT * FROM users WHERE username = ?`)
     .get(username) as AppUser | undefined;
+}
+
+export function getUserRole(username: string): UserRole | null {
+  const row = getDb().prepare(`SELECT role FROM users WHERE username = ?`).get(username) as
+    | { role: UserRole }
+    | undefined;
+  return row?.role ?? null;
 }
 
 const PENDING_2FA_TTL_SECONDS = 60 * 5;

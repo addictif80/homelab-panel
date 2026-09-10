@@ -35,6 +35,7 @@ function migrate(db: Database.Database) {
       password_hash TEXT NOT NULL,
       totp_secret_encrypted TEXT,
       totp_enabled INTEGER NOT NULL DEFAULT 0,
+      role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin','viewer')),
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -248,6 +249,13 @@ function migrate(db: Database.Database) {
   // Trial clock starts the instant the database is first created — not on some later "first
   // visit", which would let someone stall the countdown by just not opening the app.
   db.exec(`INSERT OR IGNORE INTO license (id, status) VALUES (1, 'trial')`);
+
+  const userColumns = db.prepare(`PRAGMA table_info(users)`).all() as { name: string }[];
+  if (!userColumns.some((c) => c.name === "role")) {
+    // Existing installs only ever had one account — the person who set the panel up — so it
+    // keeps full access on upgrade rather than being silently downgraded to viewer.
+    db.exec(`ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'`);
+  }
 
   const hostColumns = db.prepare(`PRAGMA table_info(hosts)`).all() as { name: string }[];
   if (!hostColumns.some((c) => c.name === "needs_sudo")) {

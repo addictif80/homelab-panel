@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth";
+import { verifySessionToken, getUserRole, SESSION_COOKIE_NAME } from "@/lib/auth";
 import { isMutationBlocked } from "@/lib/license";
 
 const PUBLIC_PATHS = ["/login", "/setup"];
@@ -48,6 +48,12 @@ export async function proxy(req: NextRequest) {
       { error: "Essai expiré : cette action est désactivée tant que le panel n'est pas activé.", trialExpired: true },
       { status: 403 }
     );
+  }
+
+  // Viewer accounts get read-only access to every API route — including their own logout/session
+  // endpoints, which are GET/POST-safe or explicitly excluded above already.
+  if (pathname.startsWith("/api/") && !SAFE_METHODS.has(req.method) && getUserRole(username) === "viewer") {
+    return NextResponse.json({ error: "Compte en lecture seule : action non autorisée." }, { status: 403 });
   }
 
   const res = NextResponse.next();

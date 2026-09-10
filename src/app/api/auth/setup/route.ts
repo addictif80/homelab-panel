@@ -3,7 +3,8 @@ import { getDb, logAudit } from "@/lib/db";
 import { hashPassword, getUserByUsername } from "@/lib/auth";
 import { generateTotpSecret, encryptTotpSecret, buildOtpAuthQrDataUrl } from "@/lib/totp";
 
-// Mono-user panel: setup is only allowed while no account exists yet.
+// This bootstraps the very first account, which always becomes admin — extra accounts are
+// created afterwards from the admin's own /users page, not through this endpoint.
 export async function POST(req: NextRequest) {
   try {
     const db = getDb();
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
     const passwordHash = hashPassword(password);
 
     db.prepare(
-      `INSERT INTO users (username, password_hash, totp_secret_encrypted, totp_enabled) VALUES (?, ?, ?, 0)`
+      `INSERT INTO users (username, password_hash, totp_secret_encrypted, totp_enabled, role) VALUES (?, ?, ?, 0, 'admin')`
     ).run(username, passwordHash, encryptTotpSecret(totpSecret));
 
     const qrDataUrl = await buildOtpAuthQrDataUrl(username, totpSecret);

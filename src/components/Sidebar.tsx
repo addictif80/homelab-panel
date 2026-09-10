@@ -39,6 +39,7 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string }[] }[
     items: [
       { href: "/inventory", label: "Inventaire & topologie" },
       { href: "/audit", label: "Journal d'audit" },
+      { href: "/users", label: "Comptes" },
     ],
   },
   ...(process.env.NEXT_PUBLIC_SELLER_MODE === "true"
