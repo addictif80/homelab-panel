@@ -152,13 +152,21 @@ export function createFreeboxClient(config: Record<string, string>, secret: Reco
     return data.result;
   }
 
+  // A handful of Freebox endpoints answer `success: true` with a null/missing `result` instead
+  // of an empty list when there's nothing to report (seen in practice on some models/firmwares
+  // for certain LAN interfaces) — treat that the same as an empty array rather than crashing.
+  async function apiList<T>(path: string, options: { method?: string; body?: string } = {}): Promise<T[]> {
+    const result = await api(path, options);
+    return Array.isArray(result) ? (result as T[]) : [];
+  }
+
   return {
     async getStatus(): Promise<RouterStatus> {
       const conn = (await api("/connection/")) as { ipv4?: string; state?: string };
-      const interfaces = (await api("/lan/browser/interfaces/")) as { name: string }[];
+      const interfaces = await apiList<{ name: string }>("/lan/browser/interfaces/");
       let deviceCount = 0;
       for (const iface of interfaces) {
-        const hosts = (await api(`/lan/browser/${encodeURIComponent(iface.name)}/`)) as { active?: boolean }[];
+        const hosts = await apiList<{ active?: boolean }>(`/lan/browser/${encodeURIComponent(iface.name)}/`);
         deviceCount += hosts.filter((h) => h.active).length;
       }
       return { model: "Freebox", uptimeSeconds: null, wanIp: conn.ipv4 ?? null, connectedDevicesCount: deviceCount };
@@ -169,15 +177,15 @@ export function createFreeboxClient(config: Record<string, string>, secret: Reco
       // one's own /lan/browser/{name}/ then returns its connected hosts. (A previous version of
       // this code treated "pub" itself as if it were that interface list, then tried to re-query
       // using host names as interface names, which the Freebox rightly rejected.)
-      const interfaces = (await api("/lan/browser/interfaces/")) as { name: string }[];
+      const interfaces = await apiList<{ name: string }>("/lan/browser/interfaces/");
       const devices: ConnectedDevice[] = [];
       for (const iface of interfaces) {
-        const hosts = (await api(`/lan/browser/${encodeURIComponent(iface.name)}/`)) as {
+        const hosts = await apiList<{
           id: string;
           primary_name?: string;
           l2ident?: { id: string };
           l3connectivities?: { addr: string; active: boolean }[];
-        }[];
+        }>(`/lan/browser/${encodeURIComponent(iface.name)}/`);
         for (const h of hosts) {
           const conn = h.l3connectivities?.find((c) => c.active) || h.l3connectivities?.[0];
           devices.push({
@@ -193,7 +201,7 @@ export function createFreeboxClient(config: Record<string, string>, secret: Reco
     },
 
     async listPortForwards(): Promise<PortForward[]> {
-      const rules = (await api("/fw/redir/")) as {
+      const rules = await apiList<{
         id: number;
         enabled: boolean;
         ip_proto: string;
@@ -202,7 +210,7 @@ export function createFreeboxClient(config: Record<string, string>, secret: Reco
         lan_ip: string;
         lan_port: number;
         comment?: string;
-      }[];
+      }>("/fw/redir/");
       return rules.map((r) => ({
         id: String(r.id),
         protocol: (r.ip_proto as "tcp" | "udp") || "tcp",
