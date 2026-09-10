@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
-type Host = { id: number; name: string; kind: string };
+type Host = { id: number; name: string; kind: string; proxmox_node: string | null };
 type Resource = {
   vmid: number;
   node: string;
@@ -38,6 +38,19 @@ export default function ProxmoxPage() {
   const [verifySsl, setVerifySsl] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
 
+  const [showCreate, setShowCreate] = useState(false);
+  const [createHostId, setCreateHostId] = useState<number | null>(null);
+  const [newVm, setNewVm] = useState({
+    vmid: "",
+    name: "",
+    cores: "2",
+    memoryMb: "2048",
+    diskSpec: "local-lvm:32",
+    isoSpec: "",
+    bridge: "vmbr0",
+  });
+  const [creating, setCreating] = useState(false);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -47,6 +60,7 @@ export default function ProxmoxPage() {
       const physical: Host[] = hostsData.hosts.filter((h: Host) => h.kind === "physical");
       setHosts(physical);
       if (physical.length > 0 && configHostId === null) setConfigHostId(physical[0].id);
+      if (physical.length > 0 && createHostId === null) setCreateHostId(physical[0].id);
 
       const configs = await Promise.all(
         physical.map(async (h) => {
@@ -111,7 +125,51 @@ export default function ProxmoxPage() {
     }
   }
 
-  async function runAction(r: AggregatedResource, action: "start" | "stop" | "shutdown" | "reboot") {
+  async function deleteVm(r: AggregatedResource) {
+    if (!confirm(`Supprimer définitivement ${r.name || `#${r.vmid}`} (${r.type === "qemu" ? "VM" : "LXC"}) ? Cette action est irréversible.`)) {
+      return;
+    }
+    await runAction(r, "delete");
+  }
+
+  async function createVm(e: React.FormEvent) {
+    e.preventDefault();
+    if (!createHostId) return;
+    const node = hosts.find((h) => h.id === createHostId)?.proxmox_node;
+    if (!node) {
+      setError("Ce nœud n'a pas de nom Proxmox renseigné dans l'inventaire.");
+      return;
+    }
+    setCreating(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/proxmox/${createHostId}/vm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          node,
+          vmid: Number(newVm.vmid),
+          name: newVm.name,
+          cores: Number(newVm.cores),
+          memoryMb: Number(newVm.memoryMb),
+          diskSpec: newVm.diskSpec,
+          isoSpec: newVm.isoSpec || undefined,
+          bridge: newVm.bridge,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setShowCreate(false);
+      setNewVm({ vmid: "", name: "", cores: "2", memoryMb: "2048", diskSpec: "local-lvm:32", isoSpec: "", bridge: "vmbr0" });
+      loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function runAction(r: AggregatedResource, action: "start" | "stop" | "shutdown" | "reboot" | "delete") {
     setPending(`${r.vmid}-${action}`);
     try {
       const res = await fetch(`/api/proxmox/${r.hostId}/action`, {
@@ -140,6 +198,12 @@ export default function ProxmoxPage() {
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setShowCreate((s) => !s)}
+            className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1 text-sm text-blue-200 hover:bg-blue-900/60"
+          >
+            + Créer une VM
+          </button>
+          <button
             onClick={() => setShowConfig((s) => !s)}
             className="rounded border border-neutral-700 px-3 py-1 text-sm hover:bg-neutral-800"
           >
@@ -153,6 +217,103 @@ export default function ProxmoxPage() {
           </Link>
         </div>
       </div>
+
+      {showCreate && (
+        <form onSubmit={createVm} className="max-w-2xl space-y-3 rounded border border-neutral-800 p-4">
+          <p className="text-xs text-neutral-400">
+            Crée une VM QEMU avec un disque, une carte réseau et éventuellement un ISO monté — pour tout réglage plus
+            fin (BIOS, disques multiples...), édite-la ensuite depuis l&apos;UI Proxmox elle-même.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="mb-1 block text-xs text-neutral-400">Nœud Proxmox</span>
+              <select
+                value={createHostId ?? ""}
+                onChange={(e) => setCreateHostId(Number(e.target.value))}
+                className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+              >
+                {hosts.map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {h.name} {h.proxmox_node ? `(${h.proxmox_node})` : "— nœud non renseigné"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-neutral-400">VMID</span>
+              <input
+                value={newVm.vmid}
+                onChange={(e) => setNewVm({ ...newVm, vmid: e.target.value })}
+                placeholder="110"
+                className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                required
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-neutral-400">Nom</span>
+              <input
+                value={newVm.name}
+                onChange={(e) => setNewVm({ ...newVm, name: e.target.value })}
+                className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                required
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-neutral-400">Cœurs CPU</span>
+              <input
+                type="number"
+                min={1}
+                value={newVm.cores}
+                onChange={(e) => setNewVm({ ...newVm, cores: e.target.value })}
+                className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-neutral-400">Mémoire (Mo)</span>
+              <input
+                type="number"
+                min={256}
+                value={newVm.memoryMb}
+                onChange={(e) => setNewVm({ ...newVm, memoryMb: e.target.value })}
+                className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-neutral-400">Disque (stockage:taille en Go)</span>
+              <input
+                value={newVm.diskSpec}
+                onChange={(e) => setNewVm({ ...newVm, diskSpec: e.target.value })}
+                placeholder="local-lvm:32"
+                className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-neutral-400">ISO à monter (optionnel)</span>
+              <input
+                value={newVm.isoSpec}
+                onChange={(e) => setNewVm({ ...newVm, isoSpec: e.target.value })}
+                placeholder="local:iso/debian-12.iso"
+                className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-neutral-400">Bridge réseau</span>
+              <input
+                value={newVm.bridge}
+                onChange={(e) => setNewVm({ ...newVm, bridge: e.target.value })}
+                className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+              />
+            </label>
+          </div>
+          <button
+            type="submit"
+            disabled={creating}
+            className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
+          >
+            {creating ? "Création..." : "Créer la VM"}
+          </button>
+        </form>
+      )}
 
       {showConfig && (
         <form onSubmit={saveConfig} className="max-w-md space-y-3 rounded border border-neutral-800 p-4">
@@ -269,6 +430,13 @@ export default function ProxmoxPage() {
                         </button>
                       </>
                     )}
+                    <button
+                      onClick={() => deleteVm(r)}
+                      disabled={pending === `${r.vmid}-delete`}
+                      className="rounded border border-red-900 px-2 py-0.5 text-xs text-red-300 hover:bg-red-950/40"
+                    >
+                      Supprimer
+                    </button>
                   </td>
                 </tr>
               ))}

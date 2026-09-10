@@ -172,3 +172,40 @@ export async function vmAction(
 ) {
   return proxmoxRequest(hostId, `/nodes/${node}/${type}/${vmid}/status/${action}`, "POST");
 }
+
+export async function getVmConfig(hostId: number, node: string, type: "qemu" | "lxc", vmid: number) {
+  return proxmoxRequest(hostId, `/nodes/${node}/${type}/${vmid}/config`);
+}
+
+export async function deleteVm(hostId: number, node: string, type: "qemu" | "lxc", vmid: number) {
+  return proxmoxRequest(hostId, `/nodes/${node}/${type}/${vmid}`, "DELETE");
+}
+
+export type CreateVmInput = {
+  vmid: number;
+  name: string;
+  cores: number;
+  memoryMb: number;
+  /** Proxmox storage spec, e.g. "local-lvm:32" for a 32 GiB disk on the local-lvm storage. */
+  diskSpec: string;
+  /** Proxmox volume spec for an ISO to mount, e.g. "local:iso/debian-12.iso". Omit for none. */
+  isoSpec?: string;
+  bridge: string;
+};
+
+/** Creates a QEMU VM with one disk, one NIC, and an optional mounted ISO — everything else
+ * (BIOS, display, extra disks...) stays at Proxmox's own defaults, editable afterwards in its
+ * own UI for anything more advanced than a homelab VM needs. */
+export async function createVm(hostId: number, node: string, input: CreateVmInput) {
+  const params = new URLSearchParams();
+  params.set("vmid", String(input.vmid));
+  params.set("name", input.name);
+  params.set("cores", String(input.cores));
+  params.set("memory", String(input.memoryMb));
+  params.set("scsihw", "virtio-scsi-pci");
+  params.set("scsi0", input.diskSpec);
+  params.set("net0", `virtio,bridge=${input.bridge}`);
+  params.set("ostype", "l26");
+  if (input.isoSpec) params.set("ide2", `${input.isoSpec},media=cdrom`);
+  return proxmoxRequest(hostId, `/nodes/${node}/qemu`, "POST", params);
+}

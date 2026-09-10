@@ -14,6 +14,7 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string }[] }[
       { href: "/ssh", label: "Terminal SSH" },
       { href: "/updates", label: "Mises à jour" },
       { href: "/files", label: "Explorateur de fichiers" },
+      { href: "/cyberpanel", label: "CyberPanel" },
     ],
   },
   {
