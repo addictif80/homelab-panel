@@ -1,3 +1,4 @@
+import https from "https";
 import { createHash } from "crypto";
 import { getSetting, setSetting } from "./db";
 import { vaultDecrypt, vaultEncrypt } from "./crypto";
@@ -5,7 +6,7 @@ import { vaultDecrypt, vaultEncrypt } from "./crypto";
 const CONFIG_KEY = "cyberpanel_config";
 const PASSWORD_KEY = "cyberpanel_password_encrypted";
 
-export type CyberPanelConfig = { baseUrl: string; adminUser: string };
+export type CyberPanelConfig = { baseUrl: string; adminUser: string; verifySsl?: boolean };
 
 export function getCyberPanelConfig(): CyberPanelConfig | null {
   const raw = getSetting(CONFIG_KEY);
@@ -30,22 +31,62 @@ function authHeader(config: CyberPanelConfig): string {
   return `Basic ${createHash("sha256").update(`${config.adminUser}:${password}`).digest("hex")}`;
 }
 
-async function cyberPanelRequest(controller: string, data: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+/**
+ * CyberPanel's admin UI (and its cloudAPI) runs behind a self-signed TLS certificate by
+ * default — Node's global `fetch` rejects that outright (surfaces as an opaque "fetch failed",
+ * before any HTTP response even comes back), so this uses `https.request` directly instead,
+ * the same way lib/proxmox.ts already does for the same reason.
+ */
+function cyberPanelRequest(controller: string, data: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
   const config = getCyberPanelConfig();
   if (!config) throw new Error("CyberPanel n'est pas configuré.");
 
-  const res = await fetch(`${config.baseUrl.replace(/\/$/, "")}/cloudAPI/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: authHeader(config) },
-    body: JSON.stringify({ serverUserName: config.adminUser, controller, ...data }),
-  });
-  if (!res.ok) throw new Error(`CyberPanel a répondu ${res.status}.`);
+  const url = new URL(`${config.baseUrl.replace(/\/$/, "")}/cloudAPI/`);
+  const payload = JSON.stringify({ serverUserName: config.adminUser, controller, ...data });
 
-  const result = (await res.json()) as Record<string, unknown>;
-  if (result.status === 0) {
-    throw new Error(`CyberPanel : ${result.error_message || "Erreur inconnue."}`);
-  }
-  return result;
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        hostname: url.hostname,
+        port: url.port || 443,
+        path: url.pathname,
+        method: "POST",
+        rejectUnauthorized: config.verifySsl ?? false,
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
+          Authorization: authHeader(config),
+        },
+        timeout: 15_000,
+      },
+      (res) => {
+        let raw = "";
+        res.on("data", (chunk) => (raw += chunk));
+        res.on("end", () => {
+          if ((res.statusCode ?? 500) >= 400) {
+            reject(new Error(`CyberPanel a répondu ${res.statusCode}: ${raw || res.statusMessage}`));
+            return;
+          }
+          let result: Record<string, unknown>;
+          try {
+            result = JSON.parse(raw);
+          } catch {
+            reject(new Error("Réponse CyberPanel invalide."));
+            return;
+          }
+          if (result.status === 0) {
+            reject(new Error(`CyberPanel : ${result.error_message || "Erreur inconnue."}`));
+            return;
+          }
+          resolve(result);
+        });
+      }
+    );
+    req.on("timeout", () => req.destroy(new Error("Timeout de connexion à CyberPanel.")));
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
 }
 
 function parseDataField(result: Record<string, unknown>): unknown[] {

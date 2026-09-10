@@ -6,15 +6,16 @@ export async function GET() {
 }
 
 export async function PUT(req: NextRequest) {
-  const { baseUrl, adminUser, password } = (await req.json()) as {
+  const { baseUrl, adminUser, password, verifySsl } = (await req.json()) as {
     baseUrl?: string;
     adminUser?: string;
     password?: string;
+    verifySsl?: boolean;
   };
   if (!baseUrl || !adminUser) {
     return NextResponse.json({ error: "URL et utilisateur admin requis." }, { status: 400 });
   }
-  setCyberPanelConfig({ baseUrl, adminUser }, password);
+  setCyberPanelConfig({ baseUrl, adminUser, verifySsl: !!verifySsl }, password);
 
   try {
     await testCyberPanelConnection();

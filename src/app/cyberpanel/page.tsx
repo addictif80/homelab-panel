@@ -14,6 +14,7 @@ export default function CyberPanelPage() {
   const [adminUser, setAdminUser] = useState("admin");
   const [password, setPassword] = useState("");
   const [hasPassword, setHasPassword] = useState(false);
+  const [verifySsl, setVerifySsl] = useState(false);
 
   const [websites, setWebsites] = useState<Website[] | null>(null);
   const [packages, setPackages] = useState<string[]>([]);
@@ -30,6 +31,7 @@ export default function CyberPanelPage() {
         if (d.config) {
           setBaseUrl(d.config.baseUrl);
           setAdminUser(d.config.adminUser);
+          setVerifySsl(!!d.config.verifySsl);
         }
         setHasPassword(d.hasPassword);
       });
@@ -64,7 +66,7 @@ export default function CyberPanelPage() {
     const res = await fetch("/api/settings/cyberpanel", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ baseUrl, adminUser, password: password || undefined }),
+      body: JSON.stringify({ baseUrl, adminUser, password: password || undefined, verifySsl }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -140,6 +142,14 @@ export default function CyberPanelPage() {
               className={INPUT_CLASS}
             />
           </label>
+          <label className="flex items-center gap-2 text-sm text-neutral-300">
+            <input type="checkbox" checked={verifySsl} onChange={(e) => setVerifySsl(e.target.checked)} />
+            Vérifier le certificat TLS
+          </label>
+          <p className="text-xs text-neutral-500">
+            CyberPanel utilise un certificat auto-signé par défaut sur son port d&apos;administration (8090) — laisse
+            cette case décochée sauf si tu as installé un vrai certificat dessus, sinon la connexion échouera.
+          </p>
           <button onClick={saveConfig} className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60">
             Enregistrer et tester la connexion
           </button>
