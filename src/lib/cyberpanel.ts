@@ -97,16 +97,39 @@ function parseDataField(result: Record<string, unknown>): unknown[] {
 
 export type CyberPanelWebsite = { domain: string; adminEmail?: string; state?: string; package?: string };
 
+const MAX_PAGES = 50; // safety cap — a real CyberPanel install has nowhere near this many pages
+
+/** fetchWebsites is paginated (same as CyberPanel's own "List Websites" screen) — a single
+ * page: 1 call only returns whatever fits on the first page, silently hiding the rest once a
+ * server has more sites than that. This walks pages until one comes back empty. */
 export async function listWebsites(): Promise<CyberPanelWebsite[]> {
-  const result = await cyberPanelRequest("fetchWebsites", { page: 1 });
-  return (parseDataField(result) as Record<string, unknown>[])
-    .filter((w) => typeof w.domain === "string")
-    .map((w) => ({
-      domain: w.domain as string,
-      adminEmail: w.adminEmail as string | undefined,
-      state: w.state as string | undefined,
-      package: w.package as string | undefined,
-    }));
+  const sites: Record<string, unknown>[] = [];
+  const seenDomains = new Set<string>();
+
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const result = await cyberPanelRequest("fetchWebsites", { page });
+    const pageSites = (parseDataField(result) as Record<string, unknown>[]).filter((w) => typeof w.domain === "string");
+    if (pageSites.length === 0) break;
+
+    let addedNew = false;
+    for (const site of pageSites) {
+      const domain = site.domain as string;
+      if (seenDomains.has(domain)) continue;
+      seenDomains.add(domain);
+      sites.push(site);
+      addedNew = true;
+    }
+    // Some CyberPanel versions clamp an out-of-range page back to the last real one instead of
+    // returning an empty list — if a page adds nothing new, we've already seen everything.
+    if (!addedNew) break;
+  }
+
+  return sites.map((w) => ({
+    domain: w.domain as string,
+    adminEmail: w.adminEmail as string | undefined,
+    state: w.state as string | undefined,
+    package: w.package as string | undefined,
+  }));
 }
 
 export async function createWebsite(input: {
