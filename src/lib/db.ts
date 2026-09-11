@@ -216,6 +216,14 @@ function migrate(db: Database.Database) {
       ignored_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    -- Tracks IPs blocked from the Security Center as a single infra-wide registry: an IP is
+    -- blocked/unblocked everywhere at once (see lib/firewall.ts), so there's no per-host state to
+    -- model here, just "is this IP currently on the list".
+    CREATE TABLE IF NOT EXISTS blocked_ips (
+      ip TEXT PRIMARY KEY,
+      blocked_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS maintenance_plans (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,

@@ -101,6 +101,8 @@ export default function SecurityPage() {
     targetHostId: number;
   } | null>(null);
   const [blocking, setBlocking] = useState(false);
+  const [blockedIps, setBlockedIps] = useState<{ ip: string; blockedAt: string }[]>([]);
+  const [unblocking, setUnblocking] = useState<string | null>(null);
 
   const runScan = useCallback(async () => {
     setLoading(true);
@@ -117,9 +119,36 @@ export default function SecurityPage() {
     }
   }, []);
 
+  const refreshBlockedIps = useCallback(async () => {
+    const res = await fetch("/api/security/blocked-ips");
+    if (!res.ok) return;
+    const data = await res.json();
+    setBlockedIps(data.blockedIps);
+  }, []);
+
   useEffect(() => {
     runScan();
-  }, [runScan]);
+    refreshBlockedIps();
+  }, [runScan, refreshBlockedIps]);
+
+  async function unblockIp(ip: string) {
+    setUnblocking(ip);
+    try {
+      const res = await fetch("/api/security/blocked-ips/unblock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ip }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Échec du déblocage.");
+      setStatusMsg(data.message);
+      await refreshBlockedIps();
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setUnblocking(null);
+    }
+  }
 
   async function applyFix() {
     if (!confirming) return;
@@ -168,6 +197,7 @@ export default function SecurityPage() {
       } else {
         setResults((prev) => (prev ? prev.map((h) => (h.hostId === targetHostId ? data.rescan : h)) : prev));
       }
+      await refreshBlockedIps();
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : "Erreur.");
     } finally {
@@ -305,6 +335,36 @@ export default function SecurityPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {blockedIps.length > 0 && (
+        <div className="rounded border border-neutral-800 bg-neutral-900">
+          <div className="border-b border-neutral-800 px-4 py-3">
+            <h2 className="text-sm font-semibold text-neutral-100">IPs bloquées ({blockedIps.length})</h2>
+            <p className="mt-0.5 text-xs text-neutral-500">
+              Débloquer retire la règle sur toutes les machines de l&apos;infrastructure d&apos;un coup.
+            </p>
+          </div>
+          <ul className="divide-y divide-neutral-800">
+            {blockedIps.map((entry) => (
+              <li key={entry.ip} className="flex items-center justify-between px-4 py-2.5">
+                <div>
+                  <span className="font-mono text-sm text-neutral-100">{entry.ip}</span>
+                  <span className="ml-2 text-xs text-neutral-500">
+                    Bloquée le {new Date(entry.blockedAt).toLocaleString("fr-FR")}
+                  </span>
+                </div>
+                <button
+                  onClick={() => unblockIp(entry.ip)}
+                  disabled={unblocking === entry.ip}
+                  className="rounded border border-neutral-600 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800 disabled:opacity-50"
+                >
+                  {unblocking === entry.ip ? "Déblocage..." : "Débloquer"}
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

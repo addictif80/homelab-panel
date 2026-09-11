@@ -19,6 +19,27 @@ function getHostUpdateMethod(hostId: number): string | null {
   return row?.update_method ?? null;
 }
 
+/** The Security Center treats blocking as one infra-wide action rather than per-host state — see
+ * blocked_ips in lib/db.ts. */
+export function recordBlockedIp(ip: string): void {
+  getDb()
+    .prepare(`INSERT INTO blocked_ips (ip, blocked_at) VALUES (?, datetime('now')) ON CONFLICT(ip) DO NOTHING`)
+    .run(ip);
+}
+
+export function forgetBlockedIp(ip: string): void {
+  getDb().prepare(`DELETE FROM blocked_ips WHERE ip = ?`).run(ip);
+}
+
+export function listBlockedIps(): { ip: string; blockedAt: string }[] {
+  return (
+    getDb().prepare(`SELECT ip, blocked_at as blockedAt FROM blocked_ips ORDER BY blocked_at DESC`).all() as {
+      ip: string;
+      blockedAt: string;
+    }[]
+  );
+}
+
 export type BlockEverywhereResult = { hostId: number; hostName: string; ok: boolean; message: string };
 
 /**
@@ -33,7 +54,7 @@ export async function blockIpEverywhere(ip: string): Promise<BlockEverywhereResu
     name: string;
   }[];
 
-  return Promise.all(
+  const results = await Promise.all(
     hosts.map(async (host) => {
       try {
         const { message } = await blockIp(host.id, ip);
@@ -48,6 +69,39 @@ export async function blockIpEverywhere(ip: string): Promise<BlockEverywhereResu
       }
     })
   );
+  return results;
+}
+
+/**
+ * Unblocking is always infra-wide by design (unlike blocking, which can target one host or
+ * everywhere) — a false positive should disappear from every machine at once, not linger on the
+ * ones the user forgot to check. Best-effort per host, same as blockIpEverywhere: a host where
+ * the rule was never applied (it had no SSH access, or the IP was only ever blocked on some
+ * hosts) just reports nothing to do rather than failing the batch.
+ */
+export async function unblockIpEverywhere(ip: string): Promise<BlockEverywhereResult[]> {
+  const hosts = getDb().prepare(`SELECT id, name FROM hosts ORDER BY kind, name`).all() as {
+    id: number;
+    name: string;
+  }[];
+
+  const results = await Promise.all(
+    hosts.map(async (host) => {
+      try {
+        const { message } = await unblockIp(host.id, ip);
+        return { hostId: host.id, hostName: host.name, ok: true, message };
+      } catch (err) {
+        return {
+          hostId: host.id,
+          hostName: host.name,
+          ok: false,
+          message: err instanceof Error ? err.message : "Erreur inconnue.",
+        };
+      }
+    })
+  );
+  forgetBlockedIp(ip);
+  return results;
 }
 
 /**
@@ -59,6 +113,12 @@ export async function blockIpEverywhere(ip: string): Promise<BlockEverywhereResu
  *  - Anything else (Synology DSM, unknown): best-effort iptables rule only, flagged as such.
  */
 export async function blockIp(hostId: number, ip: string): Promise<{ message: string }> {
+  const result = await applyBlockIp(hostId, ip);
+  recordBlockedIp(ip);
+  return result;
+}
+
+async function applyBlockIp(hostId: number, ip: string): Promise<{ message: string }> {
   if (!isValidIpv4(ip)) throw new Error("Adresse IP invalide.");
 
   const updateMethod = getHostUpdateMethod(hostId);
@@ -119,4 +179,56 @@ export async function blockIp(hostId: number, ip: string): Promise<{ message: st
   return {
     message: `IP ${ip} bloquée pour la session en cours seulement : la persistance après redémarrage n'est pas gérée pour ce type de machine.`,
   };
+}
+
+/**
+ * Reverses blockIp on a single host — mirrors its three OS-family branches so it removes exactly
+ * what was added. Removing a rule that was never applied on this host (it was only blocked
+ * elsewhere, or SSH was unreachable at block time) is treated as a no-op success rather than an
+ * error, since that's the expected case for most hosts in an infra-wide unblock.
+ */
+export async function unblockIp(hostId: number, ip: string): Promise<{ message: string }> {
+  if (!isValidIpv4(ip)) throw new Error("Adresse IP invalide.");
+
+  const updateMethod = getHostUpdateMethod(hostId);
+
+  if (updateMethod === "opkg") {
+    const ruleName = `homelab_block_${ip.replace(/\./g, "_")}`;
+    const command = [
+      `RULE=${shellQuote(ruleName)}`,
+      `IDX=$(uci show firewall 2>/dev/null | grep "='$RULE'" | head -n1 | cut -d. -f2)`,
+      `if [ -n "$IDX" ]; then uci delete firewall.$IDX && uci commit firewall && /etc/init.d/firewall reload; fi`,
+    ].join("\n");
+    const { code, stderr } = await withTimeout(
+      runSshCommand(hostId, command, { sudo: true }),
+      BLOCK_TIMEOUT_MS,
+      "Délai dépassé lors du déblocage."
+    );
+    if (code !== 0) throw new Error(stderr || "Échec du déblocage via uci firewall.");
+    return { message: `IP ${ip} débloquée.` };
+  }
+
+  const removeCommand = `iptables -D INPUT -s ${shellQuote(ip)} -j DROP 2>/dev/null || true`;
+
+  if (updateMethod === "apt") {
+    const command = [
+      removeCommand,
+      `command -v netfilter-persistent >/dev/null 2>&1 && netfilter-persistent save >/dev/null 2>&1 || true`,
+    ].join("\n");
+    const { code, stderr } = await withTimeout(
+      runSshCommand(hostId, command, { sudo: true }),
+      BLOCK_TIMEOUT_MS,
+      "Délai dépassé lors du déblocage."
+    );
+    if (code !== 0) throw new Error(stderr || "Échec du déblocage iptables.");
+    return { message: `IP ${ip} débloquée.` };
+  }
+
+  const { code, stderr } = await withTimeout(
+    runSshCommand(hostId, removeCommand, { sudo: true }),
+    BLOCK_TIMEOUT_MS,
+    "Délai dépassé lors du déblocage."
+  );
+  if (code !== 0) throw new Error(stderr || "Échec du déblocage iptables.");
+  return { message: `IP ${ip} débloquée.` };
 }
