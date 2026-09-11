@@ -60,7 +60,7 @@ export default function AuditPage() {
         </select>
       </div>
 
-      <div className="overflow-hidden rounded border border-neutral-800">
+      <div className="overflow-x-auto rounded border border-neutral-800">
         <table className="w-full text-sm">
           <thead className="bg-neutral-900 text-left text-xs text-neutral-500">
             <tr>

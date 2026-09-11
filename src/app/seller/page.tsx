@@ -240,7 +240,7 @@ export default function SellerPage() {
           </span>
         </div>
 
-        <div className="overflow-hidden rounded border border-neutral-800">
+        <div className="overflow-x-auto rounded border border-neutral-800">
           <table className="w-full text-sm">
             <thead className="bg-neutral-950 text-left text-xs text-neutral-500">
               <tr>
@@ -272,7 +272,7 @@ export default function SellerPage() {
         </div>
 
         <h3 className="pt-2 text-xs font-medium text-neutral-400">Détail des ventes</h3>
-        <div className="overflow-hidden rounded border border-neutral-800">
+        <div className="overflow-x-auto rounded border border-neutral-800">
           <table className="w-full text-sm">
             <thead className="bg-neutral-950 text-left text-xs text-neutral-500">
               <tr>
@@ -320,7 +320,7 @@ export default function SellerPage() {
           Une clé est générée automatiquement à chaque vente et n&apos;est utilisable qu&apos;une seule fois — la
           validation se fait côté serveur (une clé déjà consommée est refusée même si elle est réessayée ailleurs).
         </p>
-        <div className="overflow-hidden rounded border border-neutral-800">
+        <div className="overflow-x-auto rounded border border-neutral-800">
           <table className="w-full text-sm">
             <thead className="bg-neutral-950 text-left text-xs text-neutral-500">
               <tr>

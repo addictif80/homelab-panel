@@ -281,7 +281,7 @@ export default function StorePage() {
         </div>
 
         {/* Comparison table */}
-        <div className="mt-20 overflow-hidden rounded-xl border border-neutral-800">
+        <div className="mt-20 overflow-x-auto rounded-xl border border-neutral-800">
           <table className="w-full text-sm">
             <thead className="bg-neutral-900">
               <tr>
