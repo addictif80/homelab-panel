@@ -147,8 +147,11 @@ export function createFreeboxClient(config: Record<string, string>, secret: Reco
     const data = (await requestJson(`${apiUrl}${path}`, {
       ...options,
       headers: { "X-Fbx-App-Auth": sessionToken },
-    })) as { success: boolean; msg?: string; result: unknown };
-    if (!data.success) throw new Error(data.msg || `Freebox API : erreur sur ${path}`);
+    })) as { success: boolean; msg?: string; error_code?: string; result: unknown };
+    if (!data.success) {
+      const detail = data.msg ? `${data.msg}${data.error_code ? ` (${data.error_code})` : ""}` : `Freebox API : erreur sur ${path}`;
+      throw new Error(detail);
+    }
     return data.result;
   }
 
@@ -232,6 +235,10 @@ export function createFreeboxClient(config: Record<string, string>, secret: Reco
         lan_ip: input.internalIp,
         lan_port: Number(input.internalPort),
         comment: input.description || "",
+        // Freebox OS's own web UI always sends src_ip ("any source" = 0.0.0.0) — omitting it
+        // makes some firmwares evaluate the rule against a stale/invalid source filter and
+        // reject the port as "not available" even though it's genuinely free.
+        src_ip: "0.0.0.0",
       };
       const result = (await api("/fw/redir/", { method: "POST", body: JSON.stringify(body) })) as { id: number };
       return { id: String(result.id), ...input };
