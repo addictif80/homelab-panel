@@ -45,6 +45,38 @@ function activeFindings(host: HostScanResult): Finding[] {
   return host.findings.filter((f) => !f.ignored);
 }
 
+type SuspiciousIp = {
+  ip: string;
+  severity: Severity;
+  hosts: { hostId: number; hostName: string; findingId: string; title: string; detail: string }[];
+};
+
+/** Flattens every "block-ip" finding across all hosts into one IP-centric list, so a suspicious
+ * address that shows up on several machines (or that would otherwise require scrolling through
+ * every host card to spot) is visible and actionable from a single place. */
+function collectSuspiciousIps(results: HostScanResult[]): SuspiciousIp[] {
+  const byIp = new Map<string, SuspiciousIp>();
+  for (const host of results) {
+    for (const finding of host.findings) {
+      if (finding.ignored || finding.fixId !== "block-ip" || !finding.fixParams?.ip) continue;
+      const ip = finding.fixParams.ip;
+      const entry = byIp.get(ip) ?? { ip, severity: finding.severity, hosts: [] };
+      entry.hosts.push({
+        hostId: host.hostId,
+        hostName: host.hostName,
+        findingId: finding.id,
+        title: finding.title,
+        detail: finding.detail,
+      });
+      if (SEVERITY_ORDER.indexOf(finding.severity) < SEVERITY_ORDER.indexOf(entry.severity)) {
+        entry.severity = finding.severity;
+      }
+      byIp.set(ip, entry);
+    }
+  }
+  return Array.from(byIp.values()).sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity));
+}
+
 function hostScore(host: HostScanResult): Severity {
   if (host.error) return "warning";
   const active = activeFindings(host);
@@ -63,6 +95,12 @@ export default function SecurityPage() {
   const [statusMsg, setStatusMsg] = useState<string>("");
   const [expandedHowTo, setExpandedHowTo] = useState<Set<string>>(new Set());
   const [ignoring, setIgnoring] = useState<string | null>(null);
+  const [blockModal, setBlockModal] = useState<{
+    ip: SuspiciousIp;
+    scope: "host" | "all";
+    targetHostId: number;
+  } | null>(null);
+  const [blocking, setBlocking] = useState(false);
 
   const runScan = useCallback(async () => {
     setLoading(true);
@@ -105,6 +143,39 @@ export default function SecurityPage() {
     }
   }
 
+  function openBlockModal(ip: SuspiciousIp) {
+    setBlockModal({ ip, scope: "host", targetHostId: ip.hosts[0].hostId });
+  }
+
+  async function applyBlock() {
+    if (!blockModal) return;
+    const { ip, scope, targetHostId } = blockModal;
+    setBlocking(true);
+    try {
+      const res = await fetch(`/api/security/hosts/${targetHostId}/fix`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fixId: scope === "all" ? "block-ip-everywhere" : "block-ip",
+          params: { ip: ip.ip },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Échec du blocage.");
+      setStatusMsg(data.result.message);
+      if (scope === "all") {
+        await runScan();
+      } else {
+        setResults((prev) => (prev ? prev.map((h) => (h.hostId === targetHostId ? data.rescan : h)) : prev));
+      }
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setBlocking(false);
+      setBlockModal(null);
+    }
+  }
+
   async function setIgnored(hostId: number, findingId: string, ignore: boolean) {
     const key = `${hostId}:${findingId}`;
     setIgnoring(key);
@@ -141,6 +212,7 @@ export default function SecurityPage() {
     results?.reduce((n, h) => n + activeFindings(h).filter((f) => f.severity === "critical").length, 0) ?? 0;
   const totalWarning =
     results?.reduce((n, h) => n + activeFindings(h).filter((f) => f.severity === "warning").length, 0) ?? 0;
+  const suspiciousIps = results ? collectSuspiciousIps(results) : [];
 
   return (
     <div className="space-y-6">
@@ -178,6 +250,63 @@ export default function SecurityPage() {
       )}
 
       {!results && loading && <div className="text-sm text-neutral-500">Analyse de toutes les machines en cours (SSH)...</div>}
+
+      {suspiciousIps.length > 0 && (
+        <div className="rounded border border-neutral-800 bg-neutral-900">
+          <div className="border-b border-neutral-800 px-4 py-3">
+            <h2 className="text-sm font-semibold text-neutral-100">
+              Adresses IP suspectes ({suspiciousIps.length})
+            </h2>
+            <p className="mt-0.5 text-xs text-neutral-500">
+              Vue regroupée de toutes les machines — pas besoin de défiler host par host.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-neutral-800 text-xs text-neutral-500">
+                  <th className="px-4 py-2 font-normal">IP</th>
+                  <th className="px-4 py-2 font-normal">Sévérité</th>
+                  <th className="px-4 py-2 font-normal">Machines concernées</th>
+                  <th className="px-4 py-2 font-normal">Détail</th>
+                  <th className="px-4 py-2 font-normal"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {suspiciousIps.map((entry) => {
+                  const style = SEVERITY_STYLES[entry.severity];
+                  return (
+                    <tr key={entry.ip} className="border-b border-neutral-800 last:border-0 align-top">
+                      <td className="px-4 py-2 font-mono text-xs text-neutral-100">{entry.ip}</td>
+                      <td className="px-4 py-2">
+                        <span className={`rounded border px-1.5 py-0 text-[10px] ${style.badge}`}>{style.label}</span>
+                      </td>
+                      <td className="px-4 py-2 text-xs text-neutral-300">
+                        <div className="flex flex-wrap gap-1">
+                          {entry.hosts.map((h) => (
+                            <span key={h.hostId} className="rounded border border-neutral-700 px-1.5 py-0.5">
+                              {h.hostName}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="max-w-sm px-4 py-2 text-xs text-neutral-400">{entry.hosts[0].detail}</td>
+                      <td className="px-4 py-2 text-right">
+                        <button
+                          onClick={() => openBlockModal(entry)}
+                          className="rounded border border-neutral-600 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+                        >
+                          Bloquer
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-3">
         <DetectionThresholdsPanel />
@@ -265,7 +394,29 @@ export default function SecurityPage() {
                                 </div>
 
                                 <div className="flex shrink-0 flex-col items-end gap-1">
-                                  {finding.fixId && !finding.ignored && (
+                                  {finding.fixId === "block-ip" && !finding.ignored && finding.fixParams?.ip && (
+                                    <button
+                                      onClick={() =>
+                                        openBlockModal({
+                                          ip: finding.fixParams!.ip,
+                                          severity: finding.severity,
+                                          hosts: [
+                                            {
+                                              hostId: host.hostId,
+                                              hostName: host.hostName,
+                                              findingId: finding.id,
+                                              title: finding.title,
+                                              detail: finding.detail,
+                                            },
+                                          ],
+                                        })
+                                      }
+                                      className="rounded border border-neutral-600 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+                                    >
+                                      {finding.fixLabel || "Corriger"}
+                                    </button>
+                                  )}
+                                  {finding.fixId && finding.fixId !== "block-ip" && !finding.ignored && (
                                     <button
                                       onClick={() => setConfirming({ hostId: host.hostId, finding })}
                                       className="rounded border border-neutral-600 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
@@ -318,6 +469,78 @@ export default function SecurityPage() {
                 className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60 disabled:opacity-50"
               >
                 {applying ? "Application..." : "Confirmer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {blockModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded border border-neutral-700 bg-neutral-900 p-5">
+            <h2 className="text-sm font-semibold text-neutral-100">
+              Bloquer <span className="font-mono">{blockModal.ip.ip}</span>
+            </h2>
+            <p className="mt-2 text-xs text-neutral-500">
+              Repérée sur : {blockModal.ip.hosts.map((h) => h.hostName).join(", ")}
+            </p>
+
+            <div className="mt-4 space-y-2">
+              <label className="flex items-start gap-2 rounded border border-neutral-700 p-2.5 text-sm">
+                <input
+                  type="radio"
+                  className="mt-0.5"
+                  checked={blockModal.scope === "host"}
+                  onChange={() => setBlockModal({ ...blockModal, scope: "host" })}
+                />
+                <span>
+                  <span className="block text-neutral-200">Bloquer sur un serveur ciblé</span>
+                  {blockModal.ip.hosts.length > 1 ? (
+                    <select
+                      value={blockModal.targetHostId}
+                      onChange={(e) => setBlockModal({ ...blockModal, targetHostId: Number(e.target.value) })}
+                      className="mt-1.5 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-200"
+                    >
+                      {blockModal.ip.hosts.map((h) => (
+                        <option key={h.hostId} value={h.hostId}>
+                          {h.hostName}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="text-xs text-neutral-500">{blockModal.ip.hosts[0].hostName}</span>
+                  )}
+                </span>
+              </label>
+
+              <label className="flex items-start gap-2 rounded border border-neutral-700 p-2.5 text-sm">
+                <input
+                  type="radio"
+                  className="mt-0.5"
+                  checked={blockModal.scope === "all"}
+                  onChange={() => setBlockModal({ ...blockModal, scope: "all" })}
+                />
+                <span>
+                  <span className="block text-neutral-200">Bloquer sur toute l&apos;infrastructure</span>
+                  <span className="text-xs text-neutral-500">Réplique le blocage sur chaque machine de l&apos;inventaire.</span>
+                </span>
+              </label>
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setBlockModal(null)}
+                disabled={blocking}
+                className="rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={applyBlock}
+                disabled={blocking}
+                className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60 disabled:opacity-50"
+              >
+                {blocking ? "Blocage..." : "Confirmer"}
               </button>
             </div>
           </div>

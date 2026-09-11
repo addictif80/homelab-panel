@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import ThemeToggle from "./ThemeToggle";
@@ -52,6 +53,22 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string }[] }[
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const [publicIps, setPublicIps] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetch("/api/hosts")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data?.hosts) return;
+        // Several physical machines can share one public IP (same ISP line/box) — dedupe so it's
+        // a list of distinct exit points, not one row per host.
+        const ips = (data.hosts as { public_ip: string | null }[])
+          .map((h) => h.public_ip)
+          .filter((ip): ip is string => !!ip);
+        setPublicIps(Array.from(new Set(ips)));
+      })
+      .catch(() => {});
+  }, []);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -98,6 +115,20 @@ export default function Sidebar() {
           </div>
         ))}
       </nav>
+      {publicIps.length > 0 && (
+        <div className="mt-4 border-t border-neutral-800 pt-3">
+          <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-wider text-neutral-600">
+            IP publique{publicIps.length > 1 ? "s" : ""}
+          </p>
+          <div className="space-y-0.5 px-3">
+            {publicIps.map((ip) => (
+              <p key={ip} className="font-mono text-xs text-neutral-400">
+                {ip}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
       <button
         onClick={handleLogout}
         className="mt-4 rounded-md px-3 py-1.5 text-left text-sm text-neutral-500 hover:bg-neutral-800/70 hover:text-neutral-200"

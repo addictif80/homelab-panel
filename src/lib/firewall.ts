@@ -19,6 +19,37 @@ function getHostUpdateMethod(hostId: number): string | null {
   return row?.update_method ?? null;
 }
 
+export type BlockEverywhereResult = { hostId: number; hostName: string; ok: boolean; message: string };
+
+/**
+ * Replicates a block across every host in the inventory instead of just the one where the IP
+ * was spotted — useful since an attacker probing one machine will often move on to the next.
+ * Best-effort per host: a host with no SSH access configured (a Freebox/pfSense-managed router,
+ * a machine mid-setup, ...) just reports its own failure rather than aborting the whole batch.
+ */
+export async function blockIpEverywhere(ip: string): Promise<BlockEverywhereResult[]> {
+  const hosts = getDb().prepare(`SELECT id, name FROM hosts ORDER BY kind, name`).all() as {
+    id: number;
+    name: string;
+  }[];
+
+  return Promise.all(
+    hosts.map(async (host) => {
+      try {
+        const { message } = await blockIp(host.id, ip);
+        return { hostId: host.id, hostName: host.name, ok: true, message };
+      } catch (err) {
+        return {
+          hostId: host.id,
+          hostName: host.name,
+          ok: false,
+          message: err instanceof Error ? err.message : "Erreur inconnue.",
+        };
+      }
+    })
+  );
+}
+
 /**
  * Blocks an IP on the given host and tries to make it survive a reboot, using whatever
  * mechanism fits that host's OS family (a raw iptables rule resets on reboot otherwise):

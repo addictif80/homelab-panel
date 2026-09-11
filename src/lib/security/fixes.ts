@@ -2,7 +2,7 @@ import { runSshCommand } from "../ssh";
 import { getDb } from "../db";
 import { buildUpdateCommand, startUpdateJob, type UpdateMethod } from "../updates";
 import { withTimeout } from "../timeout";
-import { blockIp } from "../firewall";
+import { blockIp, blockIpEverywhere } from "../firewall";
 
 export type FixResult = { message: string; jobId?: string };
 
@@ -72,6 +72,17 @@ export const FIX_REGISTRY: Record<string, FixFn> = {
     const ip = params?.ip;
     if (!ip) throw new Error("Adresse IP manquante.");
     return blockIp(hostId, ip);
+  },
+
+  "block-ip-everywhere": async (_hostId, params) => {
+    const ip = params?.ip;
+    if (!ip) throw new Error("Adresse IP manquante.");
+    const results = await blockIpEverywhere(ip);
+    const succeeded = results.filter((r) => r.ok);
+    const failed = results.filter((r) => !r.ok);
+    const summary = `IP ${ip} bloquée sur ${succeeded.length}/${results.length} machine${results.length > 1 ? "s" : ""}.`;
+    const detail = failed.length > 0 ? ` Échecs : ${failed.map((f) => `${f.hostName} (${f.message})`).join(", ")}` : "";
+    return { message: summary + detail };
   },
 };
 
