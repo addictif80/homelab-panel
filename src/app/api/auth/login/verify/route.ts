@@ -3,6 +3,7 @@ import {
   verifyPending2faToken,
   createSessionToken,
   getUserByUsername,
+  clientIp,
   SESSION_COOKIE_NAME,
   SESSION_MAX_AGE,
   isLockedOut,
@@ -11,10 +12,6 @@ import {
 import { decryptTotpSecret, verifyTotpCode } from "@/lib/totp";
 import { createTrustedDevice, TRUSTED_DEVICE_COOKIE_NAME, TRUSTED_DEVICE_MAX_AGE } from "@/lib/trustedDevices";
 import { logAudit } from "@/lib/db";
-
-function clientIp(req: NextRequest): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-}
 
 export async function POST(req: NextRequest) {
   try {

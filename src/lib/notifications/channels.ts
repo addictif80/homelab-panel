@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { getSetting, setSetting } from "../db";
+import { isLoopbackOrMetadataHost } from "../validators";
 
 export type ChannelType = "webhook" | "ntfy" | "discord" | "slack";
 
@@ -43,12 +44,39 @@ export function removeChannel(id: string): void {
   saveChannels(listChannels().filter((c) => c.id !== id));
 }
 
+/** Strips secrets before a channel list ever reaches the client — GET responses should only tell
+ * the UI a channel is configured, never hand back the webhook URL or ntfy token itself (those are
+ * bearer secrets: whoever holds a Discord/Slack webhook URL can post to it directly). */
+export function redactChannel(channel: NotificationChannel): Omit<NotificationChannel, "url" | "ntfyToken"> & {
+  configured: boolean;
+} {
+  const { url: _url, ntfyToken: _ntfyToken, ...rest } = channel;
+  return { ...rest, configured: !!(channel.url || channel.ntfyTopic) };
+}
+
+function assertFetchable(rawUrl: string): URL {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error("URL invalide.");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Seuls les URL http/https sont autorisées.");
+  }
+  if (isLoopbackOrMetadataHost(url.hostname)) {
+    throw new Error("Cette adresse n'est pas autorisée comme destination de notification.");
+  }
+  return url;
+}
+
 async function sendToChannel(channel: NotificationChannel, subject: string, text: string): Promise<void> {
   switch (channel.type) {
     case "webhook": {
       if (!channel.url) throw new Error("URL manquante.");
-      const res = await fetch(channel.url, {
+      const res = await fetch(assertFetchable(channel.url), {
         method: "POST",
+        redirect: "manual",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: subject, message: text, timestamp: new Date().toISOString() }),
       });
@@ -58,8 +86,9 @@ async function sendToChannel(channel: NotificationChannel, subject: string, text
     case "ntfy": {
       if (!channel.ntfyTopic) throw new Error("Sujet (topic) ntfy manquant.");
       const base = (channel.ntfyServer || "https://ntfy.sh").replace(/\/$/, "");
-      const res = await fetch(`${base}/${channel.ntfyTopic}`, {
+      const res = await fetch(assertFetchable(`${base}/${channel.ntfyTopic}`), {
         method: "POST",
+        redirect: "manual",
         headers: {
           Title: subject,
           ...(channel.ntfyToken ? { Authorization: `Bearer ${channel.ntfyToken}` } : {}),
@@ -71,8 +100,9 @@ async function sendToChannel(channel: NotificationChannel, subject: string, text
     }
     case "discord": {
       if (!channel.url) throw new Error("URL du webhook Discord manquante.");
-      const res = await fetch(channel.url, {
+      const res = await fetch(assertFetchable(channel.url), {
         method: "POST",
+        redirect: "manual",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: `**${subject}**\n${text}`.slice(0, 1900) }),
       });
@@ -81,8 +111,9 @@ async function sendToChannel(channel: NotificationChannel, subject: string, text
     }
     case "slack": {
       if (!channel.url) throw new Error("URL du webhook Slack manquante.");
-      const res = await fetch(channel.url, {
+      const res = await fetch(assertFetchable(channel.url), {
         method: "POST",
+        redirect: "manual",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: `*${subject}*\n${text}` }),
       });

@@ -5,7 +5,7 @@ import { Client as SshClient } from "ssh2";
 import { parse } from "url";
 import { buildSshConfig, buildPrivilegedCommand, getAutoElevatePassword, shellQuote } from "@/lib/ssh";
 import { logAudit } from "@/lib/db";
-import { authenticateUpgrade } from "./wsAuth";
+import { authenticateUpgrade, isSameOriginUpgrade } from "./wsAuth";
 
 const SSH_WS_PATH = "/ws/ssh";
 
@@ -21,6 +21,12 @@ export function attachSshWebSocketServer(server: import("http").Server) {
     if (pathname !== SSH_WS_PATH) return;
 
     (async () => {
+      if (!isSameOriginUpgrade({ origin: req.headers.origin, host: req.headers.host })) {
+        socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+
       const username = await authenticateUpgrade(req.headers.cookie);
       if (!username) {
         socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");

@@ -6,15 +6,12 @@ import {
   recordLoginAttempt,
   createPending2faToken,
   createSessionToken,
+  clientIp,
   SESSION_COOKIE_NAME,
   SESSION_MAX_AGE,
 } from "@/lib/auth";
 import { isTrustedDevice, TRUSTED_DEVICE_COOKIE_NAME } from "@/lib/trustedDevices";
 import { logAudit } from "@/lib/db";
-
-function clientIp(req: NextRequest): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-}
 
 export async function POST(req: NextRequest) {
   try {

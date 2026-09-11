@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { addChannel, listChannels, type ChannelType } from "@/lib/notifications/channels";
+import { addChannel, listChannels, redactChannel, type ChannelType } from "@/lib/notifications/channels";
 
 export async function GET() {
-  return NextResponse.json({ channels: listChannels() });
+  return NextResponse.json({ channels: listChannels().map(redactChannel) });
 }
 
 export async function POST(req: NextRequest) {
@@ -33,5 +33,5 @@ export async function POST(req: NextRequest) {
     ntfyTopic: body.ntfyTopic,
     ntfyToken: body.ntfyToken,
   });
-  return NextResponse.json({ channel: created }, { status: 201 });
+  return NextResponse.json({ channel: redactChannel(created) }, { status: 201 });
 }

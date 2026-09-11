@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb, logAudit } from "@/lib/db";
+import { isValidIpv4 } from "@/lib/validators";
 
 export type Host = {
   id: number;
@@ -66,6 +67,17 @@ export async function POST(req: NextRequest) {
   const allowedKinds = ["physical", "vm", "lxc", "vps", "nas", "router"];
   if (!allowedKinds.includes(kind)) {
     return NextResponse.json({ error: "Type de machine invalide." }, { status: 400 });
+  }
+  // These end up embedded in shell commands run on remote hosts (LAN discovery's ping sweep,
+  // firewall rules) — reject anything that isn't a clean dotted-quad before it ever reaches the DB.
+  for (const [field, value] of [
+    ["lan_ip", lan_ip],
+    ["tailscale_ip", tailscale_ip],
+    ["public_ip", public_ip],
+  ] as const) {
+    if (value && !isValidIpv4(value)) {
+      return NextResponse.json({ error: `Adresse IP invalide pour ${field}.` }, { status: 400 });
+    }
   }
 
   const slug = slugify(name);

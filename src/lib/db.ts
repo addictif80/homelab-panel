@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
+import { randomBytes } from "crypto";
 
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
 if (!fs.existsSync(/* turbopackIgnore: true */ DATA_DIR)) {
@@ -298,6 +299,32 @@ function migrate(db: Database.Database) {
   if (!licenseColumns.some((c) => c.name === "certificate_json")) {
     db.exec(`ALTER TABLE license ADD COLUMN certificate_json TEXT`);
   }
+
+  ensureVaultKdfSalt(db);
+}
+
+/**
+ * Pins the vault's key-derivation salt into `settings` on first run, instead of always falling
+ * back to a fixed literal baked into the code (see lib/crypto.ts) — every install sharing the
+ * same default salt means an attacker who steals one install's DB can reuse offline dictionary
+ * work against every other install still on the default. A genuinely fresh install (nothing
+ * encrypted yet) gets a random salt. An install upgrading from before this existed already has
+ * data encrypted under the old hardcoded literal — for those, the legacy value has to be pinned
+ * as-is, or every stored SSH key/password/API token/signing key becomes permanently undecryptable.
+ */
+function ensureVaultKdfSalt(db: Database.Database) {
+  const existing = db.prepare(`SELECT value FROM settings WHERE key = 'vault_kdf_salt'`).get();
+  if (existing) return;
+
+  const LEGACY_DEFAULT_SALT = "homelab-panel-vault";
+  const hasExistingSecrets =
+    db.prepare(`SELECT 1 FROM credentials LIMIT 1`).get() ||
+    db.prepare(`SELECT 1 FROM backup_ssh_key LIMIT 1`).get() ||
+    db.prepare(`SELECT 1 FROM license_signing_key LIMIT 1`).get() ||
+    db.prepare(`SELECT 1 FROM users WHERE totp_secret_encrypted IS NOT NULL LIMIT 1`).get();
+
+  const salt = hasExistingSecrets ? LEGACY_DEFAULT_SALT : randomBytes(16).toString("hex");
+  db.prepare(`INSERT INTO settings (key, value) VALUES ('vault_kdf_salt', ?)`).run(salt);
 }
 
 export function logAudit(action: string, target?: string, detail?: string) {

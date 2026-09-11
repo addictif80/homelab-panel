@@ -51,9 +51,15 @@ export async function autoActivateFromBundledKey(): Promise<void> {
   await activateWithKey(preActivatedKey);
 }
 
-/** The seller's own deployment is never trial-limited — this flag only exists there. */
+/**
+ * The seller's own deployment is never trial-limited — this flag only exists there.
+ * Deliberately NOT a NEXT_PUBLIC_ variable: those get inlined into the client bundle, and since
+ * this gates a server-side license decision (not UI), it must stay a plain server-only env var —
+ * `SELLER_MODE`, never `NEXT_PUBLIC_SELLER_MODE` — so it can't be set to bypass licensing just by
+ * being present in a customer's own build environment under the name a client-facing flag would use.
+ */
 export function isSellerInstance(): boolean {
-  return process.env.NEXT_PUBLIC_SELLER_MODE === "true";
+  return process.env.SELLER_MODE === "true";
 }
 
 type LicenseRow = {

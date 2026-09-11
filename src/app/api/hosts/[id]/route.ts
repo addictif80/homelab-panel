@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb, logAudit } from "@/lib/db";
+import { isValidIpv4 } from "@/lib/validators";
+
+const IP_FIELDS = new Set(["lan_ip", "tailscale_ip", "public_ip"]);
 
 const EDITABLE_FIELDS = [
   "name",
@@ -36,6 +39,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const values: Record<string, unknown> = { id };
     for (const field of EDITABLE_FIELDS) {
       if (field in body) {
+        if (IP_FIELDS.has(field) && body[field] && !isValidIpv4(body[field])) {
+          return NextResponse.json({ error: `Adresse IP invalide pour ${field}.` }, { status: 400 });
+        }
         updates.push(`${field} = @${field}`);
         values[field] = BOOLEAN_FIELDS.has(field) ? (body[field] ? 1 : 0) : body[field];
       }

@@ -132,7 +132,14 @@ export function buildPrivilegedCommand(
     );
   }
   return {
-    command: `sudo -S -p '' bash -lc ${shellQuote(rawCommand)}`,
+    // `bash -lc` (login shell) is deliberate — it picks up the full PATH from /etc/profile so
+    // root-only tools (apt, docker, iptables...) resolve even when they're not on the
+    // unprivileged user's PATH. The downside: some hosts' profile/rc chain unconditionally calls
+    // `tput` for prompt coloring, which fails loudly ("tput: unknown terminal \"unknown\"") when
+    // no terminal type is set, since this is a plain exec channel with no pty. `sudo` itself
+    // resets the environment by default (env_reset), so TERM has to be set *after* sudo runs, via
+    // `env`, not as a prefix before it — a `TERM=dumb sudo ...` prefix would just get stripped.
+    command: `sudo -S -p '' env TERM=dumb bash -lc ${shellQuote(rawCommand)}`,
     stdinPassword: password,
   };
 }

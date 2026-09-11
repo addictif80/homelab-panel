@@ -6,6 +6,10 @@ export type DiscoveredDevice = { ip: string; mac: string | null };
 function subnetBase(ip: string): string | null {
   const parts = ip.split(".");
   if (parts.length !== 4) return null;
+  // Every octet must be a plain 0-255 integer — this string is embedded directly into a shell
+  // command below, so anything else (e.g. "1$(cmd)" or "1;cmd") must be rejected here rather than
+  // trusted to already be a clean IP just because it came from the hosts table.
+  if (!parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255)) return null;
   return `${parts[0]}.${parts[1]}.${parts[2]}`;
 }
 

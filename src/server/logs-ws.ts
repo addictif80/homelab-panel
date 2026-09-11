@@ -7,7 +7,7 @@ import { buildSshConfig, buildPrivilegedCommand, shellQuote } from "@/lib/ssh";
 import { getLogSource } from "@/lib/logSources";
 import { analyzeLogLines } from "@/lib/logAnalysis";
 import { getDetectionThresholds } from "@/lib/logAnalysisSettings";
-import { authenticateUpgrade } from "./wsAuth";
+import { authenticateUpgrade, isSameOriginUpgrade } from "./wsAuth";
 
 const LOGS_WS_PATH = "/ws/logs";
 const MAX_BUFFER_LINES = 500;
@@ -20,6 +20,12 @@ export function attachLogsWebSocketServer(server: import("http").Server) {
     if (pathname !== LOGS_WS_PATH) return;
 
     (async () => {
+      if (!isSameOriginUpgrade({ origin: req.headers.origin, host: req.headers.host })) {
+        socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+
       const username = await authenticateUpgrade(req.headers.cookie);
       if (!username) {
         socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");

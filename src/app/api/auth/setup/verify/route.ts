@@ -1,13 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb, logAudit } from "@/lib/db";
-import { getUserByUsername } from "@/lib/auth";
+import { getUserByUsername, clientIp, isLockedOut, recordLoginAttempt } from "@/lib/auth";
 import { decryptTotpSecret, verifyTotpCode } from "@/lib/totp";
 
 export async function POST(req: NextRequest) {
   try {
+    const ip = clientIp(req);
     const { username, code } = await req.json();
+    if (!username) {
+      return NextResponse.json({ error: "Compte introuvable." }, { status: 404 });
+    }
+
+    // This endpoint is reachable without a session (it's how first-time 2FA enrollment
+    // completes), which would otherwise let anyone flood it with 6-digit guesses against a known
+    // username's real TOTP secret — same lockout as the login endpoints closes that off.
+    if (isLockedOut(ip, username)) {
+      logAudit("login.locked_out", username, ip);
+      return NextResponse.json(
+        { error: "Trop de tentatives échouées. Réessaie dans 15 minutes." },
+        { status: 429 }
+      );
+    }
+
     const user = getUserByUsername(username);
     if (!user || !user.totp_secret_encrypted) {
+      recordLoginAttempt(ip, username, false);
       return NextResponse.json({ error: "Compte introuvable." }, { status: 404 });
     }
     if (user.totp_enabled) {
@@ -15,7 +32,9 @@ export async function POST(req: NextRequest) {
     }
 
     const secret = decryptTotpSecret(user.totp_secret_encrypted);
-    if (!verifyTotpCode(secret, String(code || ""))) {
+    const valid = verifyTotpCode(secret, String(code || ""));
+    recordLoginAttempt(ip, username, valid);
+    if (!valid) {
       return NextResponse.json({ error: "Code invalide." }, { status: 401 });
     }
 
