@@ -6,6 +6,7 @@ import SmtpSettingsPanel from "@/components/SmtpSettingsPanel";
 import NotificationChannelsPanel from "@/components/NotificationChannelsPanel";
 import CertificateWatchPanel from "@/components/CertificateWatchPanel";
 import TrustedDevicesPanel from "@/components/TrustedDevicesPanel";
+import SecurityLogsPanel from "@/components/SecurityLogsPanel";
 
 type Severity = "critical" | "warning" | "info" | "good";
 
@@ -281,102 +282,105 @@ export default function SecurityPage() {
 
       {!results && loading && <div className="text-sm text-neutral-500">Analyse de toutes les machines en cours (SSH)...</div>}
 
-      {suspiciousIps.length > 0 && (
-        <div className="rounded border border-neutral-800 bg-neutral-900">
-          <div className="border-b border-neutral-800 px-4 py-3">
-            <h2 className="text-sm font-semibold text-neutral-100">
-              Adresses IP suspectes ({suspiciousIps.length})
-            </h2>
-            <p className="mt-0.5 text-xs text-neutral-500">
-              Vue regroupée de toutes les machines — pas besoin de défiler host par host.
-            </p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-neutral-800 text-xs text-neutral-500">
-                  <th className="px-4 py-2 font-normal">IP</th>
-                  <th className="px-4 py-2 font-normal">Sévérité</th>
-                  <th className="px-4 py-2 font-normal">Machines concernées</th>
-                  <th className="px-4 py-2 font-normal">Détail</th>
-                  <th className="px-4 py-2 font-normal"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {suspiciousIps.map((entry) => {
-                  const style = SEVERITY_STYLES[entry.severity];
-                  return (
-                    <tr key={entry.ip} className="border-b border-neutral-800 last:border-0 align-top">
-                      <td className="px-4 py-2 font-mono text-xs text-neutral-100">{entry.ip}</td>
-                      <td className="px-4 py-2">
-                        <span className={`rounded border px-1.5 py-0 text-[10px] ${style.badge}`}>{style.label}</span>
-                      </td>
-                      <td className="px-4 py-2 text-xs text-neutral-300">
-                        <div className="flex flex-wrap gap-1">
-                          {entry.hosts.map((h) => (
-                            <span key={h.hostId} className="rounded border border-neutral-700 px-1.5 py-0.5">
-                              {h.hostName}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="max-w-sm px-4 py-2 text-xs text-neutral-400">{entry.hosts[0].detail}</td>
-                      <td className="px-4 py-2 text-right">
-                        <button
-                          onClick={() => openBlockModal(entry)}
-                          className="rounded border border-neutral-600 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
-                        >
-                          Bloquer
-                        </button>
-                      </td>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
+        <SecurityLogsPanel />
+
+        <div className="space-y-4">
+          <div className="rounded border border-neutral-800 bg-neutral-900">
+            <div className="border-b border-neutral-800 px-4 py-3">
+              <h2 className="text-sm font-semibold text-neutral-100">
+                Adresses IP suspectes {suspiciousIps.length > 0 ? `(${suspiciousIps.length})` : ""}
+              </h2>
+              <p className="mt-0.5 text-xs text-neutral-500">
+                Vue regroupée de toutes les machines — pas besoin de défiler host par host.
+              </p>
+            </div>
+            {suspiciousIps.length === 0 ? (
+              <p className="p-4 text-sm text-neutral-500">Aucune IP suspecte détectée.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-neutral-800 text-xs text-neutral-500">
+                      <th className="px-4 py-2 font-normal">IP</th>
+                      <th className="px-4 py-2 font-normal">Sévérité</th>
+                      <th className="px-4 py-2 font-normal">Machines concernées</th>
+                      <th className="px-4 py-2 font-normal"></th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody>
+                    {suspiciousIps.map((entry) => {
+                      const style = SEVERITY_STYLES[entry.severity];
+                      return (
+                        <tr key={entry.ip} className="border-b border-neutral-800 last:border-0 align-top">
+                          <td className="px-4 py-2 font-mono text-xs text-neutral-100">{entry.ip}</td>
+                          <td className="px-4 py-2">
+                            <span className={`rounded border px-1.5 py-0 text-[10px] ${style.badge}`}>{style.label}</span>
+                          </td>
+                          <td className="px-4 py-2 text-xs text-neutral-300">
+                            <div className="flex flex-wrap gap-1">
+                              {entry.hosts.map((h) => (
+                                <span key={h.hostId} className="rounded border border-neutral-700 px-1.5 py-0.5">
+                                  {h.hostName}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-4 py-2 text-right">
+                            <button
+                              onClick={() => openBlockModal(entry)}
+                              className="rounded border border-neutral-600 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+                            >
+                              Bloquer
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded border border-neutral-800 bg-neutral-900">
+            <div className="border-b border-neutral-800 px-4 py-3">
+              <h2 className="text-sm font-semibold text-neutral-100">
+                IPs bloquées {blockedIps.length > 0 ? `(${blockedIps.length})` : ""}
+              </h2>
+              <p className="mt-0.5 text-xs text-neutral-500">
+                Débloquer retire la règle sur toutes les machines de l&apos;infrastructure d&apos;un coup.
+              </p>
+            </div>
+            {blockedIps.length === 0 ? (
+              <p className="p-4 text-sm text-neutral-500">Aucune IP bloquée actuellement.</p>
+            ) : (
+              <ul className="divide-y divide-neutral-800">
+                {blockedIps.map((entry) => (
+                  <li key={entry.ip} className="flex items-center justify-between px-4 py-2.5">
+                    <div>
+                      <span className="font-mono text-sm text-neutral-100">{entry.ip}</span>
+                      <span className="ml-2 text-xs text-neutral-500">
+                        Bloquée le {new Date(entry.blockedAt).toLocaleString("fr-FR")}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => unblockIp(entry.ip)}
+                      disabled={unblocking === entry.ip}
+                      className="rounded border border-neutral-600 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800 disabled:opacity-50"
+                    >
+                      {unblocking === entry.ip ? "Déblocage..." : "Débloquer"}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
-      )}
-
-      {blockedIps.length > 0 && (
-        <div className="rounded border border-neutral-800 bg-neutral-900">
-          <div className="border-b border-neutral-800 px-4 py-3">
-            <h2 className="text-sm font-semibold text-neutral-100">IPs bloquées ({blockedIps.length})</h2>
-            <p className="mt-0.5 text-xs text-neutral-500">
-              Débloquer retire la règle sur toutes les machines de l&apos;infrastructure d&apos;un coup.
-            </p>
-          </div>
-          <ul className="divide-y divide-neutral-800">
-            {blockedIps.map((entry) => (
-              <li key={entry.ip} className="flex items-center justify-between px-4 py-2.5">
-                <div>
-                  <span className="font-mono text-sm text-neutral-100">{entry.ip}</span>
-                  <span className="ml-2 text-xs text-neutral-500">
-                    Bloquée le {new Date(entry.blockedAt).toLocaleString("fr-FR")}
-                  </span>
-                </div>
-                <button
-                  onClick={() => unblockIp(entry.ip)}
-                  disabled={unblocking === entry.ip}
-                  className="rounded border border-neutral-600 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800 disabled:opacity-50"
-                >
-                  {unblocking === entry.ip ? "Déblocage..." : "Débloquer"}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div className="space-y-3">
-        <DetectionThresholdsPanel />
-        <SmtpSettingsPanel />
-        <NotificationChannelsPanel />
-        <CertificateWatchPanel onChanged={runScan} />
-        <TrustedDevicesPanel />
       </div>
 
       <div className="space-y-4">
+        <h2 className="text-sm font-semibold text-neutral-100">Analyse par machine</h2>
         {results
           ?.slice()
           .sort((a, b) => SEVERITY_ORDER.indexOf(hostScore(a)) - SEVERITY_ORDER.indexOf(hostScore(b)))
@@ -502,6 +506,14 @@ export default function SecurityPage() {
               </div>
             );
           })}
+      </div>
+
+      <div className="space-y-3">
+        <DetectionThresholdsPanel />
+        <SmtpSettingsPanel />
+        <NotificationChannelsPanel />
+        <CertificateWatchPanel onChanged={runScan} />
+        <TrustedDevicesPanel />
       </div>
 
       {confirming && (

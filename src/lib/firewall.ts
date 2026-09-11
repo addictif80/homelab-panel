@@ -19,6 +19,27 @@ function getHostUpdateMethod(hostId: number): string | null {
   return row?.update_method ?? null;
 }
 
+/**
+ * Refuses to block an IP that belongs to the infrastructure itself — a host's LAN address,
+ * Tailscale address, or public IP (several physical machines can share the same one, e.g. behind
+ * the same Freebox/router). Blocking one of these would either be a no-op self-sabotage (a LAN
+ * IP dropped on itself) or lock the panel out of a machine it manages, so this is checked before
+ * any SSH command runs rather than left to fail loudly later.
+ */
+function findInfraOwner(ip: string): string | null {
+  const row = getDb()
+    .prepare(`SELECT name FROM hosts WHERE lan_ip = ? OR tailscale_ip = ? OR public_ip = ? LIMIT 1`)
+    .get(ip, ip, ip) as { name: string } | undefined;
+  return row?.name ?? null;
+}
+
+function assertBlockable(ip: string): void {
+  const owner = findInfraOwner(ip);
+  if (owner) {
+    throw new Error(`${ip} est une adresse de l'infrastructure (${owner}) — blocage refusé pour éviter un auto-verrouillage.`);
+  }
+}
+
 /** The Security Center treats blocking as one infra-wide action rather than per-host state — see
  * blocked_ips in lib/db.ts. */
 export function recordBlockedIp(ip: string): void {
@@ -49,6 +70,7 @@ export type BlockEverywhereResult = { hostId: number; hostName: string; ok: bool
  * a machine mid-setup, ...) just reports its own failure rather than aborting the whole batch.
  */
 export async function blockIpEverywhere(ip: string): Promise<BlockEverywhereResult[]> {
+  assertBlockable(ip);
   const hosts = getDb().prepare(`SELECT id, name FROM hosts ORDER BY kind, name`).all() as {
     id: number;
     name: string;
@@ -113,6 +135,7 @@ export async function unblockIpEverywhere(ip: string): Promise<BlockEverywhereRe
  *  - Anything else (Synology DSM, unknown): best-effort iptables rule only, flagged as such.
  */
 export async function blockIp(hostId: number, ip: string): Promise<{ message: string }> {
+  assertBlockable(ip);
   const result = await applyBlockIp(hostId, ip);
   recordBlockedIp(ip);
   return result;
