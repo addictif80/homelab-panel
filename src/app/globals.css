@@ -105,3 +105,24 @@ body {
     @apply mt-1 text-sm text-neutral-400;
   }
 }
+
+/* Vue vivante (LivingBrain): each node's own heartbeat, and a flowing dash pattern along links
+ * between two currently-reachable hosts. Duration is set per node via an inline style (tied to
+ * real latency), so the keyframes themselves only define the motion, not its speed. */
+@keyframes brain-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.35); opacity: 1; }
+}
+.brain-node {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation-name: brain-pulse;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+@keyframes brain-flow {
+  to { stroke-dashoffset: -20; }
+}
+.brain-flow {
+  animation: brain-flow 1s linear infinite;
+}
