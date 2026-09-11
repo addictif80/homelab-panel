@@ -16,9 +16,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex flex-1 flex-col">
       <TrialBanner />
       <SelfUpdateBanner />
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
         <Sidebar />
-        <main className="flex-1 overflow-auto p-6">{children}</main>
+        <main className="flex-1 overflow-auto p-4 sm:p-6">{children}</main>
       </div>
     </div>
   );

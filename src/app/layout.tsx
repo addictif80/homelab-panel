@@ -27,11 +27,21 @@ export const metadata: Metadata = {
   title: "Homelab Panel",
   description: "Panneau de contrôle centralisé du homelab",
   manifest: "/manifest.webmanifest",
-  icons: { icon: "/icon.svg", apple: "/icon.svg" },
+  icons: { icon: "/icon.svg", apple: "/apple-touch-icon.png" },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Homelab",
+  },
 };
 
 export const viewport = {
   themeColor: "#3b56d9",
+  // viewportFit "cover" lets the standalone app draw under the notch/home-indicator area — the
+  // safe-area-inset-* env() values used in AppShell/Sidebar only report non-zero once this is set.
+  viewportFit: "cover",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

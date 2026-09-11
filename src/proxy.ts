@@ -2,7 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken, createSessionToken, getUserRole, SESSION_COOKIE_NAME, SESSION_MAX_AGE } from "@/lib/auth";
 import { isMutationBlocked } from "@/lib/license";
 
-const PUBLIC_PATHS = ["/login", "/setup"];
+// PWA installability assets: the browser (and, on iOS, the Safari "Add to Home Screen" sheet)
+// fetches these without necessarily carrying a session cookie yet — e.g. from the login screen,
+// or an install prompt shown before the first successful sign-in. Gating them behind auth turns
+// them into an HTML redirect to /login, which breaks manifest parsing and service worker
+// registration (wrong MIME type) for anyone who hasn't logged in yet on this device.
+const PUBLIC_PWA_ASSETS = [
+  "/manifest.webmanifest",
+  "/sw.js",
+  "/icon.svg",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/apple-touch-icon.png",
+];
+const PUBLIC_PATHS = ["/login", "/setup", ...PUBLIC_PWA_ASSETS];
 const PUBLIC_PATH_PREFIXES = ["/store"];
 const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/store/", "/api/download/"];
 // Carved out of the otherwise auth-gated /api/seller/ prefix: every buyer's own self-hosted

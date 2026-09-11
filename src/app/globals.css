@@ -16,6 +16,17 @@ select {
   color: inherit;
 }
 
+/* Installed-app feel on mobile: no callout/highlight flash on tap, and no rubber-band scroll
+   escaping into a pull-to-refresh or back-swipe gesture on the body itself (inner scroll
+   containers like the log tail or SSH terminal keep their own native scrolling). */
+html {
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: contain;
+}
+body {
+  touch-action: manipulation;
+}
+
 @theme inline {
   --font-sans: var(--font-plex-sans);
   --font-mono: var(--font-plex-mono);
