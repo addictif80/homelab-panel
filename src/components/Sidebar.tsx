@@ -121,18 +121,25 @@ export default function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    fetch("/api/hosts")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!data?.hosts) return;
-        // Several physical machines can share one public IP (same ISP line/box) — dedupe so it's
-        // a list of distinct exit points, not one row per host.
-        const ips = (data.hosts as { public_ip: string | null }[])
-          .map((h) => h.public_ip)
-          .filter((ip): ip is string => !!ip);
-        setPublicIps(Array.from(new Set(ips)));
-      })
-      .catch(() => {});
+    Promise.all([
+      fetch("/api/hosts")
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null),
+      // Fallback for installs with no router configured under Box & routeurs: the IP the panel's
+      // own traffic exits with, detected automatically rather than needing to be typed in anywhere.
+      fetch("/api/network/public-ip")
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null),
+    ]).then(([hostsData, panelIpData]) => {
+      // Several physical machines can share one public IP (same ISP line/box, or a router's WAN
+      // IP already picked up automatically from Box & routeurs) — dedupe so it's a list of
+      // distinct exit points, not one row per host.
+      const ips = (hostsData?.hosts as { public_ip: string | null }[] | undefined)
+        ?.map((h) => h.public_ip)
+        .filter((ip): ip is string => !!ip) ?? [];
+      if (panelIpData?.ip) ips.push(panelIpData.ip);
+      setPublicIps(Array.from(new Set(ips)));
+    });
   }, []);
 
   // A route change is the normal way a drawer link gets used, so close it automatically instead
