@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import DirectoryPicker from "@/components/DirectoryPicker";
 
 type Host = { id: number; name: string; kind: string; docker_enabled: number; proxmox_node: string | null };
 type SourceType = "paths" | "docker" | "database" | "proxmox_vm";
@@ -406,6 +407,7 @@ function CreatePlanForm({
 
   // paths
   const [pathsText, setPathsText] = useState("/etc");
+  const [browsing, setBrowsing] = useState<"source" | "dest" | null>(null);
 
   // docker
   const [containers, setContainers] = useState<DockerContainer[]>([]);
@@ -422,13 +424,26 @@ function CreatePlanForm({
   // proxmox
   const [pveResources, setPveResources] = useState<ProxmoxResource[]>([]);
   const [selectedVmid, setSelectedVmid] = useState<number | null>(null);
+  const [containersError, setContainersError] = useState("");
 
   useEffect(() => {
     if (!sourceHostId) return;
     if (sourceType === "docker" || sourceType === "database") {
+      setContainersError("");
       fetch(`/api/docker/${sourceHostId}/containers`)
         .then((r) => r.json())
-        .then((d) => setContainers(d.containers || []));
+        .then((d) => {
+          // A failed listing (permission denied, sudo not configured for this host, docker not
+          // found...) used to silently look identical to "this machine really has zero
+          // containers" — surface the real reason instead of defaulting to an empty list.
+          if (d.error) {
+            setContainersError(d.error);
+            setContainers([]);
+            return;
+          }
+          setContainers(d.containers || []);
+        })
+        .catch(() => setContainersError("Impossible de contacter le panel."));
     }
     if (sourceType === "proxmox_vm") {
       fetch(`/api/proxmox/${sourceHostId}/resources`)
@@ -534,7 +549,17 @@ function CreatePlanForm({
         </label>
         <label className="col-span-2 block">
           <span className="mb-1 block text-xs text-neutral-400">Dossier de destination</span>
-          <input value={destPath} onChange={(e) => setDestPath(e.target.value)} className={INPUT_CLASS} />
+          <div className="flex gap-2">
+            <input value={destPath} onChange={(e) => setDestPath(e.target.value)} className={INPUT_CLASS} />
+            <button
+              type="button"
+              onClick={() => setBrowsing("dest")}
+              disabled={!destHostId}
+              className="shrink-0 rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800 disabled:opacity-40"
+            >
+              Parcourir...
+            </button>
+          </div>
         </label>
         <label className="block">
           <span className="mb-1 block text-xs text-neutral-400">Fréquence</span>
@@ -567,7 +592,34 @@ function CreatePlanForm({
             rows={3}
             className={`${INPUT_CLASS} font-mono`}
           />
+          <button
+            type="button"
+            onClick={() => setBrowsing("source")}
+            disabled={!sourceHostId}
+            className="mt-1.5 rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800 disabled:opacity-40"
+          >
+            Parcourir la machine source...
+          </button>
         </label>
+      )}
+
+      {browsing && (
+        <DirectoryPicker
+          hostId={(browsing === "source" ? sourceHostId : destHostId)!}
+          initialPath={browsing === "source" ? pathsText.split("\n").pop()?.trim() || "/" : destPath}
+          onClose={() => setBrowsing(null)}
+          onSelect={(path) => {
+            if (browsing === "source") {
+              setPathsText((prev) => {
+                const lines = prev.split("\n").map((l) => l.trim()).filter(Boolean);
+                return lines.includes(path) ? prev : [...lines, path].join("\n");
+              });
+            } else {
+              setDestPath(path);
+            }
+            setBrowsing(null);
+          }}
+        />
       )}
 
       {sourceType === "docker" && (
@@ -589,8 +641,15 @@ function CreatePlanForm({
                 {c.name}
               </label>
             ))}
-            {containers.length === 0 && <p className="p-2 text-xs text-neutral-600">Aucun conteneur sur cette machine.</p>}
+            {containers.length === 0 && !containersError && (
+              <p className="p-2 text-xs text-neutral-600">Aucun conteneur sur cette machine.</p>
+            )}
           </div>
+          {containersError && (
+            <p className="mt-1 text-xs text-red-400">
+              Impossible de lister les conteneurs : {containersError}
+            </p>
+          )}
         </div>
       )}
 
