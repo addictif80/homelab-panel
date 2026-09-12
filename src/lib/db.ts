@@ -271,6 +271,19 @@ function migrate(db: Database.Database) {
       detail TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- The "boîte noire" for Vue vivante: a rolling recording of every host's reachability pulse,
+    -- pruned to a fixed retention window (see lib/pulseRecorder.ts) rather than kept forever —
+    -- this is a scrub-back-through-recent-history feature, not a long-term metrics store.
+    CREATE TABLE IF NOT EXISTS pulse_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+      reachable INTEGER NOT NULL,
+      latency_ms INTEGER,
+      recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pulse_history_time ON pulse_history(recorded_at);
   `);
 
   // Trial clock starts the instant the database is first created — not on some later "first

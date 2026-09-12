@@ -4,6 +4,7 @@ import { attachSshWebSocketServer } from "./src/server/ssh-ws";
 import { attachLogsWebSocketServer } from "./src/server/logs-ws";
 import { startNotificationScheduler } from "./src/lib/notifications/scheduler";
 import { startBackupScheduler } from "./src/lib/backup/scheduler";
+import { startPulseRecorder } from "./src/lib/pulseRecorder";
 import { autoActivateFromBundledKey } from "./src/lib/license";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -22,6 +23,7 @@ app.prepare().then(() => {
   attachLogsWebSocketServer(server);
   startNotificationScheduler();
   startBackupScheduler();
+  startPulseRecorder();
   autoActivateFromBundledKey().catch(() => {});
 
   server.listen(port, hostname, () => {

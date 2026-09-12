@@ -48,6 +48,26 @@ type HostRow = {
   ssh_user: string | null;
 };
 
+export type PulseHistoryRow = { hostId: number; reachable: boolean; latencyMs: number | null; recordedAt: string };
+
+/** Raw recorded ticks for the "boîte noire" rewind — grouping by exact recorded_at into distinct
+ * ticks is left to the caller, since a single recording pass writes all hosts within the same
+ * SQLite-resolution second and is cheap to re-group in JS. */
+export function getPulseHistory(sinceHoursAgo: number): PulseHistoryRow[] {
+  return getDb()
+    .prepare(
+      `SELECT host_id as hostId, reachable, latency_ms as latencyMs, recorded_at as recordedAt
+       FROM pulse_history
+       WHERE recorded_at > datetime('now', ?)
+       ORDER BY recorded_at ASC`
+    )
+    .all(`-${sinceHoursAgo} hours`)
+    .map((r) => {
+      const row = r as { hostId: number; reachable: number; latencyMs: number | null; recordedAt: string };
+      return { ...row, reachable: !!row.reachable };
+    });
+}
+
 export async function getFleetPulse(): Promise<HostPulse[]> {
   const hosts = getDb()
     .prepare(`SELECT id, lan_ip, tailscale_ip, public_ip, ssh_port, ssh_user FROM hosts`)

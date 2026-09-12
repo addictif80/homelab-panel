@@ -24,6 +24,14 @@ type Host = {
 
 type Link = { id: number; host_a_id: number; host_b_id: number; link_type: string };
 
+const LINK_TYPE_LABELS: Record<string, string> = {
+  lan: "Lien LAN",
+  tailscale: "Lien Tailscale",
+  cluster: "Cluster Proxmox",
+  network: "Réseau (générique)",
+};
+const LINK_TYPE_OPTIONS = Object.keys(LINK_TYPE_LABELS);
+
 const KIND_LABELS: Record<string, string> = {
   physical: "Serveur physique",
   vm: "VM",
@@ -123,6 +131,8 @@ export default function InventoryPage() {
   const [editingId, setEditingId] = useState<number | "new" | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [formError, setFormError] = useState("");
+  const [linkForm, setLinkForm] = useState({ host_a_id: "", host_b_id: "", link_type: "lan" });
+  const [linkError, setLinkError] = useState("");
 
   const load = useCallback(async () => {
     const res = await fetch("/api/hosts");
@@ -208,6 +218,37 @@ export default function InventoryPage() {
     if (!confirm(`Supprimer ${h.name} ? Ses identifiants SSH associés seront aussi supprimés.`)) return;
     await fetch(`/api/hosts/${h.id}`, { method: "DELETE" });
     load();
+  }
+
+  async function addLink(e: React.FormEvent) {
+    e.preventDefault();
+    setLinkError("");
+    try {
+      const res = await fetch("/api/hosts/links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          host_a_id: Number(linkForm.host_a_id),
+          host_b_id: Number(linkForm.host_b_id),
+          link_type: linkForm.link_type,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setLinkForm({ host_a_id: "", host_b_id: "", link_type: "lan" });
+      load();
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : "Erreur");
+    }
+  }
+
+  async function deleteLink(id: number) {
+    await fetch(`/api/hosts/links/${id}`, { method: "DELETE" });
+    load();
+  }
+
+  function hostName(id: number): string {
+    return hosts.find((h) => h.id === id)?.name ?? `#${id}`;
   }
 
   return (
@@ -306,7 +347,100 @@ export default function InventoryPage() {
           </table>
         </div>
       ) : (
-        <TopologyDiagram hosts={hosts} links={links} />
+        <div className="space-y-4">
+          <TopologyDiagram hosts={hosts} links={links} />
+
+          <div className="rounded border border-neutral-800 bg-neutral-900 p-4">
+            <h2 className="text-sm font-semibold text-neutral-100">Liens réseau</h2>
+            <p className="mt-1 text-xs text-neutral-500">
+              Ce sont ces liens qui dessinent le schéma ci-dessus (et les connexions de la Vue vivante). Ils
+              ne sont pas déduits automatiquement — ajoute ou supprime-les ici pour qu&apos;ils reflètent ton
+              réseau réel.
+            </p>
+
+            <form onSubmit={addLink} className="mt-3 flex flex-wrap items-end gap-2">
+              <div>
+                <label className="block text-xs mb-1 text-neutral-400">Machine A</label>
+                <select
+                  value={linkForm.host_a_id}
+                  onChange={(e) => setLinkForm({ ...linkForm, host_a_id: e.target.value })}
+                  className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm"
+                  required
+                >
+                  <option value="" disabled>
+                    Choisir...
+                  </option>
+                  {hosts.map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs mb-1 text-neutral-400">Machine B</label>
+                <select
+                  value={linkForm.host_b_id}
+                  onChange={(e) => setLinkForm({ ...linkForm, host_b_id: e.target.value })}
+                  className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm"
+                  required
+                >
+                  <option value="" disabled>
+                    Choisir...
+                  </option>
+                  {hosts.map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs mb-1 text-neutral-400">Type</label>
+                <select
+                  value={linkForm.link_type}
+                  onChange={(e) => setLinkForm({ ...linkForm, link_type: e.target.value })}
+                  className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm"
+                >
+                  {LINK_TYPE_OPTIONS.map((t) => (
+                    <option key={t} value={t}>
+                      {LINK_TYPE_LABELS[t]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="submit"
+                className="rounded bg-blue-600 text-white px-3 py-1.5 text-sm font-medium hover:bg-blue-500"
+              >
+                + Ajouter le lien
+              </button>
+            </form>
+            {linkError && <p className="mt-2 text-xs text-red-400">{linkError}</p>}
+
+            <ul className="mt-4 divide-y divide-neutral-800 border-t border-neutral-800">
+              {links.map((l) => (
+                <li key={l.id} className="flex items-center justify-between py-2 text-sm">
+                  <span>
+                    <span className="font-medium text-neutral-200">{hostName(l.host_a_id)}</span>
+                    <span className="text-neutral-500"> ↔ </span>
+                    <span className="font-medium text-neutral-200">{hostName(l.host_b_id)}</span>
+                    <span className="ml-2 text-xs text-neutral-500">
+                      {LINK_TYPE_LABELS[l.link_type] ?? l.link_type}
+                    </span>
+                  </span>
+                  <button
+                    onClick={() => deleteLink(l.id)}
+                    className="rounded border border-neutral-700 px-2 py-0.5 text-xs text-red-400 hover:bg-neutral-800"
+                  >
+                    Supprimer
+                  </button>
+                </li>
+              ))}
+              {links.length === 0 && <li className="py-3 text-sm text-neutral-500">Aucun lien pour l&apos;instant.</li>}
+            </ul>
+          </div>
+        </div>
       )}
 
       {editingId !== null && (
