@@ -1,6 +1,6 @@
 export type Severity = "critical" | "warning" | "info" | "good";
 
-export type FindingCategory = "ssh" | "firewall" | "updates" | "accounts" | "network" | "docker";
+export type FindingCategory = "ssh" | "firewall" | "updates" | "accounts" | "network" | "docker" | "diagnostics";
 
 export type Finding = {
   id: string;

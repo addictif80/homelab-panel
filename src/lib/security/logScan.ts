@@ -1,7 +1,7 @@
 import { runSshCommand, shellQuote } from "../ssh";
 import { withTimeout } from "../timeout";
 import { listLogSources } from "../logSources";
-import { analyzeLogLines, reasonLabel } from "../logAnalysis";
+import { analyzeLogLines, reasonLabel, summarizeGenericErrors } from "../logAnalysis";
 import { getDetectionThresholds } from "../logAnalysisSettings";
 import type { Finding } from "./types";
 
@@ -51,6 +51,18 @@ export async function historicalLogFindings(hostId: number): Promise<Finding[]> 
         fixId: "block-ip",
         fixLabel: `Bloquer ${s.ip}`,
         fixParams: { ip: s.ip },
+      });
+    }
+
+    const errorSummary = summarizeGenericErrors(lines);
+    if (errorSummary) {
+      findings.push({
+        id: `log-errors-${source.id}`,
+        category: "diagnostics",
+        severity: errorSummary.count >= 100 ? "critical" : "warning",
+        title: `Beaucoup d'erreurs dans les logs "${source.label}" (${errorSummary.count})`,
+        detail: `Sur les ${HISTORY_LINES} dernières lignes du conteneur "${source.containerName}", ${errorSummary.count} contiennent un mot-clé d'erreur (error, exception, fatal, refused...). Dernier exemple : "${errorSummary.sample}". Action recommandée : ouvrir les logs complets de ce conteneur pour identifier la cause.`,
+        howTo: [`docker logs --tail 200 ${source.containerId}`],
       });
     }
   }

@@ -2,6 +2,7 @@ import { getDb, logAudit } from "../db";
 import { collectHostFacts } from "./facts";
 import { analyzeHost } from "./analyze";
 import { historicalLogFindings } from "./logScan";
+import { hostDiagnosticsFindings } from "./hostDiagnostics";
 import { listIgnoredKeys } from "./ignore";
 import { scanCertificates } from "./certFindings";
 import type { HostScanResult } from "./types";
@@ -26,9 +27,12 @@ export async function scanHost(host: HostRow): Promise<HostScanResult> {
   try {
     const facts = await collectHostFacts(host.id);
     const findings = analyzeHost(host, facts);
-    const logFindings = await historicalLogFindings(host.id).catch(() => []);
+    const [logFindings, diagFindings] = await Promise.all([
+      historicalLogFindings(host.id).catch(() => []),
+      hostDiagnosticsFindings(host.id).catch(() => []),
+    ]);
     const ignoredKeys = listIgnoredKeys();
-    const allFindings = [...findings, ...logFindings].map((f) =>
+    const allFindings = [...findings, ...logFindings, ...diagFindings].map((f) =>
       ignoredKeys.has(`${host.id}:${f.id}`) ? { ...f, ignored: true } : f
     );
     return {

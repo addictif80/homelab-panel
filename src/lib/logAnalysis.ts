@@ -52,6 +52,25 @@ function extractStatusCode(line: string): number | null {
   return match ? parseInt(match[1], 10) : null;
 }
 
+const GENERIC_ERROR_RE = /\b(error|exception|fatal|critical|panic|traceback|segfault|refused|denied)\b/i;
+const GENERIC_ERROR_MIN_COUNT = 15;
+
+export type GenericErrorSummary = { count: number; sample: string };
+
+/**
+ * Flags a log source that's generally noisy with error-level messages, independently of the
+ * IP-focused suspicious-activity detection above — catches an app that's misbehaving even when
+ * nothing about the traffic itself looks like an attack (e.g. a backend crashing on bad input).
+ */
+export function summarizeGenericErrors(
+  lines: string[],
+  minCount: number = GENERIC_ERROR_MIN_COUNT
+): GenericErrorSummary | null {
+  const matches = lines.filter((l) => GENERIC_ERROR_RE.test(l));
+  if (matches.length < minCount) return null;
+  return { count: matches.length, sample: matches[matches.length - 1].slice(0, 300) };
+}
+
 /** Scans a batch of log lines and returns IPs worth suggesting a block for, with why. */
 export function analyzeLogLines(
   lines: string[],
