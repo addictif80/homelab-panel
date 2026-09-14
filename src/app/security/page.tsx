@@ -34,6 +34,7 @@ type HostScanResult = {
 };
 
 const SEVERITY_ORDER: Severity[] = ["critical", "warning", "info", "good"];
+const COLLAPSE_THRESHOLD = 5;
 
 const SEVERITY_STYLES: Record<Severity, { dot: string; badge: string; label: string }> = {
   critical: { dot: "bg-red-500", badge: "border-red-800 bg-red-950/40 text-red-300", label: "Critique" },
@@ -104,6 +105,16 @@ export default function SecurityPage() {
   const [blocking, setBlocking] = useState(false);
   const [blockedIps, setBlockedIps] = useState<{ ip: string; blockedAt: string }[]>([]);
   const [unblocking, setUnblocking] = useState<string | null>(null);
+  const [expandedHosts, setExpandedHosts] = useState<Set<number>>(new Set());
+
+  function toggleHostExpanded(hostId: number) {
+    setExpandedHosts((prev) => {
+      const next = new Set(prev);
+      if (next.has(hostId)) next.delete(hostId);
+      else next.add(hostId);
+      return next;
+    });
+  }
 
   const runScan = useCallback(async () => {
     setLoading(true);
@@ -408,15 +419,19 @@ export default function SecurityPage() {
                     <p className="text-sm text-emerald-400">Aucun problème détecté sur cette machine.</p>
                   )}
 
-                  {!host.error && host.findings.length > 0 && (
-                    <ul className="space-y-3">
-                      {host.findings
-                        .slice()
-                        .sort((a, b) => {
-                          if (!!a.ignored !== !!b.ignored) return a.ignored ? 1 : -1;
-                          return SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity);
-                        })
-                        .map((finding) => {
+                  {!host.error && host.findings.length > 0 && (() => {
+                    const sortedFindings = host.findings.slice().sort((a, b) => {
+                      if (!!a.ignored !== !!b.ignored) return a.ignored ? 1 : -1;
+                      return SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity);
+                    });
+                    const isExpanded = expandedHosts.has(host.hostId);
+                    const hiddenCount = sortedFindings.length - COLLAPSE_THRESHOLD;
+                    const visibleFindings =
+                      isExpanded || hiddenCount <= 0 ? sortedFindings : sortedFindings.slice(0, COLLAPSE_THRESHOLD);
+                    return (
+                      <>
+                        <ul className="space-y-3">
+                          {visibleFindings.map((finding) => {
                           const fStyle = SEVERITY_STYLES[finding.severity];
                           const howToKey = `${host.hostId}:${finding.id}`;
                           const busy = ignoring === howToKey;
@@ -500,8 +515,18 @@ export default function SecurityPage() {
                             </li>
                           );
                         })}
-                    </ul>
-                  )}
+                        </ul>
+                        {hiddenCount > 0 && (
+                          <button
+                            onClick={() => toggleHostExpanded(host.hostId)}
+                            className="mt-3 text-xs text-blue-400 hover:underline"
+                          >
+                            {isExpanded ? "Réduire la liste" : `Afficher ${hiddenCount} problème${hiddenCount > 1 ? "s" : ""} de plus`}
+                          </button>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             );
