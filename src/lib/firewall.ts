@@ -127,12 +127,34 @@ export async function unblockIpEverywhere(ip: string): Promise<BlockEverywhereRe
 }
 
 /**
+ * Detects UFW at the top of the block/unblock command instead of assuming raw iptables: on any
+ * Ubuntu box with UFW enabled (the default on Ubuntu Desktop, and common on Ubuntu Server too),
+ * `iptables -I INPUT` either gets overridden by UFW's own chains or gets silently wiped out the
+ * next time UFW reloads its rules from /etc/ufw/ — and on newer Debian/Ubuntu releases the
+ * `iptables` binary may not even be installed at all (nftables-only by default), so the command
+ * just fails outright. UFW rules are persistent by construction (stored under /etc/ufw/), so
+ * there's no separate "make it survive a reboot" step needed for that branch, unlike raw iptables.
+ */
+function firewallBackendScript(ip: string, onUfw: string, onIptables: string): string {
+  return [
+    `IP=${shellQuote(ip)}`,
+    `if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "^Status: active"; then`,
+    onUfw,
+    `else`,
+    onIptables,
+    `fi`,
+  ].join("\n");
+}
+
+/**
  * Blocks an IP on the given host and tries to make it survive a reboot, using whatever
- * mechanism fits that host's OS family (a raw iptables rule resets on reboot otherwise):
- *  - Debian/Ubuntu (apt): iptables-persistent, installed on first use if missing.
+ * mechanism fits that host's OS family:
  *  - OpenWrt (opkg): a named uci firewall rule, persistent by nature since it's written
  *    straight into /etc/config/firewall.
- *  - Anything else (Synology DSM, unknown): best-effort iptables rule only, flagged as such.
+ *  - UFW active (detected at runtime, not just inferred from update_method): `ufw insert`,
+ *    persistent by construction.
+ *  - Debian/Ubuntu (apt) without UFW: iptables-persistent, installed on first use if missing.
+ *  - Anything else (Synology DSM, unknown): best-effort raw iptables rule, flagged as such.
  */
 export async function blockIp(hostId: number, ip: string): Promise<{ message: string }> {
   assertBlockable(ip);
@@ -170,35 +192,44 @@ async function applyBlockIp(hostId: number, ip: string): Promise<{ message: stri
     return { message: `IP ${ip} bloquée (règle uci persistante, survit à un redémarrage).` };
   }
 
-  const iptablesCommand = `iptables -C INPUT -s ${shellQuote(ip)} -j DROP 2>/dev/null || iptables -I INPUT -s ${shellQuote(ip)} -j DROP`;
+  const persistApt =
+    updateMethod === "apt"
+      ? [
+          `  if command -v netfilter-persistent >/dev/null 2>&1; then`,
+          `    netfilter-persistent save >/dev/null 2>&1`,
+          `  else`,
+          `    export DEBIAN_FRONTEND=noninteractive`,
+          `    apt-get update -qq >/dev/null 2>&1 && apt-get install -y iptables-persistent >/dev/null 2>&1 && netfilter-persistent save >/dev/null 2>&1`,
+          `  fi`,
+        ].join("\n")
+      : "";
 
-  if (updateMethod === "apt") {
-    const command = [
-      iptablesCommand,
-      `if command -v netfilter-persistent >/dev/null 2>&1; then`,
-      `  netfilter-persistent save >/dev/null 2>&1`,
-      `else`,
-      `  export DEBIAN_FRONTEND=noninteractive`,
-      `  apt-get update -qq >/dev/null 2>&1 && apt-get install -y iptables-persistent >/dev/null 2>&1 && netfilter-persistent save >/dev/null 2>&1`,
-      `fi`,
-    ].join("\n");
-    const { code, stderr } = await withTimeout(
-      runSshCommand(hostId, command, { sudo: true }),
-      BLOCK_TIMEOUT_MS,
-      "Délai dépassé lors du blocage."
-    );
-    if (code !== 0) throw new Error(stderr || "Échec du blocage iptables.");
-    return { message: `IP ${ip} bloquée (règle iptables persistante, survit à un redémarrage).` };
-  }
+  const command = firewallBackendScript(
+    ip,
+    [
+      `  ufw status numbered 2>/dev/null | grep -q "DENY.*$IP" || ufw insert 1 deny from "$IP" to any`,
+      `  echo homelab_backend=ufw`,
+    ].join("\n"),
+    [
+      `  iptables -C INPUT -s "$IP" -j DROP 2>/dev/null || iptables -I INPUT -s "$IP" -j DROP`,
+      persistApt,
+      `  echo homelab_backend=iptables`,
+    ].join("\n")
+  );
 
-  // DSM or unrecognized update method: apply a plain iptables rule, best-effort, but be honest
-  // that it won't survive a reboot on this kind of machine.
-  const { code, stderr } = await withTimeout(
-    runSshCommand(hostId, iptablesCommand, { sudo: true }),
+  const { code, stdout, stderr } = await withTimeout(
+    runSshCommand(hostId, command, { sudo: true }),
     BLOCK_TIMEOUT_MS,
     "Délai dépassé lors du blocage."
   );
-  if (code !== 0) throw new Error(stderr || "Échec du blocage iptables.");
+  if (code !== 0) throw new Error(stderr || "Échec du blocage du pare-feu.");
+
+  if (stdout.includes("homelab_backend=ufw")) {
+    return { message: `IP ${ip} bloquée via UFW (règle persistante, survit à un redémarrage).` };
+  }
+  if (updateMethod === "apt") {
+    return { message: `IP ${ip} bloquée (règle iptables persistante, survit à un redémarrage).` };
+  }
   return {
     message: `IP ${ip} bloquée pour la session en cours seulement : la persistance après redémarrage n'est pas gérée pour ce type de machine.`,
   };
@@ -231,27 +262,22 @@ export async function unblockIp(hostId: number, ip: string): Promise<{ message: 
     return { message: `IP ${ip} débloquée.` };
   }
 
-  const removeCommand = `iptables -D INPUT -s ${shellQuote(ip)} -j DROP 2>/dev/null || true`;
-
-  if (updateMethod === "apt") {
-    const command = [
-      removeCommand,
-      `command -v netfilter-persistent >/dev/null 2>&1 && netfilter-persistent save >/dev/null 2>&1 || true`,
-    ].join("\n");
-    const { code, stderr } = await withTimeout(
-      runSshCommand(hostId, command, { sudo: true }),
-      BLOCK_TIMEOUT_MS,
-      "Délai dépassé lors du déblocage."
-    );
-    if (code !== 0) throw new Error(stderr || "Échec du déblocage iptables.");
-    return { message: `IP ${ip} débloquée.` };
-  }
+  const command = firewallBackendScript(
+    ip,
+    [`  ufw --force delete deny from "$IP" to any >/dev/null 2>&1 || true`].join("\n"),
+    [
+      `  iptables -D INPUT -s "$IP" -j DROP 2>/dev/null || true`,
+      updateMethod === "apt"
+        ? `  command -v netfilter-persistent >/dev/null 2>&1 && netfilter-persistent save >/dev/null 2>&1 || true`
+        : "",
+    ].join("\n")
+  );
 
   const { code, stderr } = await withTimeout(
-    runSshCommand(hostId, removeCommand, { sudo: true }),
+    runSshCommand(hostId, command, { sudo: true }),
     BLOCK_TIMEOUT_MS,
     "Délai dépassé lors du déblocage."
   );
-  if (code !== 0) throw new Error(stderr || "Échec du déblocage iptables.");
+  if (code !== 0) throw new Error(stderr || "Échec du déblocage du pare-feu.");
   return { message: `IP ${ip} débloquée.` };
 }
