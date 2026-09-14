@@ -211,7 +211,6 @@ export default function StorePage() {
           </div>
           <div className="flex items-center gap-4">
             <ThemeToggle />
-            <a href="/login" className="hidden text-sm text-neutral-400 hover:text-neutral-100 sm:inline">Se connecter</a>
             <a href="#tarifs" className="btn-primary px-4 py-2">Acheter</a>
           </div>
         </div>
@@ -551,7 +550,6 @@ export default function StorePage() {
           <div className="flex items-center gap-5">
             <a href="/store/guide" className="hover:text-neutral-300">Guide de déploiement</a>
             <a href="#support" className="hover:text-neutral-300">Support</a>
-            <a href="/login" className="hover:text-neutral-300">Connexion</a>
           </div>
         </div>
       </footer>
