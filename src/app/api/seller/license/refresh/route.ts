@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb, logAudit } from "@/lib/db";
-import { getSaleIdForKey } from "@/lib/seller/licenseKeys";
+import { logAudit } from "@/lib/db";
+import { getSaleIdForKey, getKeyInstanceBinding, bindKeyInstanceId } from "@/lib/seller/licenseKeys";
 import { buildCertificateForSale } from "@/lib/seller/licenseCertificate";
 
 /**
@@ -10,18 +10,37 @@ import { buildCertificateForSale } from "@/lib/seller/licenseCertificate";
  * paid-through date; a lifetime instance never needs to (its certificate never expires), but
  * calling it is harmless. The key must have been activated at least once already — this isn't a
  * second way to activate a never-used key.
+ *
+ * This endpoint is public (no session) by necessity, so the key text alone can't be the only
+ * credential: /validate binds the activating instance's instanceId to the key, and this route
+ * requires a matching instanceId before it will hand out a certificate. Without that check, anyone
+ * who merely learned another customer's license key (printed in an email, a config file, a
+ * support ticket) could call this endpoint directly and mint a validly-signed certificate for
+ * their own, unrelated installation. A key activated before this binding existed adopts whichever
+ * instanceId first calls refresh for it, so existing customers aren't locked out.
  */
 export async function POST(req: NextRequest) {
-  const { key } = (await req.json()) as { key?: string };
+  const { key, instanceId } = (await req.json()) as { key?: string; instanceId?: string };
   if (!key) return NextResponse.json({ valid: false, error: "Clé requise." }, { status: 400 });
 
-  const row = getDb().prepare(`SELECT used_at FROM license_keys WHERE key = ?`).get(key) as
-    | { used_at: string | null }
-    | undefined;
-  if (!row) return NextResponse.json({ valid: false, error: "Clé inconnue." }, { status: 400 });
-  if (!row.used_at) return NextResponse.json({ valid: false, error: "Cette clé n'a jamais été activée." }, { status: 400 });
+  const binding = getKeyInstanceBinding(key);
+  if (!binding) return NextResponse.json({ valid: false, error: "Clé inconnue." }, { status: 400 });
+  if (!binding.usedAt) {
+    return NextResponse.json({ valid: false, error: "Cette clé n'a jamais été activée." }, { status: 400 });
+  }
 
-  const certificate = buildCertificateForSale(key, getSaleIdForKey(key));
+  let boundInstanceId = binding.instanceId;
+  if (boundInstanceId) {
+    if (!instanceId || instanceId !== boundInstanceId) {
+      logAudit("seller.license_refresh_denied", key, "instance mismatch");
+      return NextResponse.json({ valid: false, error: "Cette clé est liée à une autre installation." }, { status: 403 });
+    }
+  } else if (instanceId) {
+    bindKeyInstanceId(key, instanceId);
+    boundInstanceId = instanceId;
+  }
+
+  const certificate = buildCertificateForSale(key, getSaleIdForKey(key), boundInstanceId);
   logAudit("seller.license_refresh", key);
   return NextResponse.json({ valid: true, certificate });
 }

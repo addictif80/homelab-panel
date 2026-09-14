@@ -312,6 +312,27 @@ function migrate(db: Database.Database) {
   if (!licenseColumns.some((c) => c.name === "certificate_json")) {
     db.exec(`ALTER TABLE license ADD COLUMN certificate_json TEXT`);
   }
+  if (!licenseColumns.some((c) => c.name === "instance_id")) {
+    // Random ID generated once locally and embedded (signed) into every certificate this instance
+    // requests — lets getVerifiedCertificatePayload() reject a certificate_json copy-pasted in
+    // from a different install's database, since the copy's embedded instanceId won't match.
+    db.exec(`ALTER TABLE license ADD COLUMN instance_id TEXT`);
+  }
+  if (!licenseColumns.some((c) => c.name === "last_seen_at")) {
+    // Monotonic floor against clock rollback: trial/subscription expiry is computed from
+    // max(Date.now(), last_seen_at) instead of raw Date.now(), so winding the system clock back
+    // can't un-expire a lapsed trial or subscription.
+    db.exec(`ALTER TABLE license ADD COLUMN last_seen_at TEXT`);
+  }
+
+  const licenseKeyColumns = db.prepare(`PRAGMA table_info(license_keys)`).all() as { name: string }[];
+  if (!licenseKeyColumns.some((c) => c.name === "instance_id")) {
+    // Bound to the requesting instance's local instance_id on first successful validate/refresh —
+    // /api/seller/license/refresh (a public, unauthenticated endpoint) checks this before
+    // re-issuing a signed certificate, so merely knowing another customer's license key text isn't
+    // enough to mint a valid certificate for a different installation.
+    db.exec(`ALTER TABLE license_keys ADD COLUMN instance_id TEXT`);
+  }
 
   const salesColumns = db.prepare(`PRAGMA table_info(sales)`).all() as { name: string }[];
   if (!salesColumns.some((c) => c.name === "product_type")) {

@@ -10,9 +10,10 @@ import { signLicensePayload, type LicenseCertificate } from "./licenseSigning";
  * downloads. Lifetime sales (or a key with no sale on record, e.g. free trial edge cases) get a
  * certificate with no expiry at all, exactly like before subscriptions existed.
  */
-export function buildCertificateForSale(key: string, saleId: string | null): LicenseCertificate {
+export function buildCertificateForSale(key: string, saleId: string | null, instanceId?: string | null): LicenseCertificate {
   const sale = saleId ? getSale(saleId) : null;
   const payload: Record<string, unknown> = { key, activatedAt: new Date().toISOString() };
+  if (instanceId) payload.instanceId = instanceId;
 
   if (sale && sale.productType !== "lifetime") {
     payload.licenseType = "subscription";

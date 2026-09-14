@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import path from "path";
-import { verify, createPublicKey } from "crypto";
+import { verify, createPublicKey, randomUUID } from "crypto";
 import { getDb } from "./db";
 
 type LicenseConfig = { trialDays: number; licenseServerUrl: string; licensePublicKey: string };
@@ -68,10 +68,42 @@ type LicenseRow = {
   activation_key: string | null;
   activated_at: string | null;
   certificate_json: string | null;
+  instance_id: string | null;
+  last_seen_at: string | null;
 };
 
 function getLicenseRow(): LicenseRow {
   return getDb().prepare(`SELECT * FROM license WHERE id = 1`).get() as LicenseRow;
+}
+
+/**
+ * A random ID generated once per install and persisted locally, embedded (signed) into every
+ * certificate this instance requests. Lets getVerifiedCertificatePayload() reject a
+ * certificate_json copied in from a different install's database — the copy's signature is
+ * genuine, but its embedded instanceId won't match this machine's.
+ */
+export function getOrCreateInstanceId(): string {
+  const row = getDb().prepare(`SELECT instance_id FROM license WHERE id = 1`).get() as { instance_id: string | null };
+  if (row.instance_id) return row.instance_id;
+  const id = randomUUID();
+  getDb().prepare(`UPDATE license SET instance_id = ? WHERE id = 1`).run(id);
+  return id;
+}
+
+/**
+ * A monotonic floor against clock rollback: winding the system clock backwards can't "un-expire"
+ * a lapsed trial or subscription, because the effective time used for every expiry check never
+ * goes below the latest timestamp this instance has already observed. Advances (and persists) on
+ * every call where real time has moved forward; a rolled-back clock just returns the frozen floor.
+ */
+function getEffectiveNowMs(row: LicenseRow): number {
+  const now = Date.now();
+  const lastSeenMs = row.last_seen_at ? new Date(row.last_seen_at).getTime() : 0;
+  const effective = Math.max(now, lastSeenMs);
+  if (effective > lastSeenMs) {
+    getDb().prepare(`UPDATE license SET last_seen_at = ? WHERE id = 1`).run(new Date(effective).toISOString());
+  }
+  return effective;
 }
 
 type Certificate = { payload: string; signature: string };
@@ -86,6 +118,9 @@ type CertificatePayload = {
   /** Subscription only: how many days past validUntil this instance keeps working — read fresh
    * from the seller's current setting every time the certificate is (re)signed. */
   graceDays?: number;
+  /** Absent on a certificate signed before instance binding existed — treated as unbound (not
+   * rejected), so pre-existing activations keep working until their next refresh re-signs with it. */
+  instanceId?: string;
 };
 
 /**
@@ -111,7 +146,17 @@ function getVerifiedCertificatePayload(row: LicenseRow): CertificatePayload | nu
     const publicKey = createPublicKey({ key: licensePublicKey, format: "pem" });
     const ok = verify(null, Buffer.from(cert.payload, "utf8"), publicKey, Buffer.from(cert.signature, "base64"));
     if (!ok) return null;
-    return JSON.parse(cert.payload) as CertificatePayload;
+    const payload = JSON.parse(cert.payload) as CertificatePayload;
+
+    // A genuine signature over a payload issued for a *different* key is still a well-formed
+    // certificate — nothing stops it from being pasted into another install's DB row alongside a
+    // locally-set matching activation_key otherwise. Both checks are cheap and independent: the
+    // key match catches a certificate swapped in wholesale, the instanceId match catches one
+    // copied alongside a hand-edited activation_key to match.
+    if (payload.key !== row.activation_key) return null;
+    if (payload.instanceId && payload.instanceId !== getOrCreateInstanceId()) return null;
+
+    return payload;
   } catch {
     return null;
   }
@@ -135,6 +180,7 @@ export function getLicenseStatus(): LicenseStatus {
 
   const row = getLicenseRow();
   const { trialDays } = getLicenseConfig();
+  const effectiveNowMs = getEffectiveNowMs(row);
 
   if (row.status === "activated") {
     const payload = getVerifiedCertificatePayload(row);
@@ -142,7 +188,7 @@ export function getLicenseStatus(): LicenseStatus {
       if (payload.licenseType === "subscription" && payload.validUntil) {
         const graceMs = (payload.graceDays ?? 0) * 24 * 60 * 60 * 1000;
         const cutoffMs = new Date(payload.validUntil).getTime() + graceMs;
-        const isExpired = Date.now() > cutoffMs;
+        const isExpired = effectiveNowMs > cutoffMs;
         return { activated: !isExpired, licenseType: "subscription", trialDays, daysRemaining: Infinity, expired: isExpired };
       }
       return { activated: true, licenseType: "lifetime", trialDays, daysRemaining: Infinity, expired: false };
@@ -150,7 +196,7 @@ export function getLicenseStatus(): LicenseStatus {
   }
 
   const startedAt = new Date(`${row.trial_started_at}Z`).getTime();
-  const elapsedDays = (Date.now() - startedAt) / (24 * 60 * 60 * 1000);
+  const elapsedDays = (effectiveNowMs - startedAt) / (24 * 60 * 60 * 1000);
   const daysRemaining = Math.max(0, Math.ceil(trialDays - elapsedDays));
   return { activated: false, trialDays, daysRemaining, expired: elapsedDays >= trialDays };
 }
@@ -186,7 +232,7 @@ export async function activateWithKey(key: string): Promise<{ ok: true } | { ok:
     const res = await fetch(`${config.licenseServerUrl.replace(/\/$/, "")}/api/seller/license/validate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: trimmed }),
+      body: JSON.stringify({ key: trimmed, instanceId: getOrCreateInstanceId() }),
     });
     data = await res.json();
     if (!res.ok || !data.valid || !data.certificate) {
@@ -228,7 +274,7 @@ export async function refreshLicenseIfSubscription(): Promise<void> {
     const res = await fetch(`${config.licenseServerUrl.replace(/\/$/, "")}/api/seller/license/refresh`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: row.activation_key }),
+      body: JSON.stringify({ key: row.activation_key, instanceId: getOrCreateInstanceId() }),
     });
     const data = (await res.json()) as { valid?: boolean; certificate?: Certificate };
     if (res.ok && data.valid && data.certificate) {
