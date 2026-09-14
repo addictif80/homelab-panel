@@ -27,6 +27,9 @@ type PingState = Record<number, "idle" | "checking" | "up" | "down" | "unknown">
 export default function ServersPage() {
   const [hosts, setHosts] = useState<Host[]>([]);
   const [pingState, setPingState] = useState<PingState>({});
+  const [restarting, setRestarting] = useState<number | null>(null);
+  const [confirmingRestart, setConfirmingRestart] = useState<Host | null>(null);
+  const [restartMsg, setRestartMsg] = useState("");
 
   useEffect(() => {
     fetch("/api/hosts")
@@ -47,6 +50,25 @@ export default function ServersPage() {
       }));
     } catch {
       setPingState((s) => ({ ...s, [id]: "unknown" }));
+    }
+  }
+
+  async function confirmRestart() {
+    if (!confirmingRestart) return;
+    const hostId = confirmingRestart.id;
+    setRestarting(hostId);
+    setRestartMsg("");
+    try {
+      const res = await fetch(`/api/hosts/${hostId}/restart`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Échec du redémarrage.");
+      setRestartMsg(data.message);
+      setPingState((s) => ({ ...s, [hostId]: "idle" }));
+    } catch (err) {
+      setRestartMsg(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setRestarting(null);
+      setConfirmingRestart(null);
     }
   }
 
@@ -120,12 +142,51 @@ export default function ServersPage() {
                       Mises à jour
                     </Link>
                   )}
+                  {h.kind === "physical" && (
+                    <button
+                      onClick={() => setConfirmingRestart(h)}
+                      disabled={restarting === h.id}
+                      className="rounded border border-amber-800 bg-amber-950/30 px-2 py-0.5 text-xs text-amber-300 hover:bg-amber-950/60 disabled:opacity-50"
+                    >
+                      {restarting === h.id ? "..." : "Redémarrer"}
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {restartMsg && <p className="text-sm text-neutral-400">{restartMsg}</p>}
+
+      {confirmingRestart && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded border border-neutral-700 bg-neutral-900 p-5">
+            <h2 className="text-sm font-semibold text-neutral-100">Redémarrer « {confirmingRestart.name} » ?</h2>
+            <p className="mt-2 text-sm text-neutral-300">
+              La machine va redémarrer immédiatement. Tout service qu&apos;elle héberge (y compris des VM ou
+              conteneurs si c&apos;est un hôte Proxmox/Docker) sera interrompu le temps du redémarrage.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmingRestart(null)}
+                disabled={restarting !== null}
+                className="rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={confirmRestart}
+                disabled={restarting !== null}
+                className="rounded border border-amber-700 bg-amber-900/40 px-3 py-1.5 text-sm text-amber-200 hover:bg-amber-900/60 disabled:opacity-50"
+              >
+                {restarting !== null ? "Redémarrage..." : "Confirmer le redémarrage"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

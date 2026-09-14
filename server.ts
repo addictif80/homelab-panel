@@ -5,6 +5,7 @@ import { attachLogsWebSocketServer } from "./src/server/logs-ws";
 import { startNotificationScheduler } from "./src/lib/notifications/scheduler";
 import { startBackupScheduler } from "./src/lib/backup/scheduler";
 import { startPulseRecorder } from "./src/lib/pulseRecorder";
+import { startHostPublicIpScheduler } from "./src/lib/hostPublicIpScheduler";
 import { autoActivateFromBundledKey } from "./src/lib/license";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -24,6 +25,7 @@ app.prepare().then(() => {
   startNotificationScheduler();
   startBackupScheduler();
   startPulseRecorder();
+  startHostPublicIpScheduler();
   autoActivateFromBundledKey().catch(() => {});
 
   server.listen(port, hostname, () => {
