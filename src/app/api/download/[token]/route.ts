@@ -5,6 +5,7 @@ import { getLicenseKeyForSale } from "@/lib/seller/licenseKeys";
 import { getSigningPublicKeyPem } from "@/lib/seller/licenseSigning";
 import { getTrialDays } from "@/lib/seller/trialConfig";
 import { logAudit } from "@/lib/db";
+import { resolvePublicUrl } from "@/lib/seller/publicUrl";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   const licenseKey = getLicenseKeyForSale(result.saleId);
   const { zipPath, cleanup } = await buildClientArchive({
     trialDays: getTrialDays(),
-    licenseServerUrl: req.nextUrl.origin,
+    licenseServerUrl: resolvePublicUrl(req.nextUrl.origin),
     licensePublicKey: getSigningPublicKeyPem(),
     preActivatedKey: licenseKey?.key,
   });

@@ -4,6 +4,7 @@ import { buildClientArchive, readArchive } from "@/lib/seller/exportBuild";
 import { getTrialDays } from "@/lib/seller/trialConfig";
 import { getSigningPublicKeyPem } from "@/lib/seller/licenseSigning";
 import { logAudit } from "@/lib/db";
+import { resolvePublicUrl } from "@/lib/seller/publicUrl";
 
 /** Public — but gated by a real license key (any key ever issued, not necessarily unused) so
  * only instances that actually bought the panel can pull an update archive from here. */
@@ -15,7 +16,7 @@ export async function GET(req: NextRequest) {
 
   const { zipPath, cleanup } = await buildClientArchive({
     trialDays: getTrialDays(),
-    licenseServerUrl: req.nextUrl.origin,
+    licenseServerUrl: resolvePublicUrl(req.nextUrl.origin),
     licensePublicKey: getSigningPublicKeyPem(),
   });
   try {

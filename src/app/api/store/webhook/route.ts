@@ -7,6 +7,7 @@ import { createLicenseKey } from "@/lib/seller/licenseKeys";
 import { sendMail } from "@/lib/mail";
 import { buttonEmailHtml } from "@/lib/emailTemplates";
 import { logAudit } from "@/lib/db";
+import { resolvePublicUrl } from "@/lib/seller/publicUrl";
 
 export async function POST(req: NextRequest) {
   const signature = req.headers.get("stripe-signature");
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
         currency: session.currency ?? "eur",
       });
       const token = createDownloadToken(sale.id);
-      const downloadUrl = `${req.nextUrl.origin}/api/download/${token}`;
+      const downloadUrl = `${resolvePublicUrl(req.nextUrl.origin)}/api/download/${token}`;
       const license = createLicenseKey(sale.id);
 
       try {

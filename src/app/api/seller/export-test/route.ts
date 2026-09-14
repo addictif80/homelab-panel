@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { buildClientArchive, readArchive } from "@/lib/seller/exportBuild";
 import { getTrialDays } from "@/lib/seller/trialConfig";
 import { getSigningPublicKeyPem } from "@/lib/seller/licenseSigning";
+import { resolvePublicUrl } from "@/lib/seller/publicUrl";
 
 /** Lets the owner download the exact archive a buyer would get, without going through Stripe —
  * for verifying the export before actually selling anything. Ships as a trial copy (no key),
@@ -9,7 +10,7 @@ import { getSigningPublicKeyPem } from "@/lib/seller/licenseSigning";
 export async function GET(req: NextRequest) {
   const { zipPath, cleanup } = await buildClientArchive({
     trialDays: getTrialDays(),
-    licenseServerUrl: req.nextUrl.origin,
+    licenseServerUrl: resolvePublicUrl(req.nextUrl.origin),
     licensePublicKey: getSigningPublicKeyPem(),
   });
   try {

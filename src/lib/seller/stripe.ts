@@ -3,6 +3,7 @@ import { getSetting, setSetting } from "../db";
 import { vaultEncrypt, vaultDecrypt } from "../crypto";
 
 const SECRET_KEY_SETTING = "stripe_secret_key_encrypted";
+const PUBLISHABLE_KEY_SETTING = "stripe_publishable_key";
 const WEBHOOK_SECRET_SETTING = "stripe_webhook_secret_encrypted";
 const PRICING_SETTING = "seller_pricing";
 
@@ -26,6 +27,16 @@ export function setStripeSecretKey(key: string): void {
 function getStripeSecretKey(): string | null {
   const enc = getSetting(SECRET_KEY_SETTING);
   return enc ? vaultDecrypt(enc) : null;
+}
+
+// Not secret by design (Stripe's own docs say so) — stored in the clear like other plain
+// settings, unlike the secret key and webhook signing secret above.
+export function getPublishableKey(): string | null {
+  return getSetting(PUBLISHABLE_KEY_SETTING);
+}
+
+export function setPublishableKey(key: string): void {
+  setSetting(PUBLISHABLE_KEY_SETTING, key);
 }
 
 export function hasWebhookSecret(): boolean {

@@ -3,13 +3,14 @@ import { buildClientArchive, readArchive } from "@/lib/seller/exportBuild";
 import { getTrialDays } from "@/lib/seller/trialConfig";
 import { getSigningPublicKeyPem } from "@/lib/seller/licenseSigning";
 import { logAudit } from "@/lib/db";
+import { resolvePublicUrl } from "@/lib/seller/publicUrl";
 
 /** No payment, no token — anyone can grab a trial copy. Its trial clock starts the moment its
  * own database is first created (see db.ts), not at download time. */
 export async function GET(req: NextRequest) {
   const { zipPath, cleanup } = await buildClientArchive({
     trialDays: getTrialDays(),
-    licenseServerUrl: req.nextUrl.origin,
+    licenseServerUrl: resolvePublicUrl(req.nextUrl.origin),
     licensePublicKey: getSigningPublicKeyPem(),
   });
   try {

@@ -34,7 +34,9 @@ export default function SellerPage() {
   const [pricing, setPricing] = useState<Pricing | null>(null);
 
   const [secretKey, setSecretKey] = useState("");
+  const [publishableKey, setPublishableKey] = useState("");
   const [webhookSecret, setWebhookSecret] = useState("");
+  const [publicUrl, setPublicUrl] = useState("");
   const [amount, setAmount] = useState("29.00");
   const [productName, setProductName] = useState("Homelab Panel");
   const [productDescription, setProductDescription] = useState("");
@@ -56,6 +58,8 @@ export default function SellerPage() {
         setHasSecretKey(d.hasSecretKey);
         setHasWebhookSecret(d.hasWebhookSecret);
         setWebhookUrl(d.webhookUrl);
+        setPublishableKey(d.publishableKey || "");
+        setPublicUrl(d.publicUrl || "");
         setPricing(d.pricing);
         if (d.pricing) {
           setAmount(centsToAmountStr(d.pricing.amountCents));
@@ -99,7 +103,9 @@ export default function SellerPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           secretKey: secretKey || undefined,
+          publishableKey,
           webhookSecret: webhookSecret || undefined,
+          publicUrl,
           amountCents: Math.round(parseFloat(amount) * 100),
           currency: "eur",
           productName,
@@ -130,6 +136,8 @@ export default function SellerPage() {
       setResending(null);
     }
   }
+
+  const displayedWebhookUrl = publicUrl ? `${publicUrl.replace(/\/+$/, "")}/api/store/webhook` : webhookUrl;
 
   const monthlyTotals = new Map<string, number>();
   for (const s of sales || []) {
@@ -164,6 +172,15 @@ export default function SellerPage() {
             />
           </label>
           <label className="block">
+            <span className="mb-1 block text-xs text-neutral-400">Clé publique Stripe (publishable key)</span>
+            <input
+              value={publishableKey}
+              onChange={(e) => setPublishableKey(e.target.value)}
+              placeholder="pk_live_..."
+              className={INPUT_CLASS}
+            />
+          </label>
+          <label className="block">
             <span className="mb-1 block text-xs text-neutral-400">
               Secret de signature du webhook {hasWebhookSecret && <span className="text-emerald-500">(déjà défini)</span>}
             </span>
@@ -175,11 +192,34 @@ export default function SellerPage() {
               className={INPUT_CLASS}
             />
           </label>
+          <label className="block">
+            <span className="mb-1 block text-xs text-neutral-400">
+              URL publique du panel (domaine réel, pas l&apos;IP interne du serveur)
+            </span>
+            <input
+              value={publicUrl}
+              onChange={(e) => setPublicUrl(e.target.value)}
+              placeholder="https://mon-panel.exemple.fr"
+              className={INPUT_CLASS}
+            />
+          </label>
           <label className="col-span-2 block">
             <span className="mb-1 block text-xs text-neutral-400">
               URL à renseigner dans Stripe (Developers → Webhooks)
             </span>
-            <input readOnly value={webhookUrl} className={`${INPUT_CLASS} text-neutral-500`} />
+            <input readOnly value={displayedWebhookUrl} className={`${INPUT_CLASS} text-neutral-500`} />
+            {!publicUrl && (
+              <p className="mt-1 text-[11px] text-amber-400">
+                Renseigne l&apos;URL publique ci-dessus si cette adresse ne correspond pas à ton vrai domaine (ce
+                qui arrive derrière un reverse proxy) — sinon les liens envoyés à tes clients et l&apos;URL du
+                webhook seront faux.
+              </p>
+            )}
+            <p className="mt-2 text-[11px] text-neutral-500">
+              Dans Stripe, sélectionne uniquement l&apos;événement{" "}
+              <code className="rounded bg-neutral-950 px-1 py-0.5 font-mono">checkout.session.completed</code> — c&apos;est
+              le seul que ce panel traite.
+            </p>
           </label>
           <label className="block">
             <span className="mb-1 block text-xs text-neutral-400">Nom du produit</span>
