@@ -26,6 +26,11 @@ export function createLicenseKey(saleId: string): LicenseKey {
   return { key, saleId, createdAt: new Date().toISOString(), usedAt: null, usedByInfo: null };
 }
 
+export function getSaleIdForKey(key: string): string | null {
+  const row = getDb().prepare(`SELECT sale_id FROM license_keys WHERE key = ?`).get(key) as { sale_id: string } | undefined;
+  return row?.sale_id ?? null;
+}
+
 export function getLicenseKeyForSale(saleId: string): LicenseKey | null {
   const row = getDb().prepare(`SELECT * FROM license_keys WHERE sale_id = ? ORDER BY created_at DESC LIMIT 1`).get(saleId) as
     | KeyRow

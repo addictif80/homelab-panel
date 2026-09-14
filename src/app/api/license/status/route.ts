@@ -5,6 +5,7 @@ export async function GET() {
   const status = getLicenseStatus();
   return NextResponse.json({
     activated: status.activated,
+    licenseType: status.licenseType,
     trialDays: status.trialDays,
     daysRemaining: Number.isFinite(status.daysRemaining) ? status.daysRemaining : null,
     expired: status.expired,

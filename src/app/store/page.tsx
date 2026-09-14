@@ -3,7 +3,18 @@
 import { useEffect, useState } from "react";
 import ThemeToggle from "@/components/ThemeToggle";
 
-type Pricing = { amountCents: number; currency: string; productName: string; productDescription: string };
+type PlanKey = "lifetime" | "monthly" | "annual";
+const PLAN_KEYS: PlanKey[] = ["lifetime", "monthly", "annual"];
+const PLAN_TITLES: Record<PlanKey, string> = { lifetime: "Achat unique", monthly: "Mensuel", annual: "Annuel" };
+const PLAN_SUFFIX: Record<PlanKey, string> = { lifetime: "", monthly: "/mois", annual: "/an" };
+const PLAN_NOTE: Record<PlanKey, string> = {
+  lifetime: "Paiement unique, licence à vie",
+  monthly: "Sans engagement, résiliable à tout moment",
+  annual: "Facturé une fois par an",
+};
+
+type PlanPricing = { enabled: boolean; amountCents: number };
+type Pricing = { currency: string; productName: string; productDescription: string; plans: Record<PlanKey, PlanPricing> };
 
 const TABS: { key: string; label: string }[] = [
   { key: "security", label: "Sécurité" },
@@ -65,7 +76,7 @@ const COMPARISON_ROWS = [
 ];
 
 const STEPS = [
-  { title: "Tu achètes", text: "Paiement unique et sécurisé via Stripe, aucune carte bancaire ne transite par nos serveurs." },
+  { title: "Tu achètes", text: "Paiement sécurisé via Stripe (unique ou par abonnement), aucune carte bancaire ne transite par nos serveurs." },
   { title: "Tu reçois ton lien", text: "Un email avec un lien de téléchargement à usage unique arrive dans les minutes qui suivent." },
   { title: "Tu déploies chez toi", text: "npm install, npm run build, et c'est en ligne sur ton propre serveur — la licence t'appartient." },
 ];
@@ -85,16 +96,16 @@ const LOGOMARK = (
   </svg>
 );
 
-function formatPrice(pricing: Pricing): string {
-  const amount = (pricing.amountCents / 100).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const symbol = pricing.currency.toLowerCase() === "eur" ? "€" : pricing.currency.toUpperCase();
+function formatAmount(amountCents: number, currency: string): string {
+  const amount = (amountCents / 100).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const symbol = currency.toLowerCase() === "eur" ? "€" : currency.toUpperCase();
   return `${amount} ${symbol}`;
 }
 
 export default function StorePage() {
   const [pricing, setPricing] = useState<Pricing | null>(null);
   const [trialDays, setTrialDays] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<PlanKey | null>(null);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("security");
 
@@ -107,17 +118,24 @@ export default function StorePage() {
       });
   }, []);
 
-  async function buy() {
-    setLoading(true);
+  const enabledPlans = pricing ? PLAN_KEYS.filter((k) => pricing.plans[k]?.enabled) : [];
+  const heroPlan = enabledPlans[0] ?? null;
+
+  async function buy(plan: PlanKey) {
+    setLoading(plan);
     setError("");
     try {
-      const res = await fetch("/api/store/checkout", { method: "POST" });
+      const res = await fetch("/api/store/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       window.location.href = data.url;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur.");
-      setLoading(false);
+      setLoading(null);
     }
   }
 
@@ -137,7 +155,7 @@ export default function StorePage() {
           <div className="flex items-center gap-4">
             <ThemeToggle />
             <a href="/login" className="hidden text-sm text-neutral-400 hover:text-neutral-100 sm:inline">Se connecter</a>
-            <button onClick={buy} className="btn-primary px-4 py-2">Acheter</button>
+            <a href="#tarifs" className="btn-primary px-4 py-2">Acheter</a>
           </div>
         </div>
       </nav>
@@ -159,9 +177,14 @@ export default function StorePage() {
               auto-hébergée, avec des explications claires et des correctifs en un clic.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <button onClick={buy} disabled={loading} className="btn-primary px-6 py-3 text-sm shadow-lg shadow-blue-950/40 disabled:opacity-50">
-                {loading ? "Redirection..." : `Acheter maintenant${pricing ? ` — ${formatPrice(pricing)}` : ""}`}
-              </button>
+              <a
+                href="#tarifs"
+                className="btn-primary px-6 py-3 text-sm shadow-lg shadow-blue-950/40"
+              >
+                {heroPlan && pricing
+                  ? `Acheter maintenant — à partir de ${formatAmount(pricing.plans[heroPlan].amountCents, pricing.currency)}${PLAN_SUFFIX[heroPlan]}`
+                  : "Voir les tarifs"}
+              </a>
               <a
                 href="/api/store/trial-download"
                 className="btn-secondary px-6 py-3 text-sm"
@@ -331,24 +354,38 @@ export default function StorePage() {
       </section>
 
       {/* Pricing */}
-      <section id="tarifs" className="mx-auto max-w-3xl px-6 py-24 text-center">
-        <span className="font-mono text-xs uppercase tracking-wider text-blue-400">Tarif</span>
-        <h2 className="mt-3 text-3xl font-semibold">Un tarif simple, sans abonnement</h2>
+      <section id="tarifs" className="mx-auto max-w-5xl px-6 py-24 text-center">
+        <span className="font-mono text-xs uppercase tracking-wider text-blue-400">Tarifs</span>
+        <h2 className="mt-3 text-3xl font-semibold">Choisis la formule qui te convient</h2>
+        {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
 
-        {pricing ? (
-          <div className="mx-auto mt-10 max-w-sm rounded-2xl border border-neutral-700 bg-gradient-to-b from-neutral-900 to-neutral-950 p-10">
-            <h3 className="text-base font-semibold">{pricing.productName}</h3>
-            {pricing.productDescription && <p className="mt-2 text-sm text-neutral-400">{pricing.productDescription}</p>}
-            <p className="mt-6 font-display text-5xl font-semibold">{formatPrice(pricing)}</p>
-            <p className="mt-2 font-mono text-xs uppercase tracking-wider text-neutral-500">Paiement unique</p>
-            <button onClick={buy} disabled={loading} className="btn-primary mt-8 w-full py-3.5 text-sm disabled:opacity-50">
-              {loading ? "Redirection..." : "Acheter maintenant"}
-            </button>
-            <p className="mt-5 text-xs text-neutral-600">Lien de téléchargement envoyé par email après paiement.</p>
+        {pricing && enabledPlans.length > 0 ? (
+          <div className={`mx-auto mt-10 grid gap-6 ${enabledPlans.length === 1 ? "max-w-sm" : enabledPlans.length === 2 ? "max-w-2xl sm:grid-cols-2" : "max-w-4xl sm:grid-cols-3"}`}>
+            {enabledPlans.map((k) => (
+              <div key={k} className="flex h-full flex-col rounded-2xl border border-neutral-700 bg-gradient-to-b from-neutral-900 to-neutral-950 p-8">
+                <h3 className="text-base font-semibold">{pricing.productName} — {PLAN_TITLES[k]}</h3>
+                <p className="mt-2 min-h-[2.5rem] text-sm text-neutral-400">
+                  {k === "lifetime" ? pricing.productDescription : " "}
+                </p>
+                <p className="mt-4 font-display text-4xl font-semibold">
+                  {formatAmount(pricing.plans[k].amountCents, pricing.currency)}
+                  <span className="text-lg text-neutral-500">{PLAN_SUFFIX[k]}</span>
+                </p>
+                <p className="mt-2 font-mono text-xs uppercase tracking-wider text-neutral-500">{PLAN_NOTE[k]}</p>
+                <button
+                  onClick={() => buy(k)}
+                  disabled={loading !== null}
+                  className="btn-primary mt-8 w-full py-3.5 text-sm disabled:opacity-50"
+                >
+                  {loading === k ? "Redirection..." : "Choisir cette offre"}
+                </button>
+              </div>
+            ))}
           </div>
         ) : (
           <p className="mt-8 text-sm text-neutral-500">Tarif indisponible pour le moment.</p>
         )}
+        <p className="mt-8 text-xs text-neutral-600">Lien de téléchargement envoyé par email après paiement.</p>
       </section>
 
       {/* CTA band */}
@@ -358,9 +395,9 @@ export default function StorePage() {
           <p className="mt-3 text-neutral-400">
             Un seul panel pour la sécurité, les sauvegardes et l&apos;administration de toute ton infra.
           </p>
-          <button onClick={buy} disabled={loading} className="btn-primary mt-7 px-7 py-3.5 text-sm disabled:opacity-50">
-            {loading ? "Redirection..." : "Acheter maintenant"}
-          </button>
+          <a href="#tarifs" className="btn-primary mt-7 inline-block px-7 py-3.5 text-sm">
+            Voir les tarifs
+          </a>
         </div>
       </section>
 

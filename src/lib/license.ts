@@ -76,35 +76,53 @@ function getLicenseRow(): LicenseRow {
 
 type Certificate = { payload: string; signature: string };
 
+type CertificatePayload = {
+  key: string;
+  activatedAt: string;
+  /** Absent on a certificate signed before subscriptions existed — treated as "lifetime". */
+  licenseType?: "lifetime" | "subscription";
+  /** Subscription only: the paid-through date as of the last successful activation/refresh. */
+  validUntil?: string | null;
+  /** Subscription only: how many days past validUntil this instance keeps working — read fresh
+   * from the seller's current setting every time the certificate is (re)signed. */
+  graceDays?: number;
+};
+
 /**
  * The `status = 'activated'` column is convenient but not trusted on its own — anyone with a
  * copy of this app also has a copy of its SQLite file, and could flip that column by hand. What
  * actually grants activation is a signature over the certificate, made with a private key that
- * never leaves the seller's server; this only returns true when that signature checks out
- * against the public key embedded in license.json.
+ * never leaves the seller's server; this only returns the payload once that signature checks out
+ * against the public key embedded in license.json — a hand-edited certificate_json is rejected.
  */
-function hasValidCertificate(row: LicenseRow): boolean {
-  if (!row.certificate_json) return false;
+function getVerifiedCertificatePayload(row: LicenseRow): CertificatePayload | null {
+  if (!row.certificate_json) return null;
   const { licensePublicKey } = getLicenseConfig();
-  if (!licensePublicKey) return false;
+  if (!licensePublicKey) return null;
 
   let cert: Certificate;
   try {
     cert = JSON.parse(row.certificate_json);
   } catch {
-    return false;
+    return null;
   }
 
   try {
     const publicKey = createPublicKey({ key: licensePublicKey, format: "pem" });
-    return verify(null, Buffer.from(cert.payload, "utf8"), publicKey, Buffer.from(cert.signature, "base64"));
+    const ok = verify(null, Buffer.from(cert.payload, "utf8"), publicKey, Buffer.from(cert.signature, "base64"));
+    if (!ok) return null;
+    return JSON.parse(cert.payload) as CertificatePayload;
   } catch {
-    return false;
+    return null;
   }
 }
 
 export type LicenseStatus = {
   activated: boolean;
+  /** Present only once a valid certificate has been read — tells the UI whether an `expired`
+   * result means "trial ran out" (no licenseType) or "subscription lapsed" (needs a different
+   * message: re-typing the same key won't help, it's already consumed). */
+  licenseType?: "lifetime" | "subscription";
   trialDays: number;
   daysRemaining: number;
   expired: boolean;
@@ -118,8 +136,17 @@ export function getLicenseStatus(): LicenseStatus {
   const row = getLicenseRow();
   const { trialDays } = getLicenseConfig();
 
-  if (row.status === "activated" && hasValidCertificate(row)) {
-    return { activated: true, trialDays, daysRemaining: Infinity, expired: false };
+  if (row.status === "activated") {
+    const payload = getVerifiedCertificatePayload(row);
+    if (payload) {
+      if (payload.licenseType === "subscription" && payload.validUntil) {
+        const graceMs = (payload.graceDays ?? 0) * 24 * 60 * 60 * 1000;
+        const cutoffMs = new Date(payload.validUntil).getTime() + graceMs;
+        const isExpired = Date.now() > cutoffMs;
+        return { activated: !isExpired, licenseType: "subscription", trialDays, daysRemaining: Infinity, expired: isExpired };
+      }
+      return { activated: true, licenseType: "lifetime", trialDays, daysRemaining: Infinity, expired: false };
+    }
   }
 
   const startedAt = new Date(`${row.trial_started_at}Z`).getTime();
@@ -175,4 +202,39 @@ export async function activateWithKey(key: string): Promise<{ ok: true } | { ok:
     )
     .run(trimmed, JSON.stringify(data.certificate));
   return { ok: true };
+}
+
+/**
+ * Called periodically (see licenseRenewalScheduler.ts) — a no-op for a seller instance, a
+ * never-activated trial, or a lifetime license (nothing to refresh, it never expires). Only a
+ * subscription instance actually calls home, to pick up its subscription's current paid-through
+ * date. Best-effort: a network hiccup or unreachable seller server just leaves the cached
+ * certificate in place — its own validUntil + graceDays already provides the fallback cutoff, so
+ * a paying customer isn't punished for a transient failure to phone home.
+ */
+export async function refreshLicenseIfSubscription(): Promise<void> {
+  if (isSellerInstance()) return;
+
+  const row = getLicenseRow();
+  if (row.status !== "activated" || !row.activation_key) return;
+
+  const payload = getVerifiedCertificatePayload(row);
+  if (!payload || payload.licenseType !== "subscription") return;
+
+  const config = getLicenseConfig();
+  if (!config.licenseServerUrl) return;
+
+  try {
+    const res = await fetch(`${config.licenseServerUrl.replace(/\/$/, "")}/api/seller/license/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: row.activation_key }),
+    });
+    const data = (await res.json()) as { valid?: boolean; certificate?: Certificate };
+    if (res.ok && data.valid && data.certificate) {
+      getDb().prepare(`UPDATE license SET certificate_json = ? WHERE id = 1`).run(JSON.stringify(data.certificate));
+    }
+  } catch {
+    // See doc comment — intentionally silent.
+  }
 }

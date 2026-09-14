@@ -8,8 +8,12 @@ import {
   setPublishableKey,
   getPricing,
   syncPricing,
+  PLAN_KEYS,
+  type PlanKey,
+  type PlanInput,
 } from "@/lib/seller/stripe";
 import { getTrialDays, setTrialDays } from "@/lib/seller/trialConfig";
+import { getSubscriptionGraceDays, setSubscriptionGraceDays } from "@/lib/seller/subscriptionConfig";
 import { getPanelPublicUrl, setPanelPublicUrl, resolvePublicUrl } from "@/lib/seller/publicUrl";
 
 export async function GET(req: NextRequest) {
@@ -21,6 +25,7 @@ export async function GET(req: NextRequest) {
     pricing: getPricing(),
     webhookUrl: `${resolvePublicUrl(req.nextUrl.origin)}/api/store/webhook`,
     trialDays: getTrialDays(),
+    subscriptionGraceDays: getSubscriptionGraceDays(),
   });
 }
 
@@ -30,11 +35,12 @@ export async function PUT(req: NextRequest) {
     publishableKey?: string;
     webhookSecret?: string;
     publicUrl?: string;
-    amountCents?: number;
     currency?: string;
     productName?: string;
     productDescription?: string;
+    plans?: Record<PlanKey, PlanInput>;
     trialDays?: number;
+    subscriptionGraceDays?: number;
   };
 
   if (body.secretKey) setStripeSecretKey(body.secretKey);
@@ -47,14 +53,19 @@ export async function PUT(req: NextRequest) {
     setPanelPublicUrl(body.publicUrl);
   }
   if (body.trialDays) setTrialDays(body.trialDays);
+  if (body.subscriptionGraceDays !== undefined) setSubscriptionGraceDays(body.subscriptionGraceDays);
 
-  if (body.amountCents && body.currency && body.productName) {
+  if (body.currency && body.productName && body.plans) {
+    const atLeastOneEnabled = PLAN_KEYS.some((k) => body.plans![k]?.enabled);
+    if (!atLeastOneEnabled) {
+      return NextResponse.json({ error: "Active au moins une offre (lifetime, mensuel ou annuel)." }, { status: 400 });
+    }
     try {
       const pricing = await syncPricing({
-        amountCents: body.amountCents,
         currency: body.currency,
         productName: body.productName,
         productDescription: body.productDescription || "",
+        plans: body.plans,
       });
       return NextResponse.json({ ok: true, pricing });
     } catch (err) {

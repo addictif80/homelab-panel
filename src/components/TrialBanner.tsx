@@ -2,7 +2,13 @@
 
 import { useEffect, useState } from "react";
 
-type LicenseStatus = { activated: boolean; trialDays: number; daysRemaining: number | null; expired: boolean };
+type LicenseStatus = {
+  activated: boolean;
+  licenseType?: "lifetime" | "subscription";
+  trialDays: number;
+  daysRemaining: number | null;
+  expired: boolean;
+};
 
 export default function TrialBanner() {
   const [status, setStatus] = useState<LicenseStatus | null>(null);
@@ -38,6 +44,21 @@ export default function TrialBanner() {
   }
 
   if (!status || status.activated) return null;
+
+  if (status.expired && status.licenseType === "subscription") {
+    return (
+      <div className="border-b border-amber-900 bg-amber-950/40 px-4 py-3">
+        <div className="mx-auto max-w-5xl">
+          <p className="text-sm font-semibold text-amber-200">Ton abonnement est arrivé à expiration.</p>
+          <p className="text-xs text-amber-300/80">
+            La consultation reste disponible, mais les actions (SSH, Docker, sauvegardes, correctifs...) sont
+            désactivées tant que le paiement n&apos;est pas régularisé. Le panel se réactive automatiquement dès que
+            le renouvellement est confirmé — pas besoin de retéléverser ta clé.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (status.expired) {
     return (

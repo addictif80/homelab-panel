@@ -313,6 +313,15 @@ function migrate(db: Database.Database) {
     db.exec(`ALTER TABLE license ADD COLUMN certificate_json TEXT`);
   }
 
+  const salesColumns = db.prepare(`PRAGMA table_info(sales)`).all() as { name: string }[];
+  if (!salesColumns.some((c) => c.name === "product_type")) {
+    // Existing rows predate subscriptions entirely — every sale so far was a lifetime purchase.
+    db.exec(`ALTER TABLE sales ADD COLUMN product_type TEXT NOT NULL DEFAULT 'lifetime'`);
+    db.exec(`ALTER TABLE sales ADD COLUMN stripe_subscription_id TEXT`);
+    db.exec(`ALTER TABLE sales ADD COLUMN subscription_status TEXT`);
+    db.exec(`ALTER TABLE sales ADD COLUMN current_period_end TEXT`);
+  }
+
   ensureVaultKdfSalt(db);
 }
 

@@ -22,6 +22,7 @@ const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/store/", "/api/download/"];
 // instance calls this one endpoint from the outside to activate, with no session of ours.
 const PUBLIC_API_EXACT = [
   "/api/seller/license/validate",
+  "/api/seller/license/refresh",
   "/api/seller/releases/latest",
   "/api/seller/releases/download",
 ];

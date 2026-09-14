@@ -3,14 +3,28 @@
 import { useEffect, useState } from "react";
 import ReleasesPanel from "@/components/ReleasesPanel";
 
+type PlanKey = "lifetime" | "monthly" | "annual";
+const PLAN_KEYS: PlanKey[] = ["lifetime", "monthly", "annual"];
+const PLAN_LABELS: Record<PlanKey, string> = { lifetime: "Achat unique (lifetime)", monthly: "Abonnement mensuel", annual: "Abonnement annuel" };
+
+type PlanPricing = { enabled: boolean; amountCents: number };
 type Pricing = {
-  amountCents: number;
   currency: string;
   productName: string;
   productDescription: string;
+  plans: Record<PlanKey, PlanPricing>;
 };
 
-type Sale = { id: string; customerEmail: string; amountCents: number; currency: string; createdAt: string };
+type Sale = {
+  id: string;
+  customerEmail: string;
+  amountCents: number;
+  currency: string;
+  productType: PlanKey;
+  subscriptionStatus: "active" | "past_due" | "canceled" | null;
+  currentPeriodEnd: string | null;
+  createdAt: string;
+};
 type LicenseKeyRow = { key: string; saleId: string; createdAt: string; usedAt: string | null; usedByInfo: string | null };
 
 const INPUT_CLASS = "w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100";
@@ -37,10 +51,12 @@ export default function SellerPage() {
   const [publishableKey, setPublishableKey] = useState("");
   const [webhookSecret, setWebhookSecret] = useState("");
   const [publicUrl, setPublicUrl] = useState("");
-  const [amount, setAmount] = useState("29.00");
+  const [planAmounts, setPlanAmounts] = useState<Record<PlanKey, string>>({ lifetime: "29.00", monthly: "5.00", annual: "49.00" });
+  const [planEnabled, setPlanEnabled] = useState<Record<PlanKey, boolean>>({ lifetime: true, monthly: false, annual: false });
   const [productName, setProductName] = useState("Homelab Panel");
   const [productDescription, setProductDescription] = useState("");
   const [trialDays, setTrialDaysInput] = useState("14");
+  const [subscriptionGraceDays, setSubscriptionGraceDays] = useState("7");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -62,11 +78,19 @@ export default function SellerPage() {
         setPublicUrl(d.publicUrl || "");
         setPricing(d.pricing);
         if (d.pricing) {
-          setAmount(centsToAmountStr(d.pricing.amountCents));
           setProductName(d.pricing.productName);
           setProductDescription(d.pricing.productDescription);
+          const amounts = {} as Record<PlanKey, string>;
+          const enabled = {} as Record<PlanKey, boolean>;
+          for (const k of PLAN_KEYS) {
+            amounts[k] = centsToAmountStr(d.pricing.plans[k]?.amountCents ?? 0);
+            enabled[k] = !!d.pricing.plans[k]?.enabled;
+          }
+          setPlanAmounts(amounts);
+          setPlanEnabled(enabled);
         }
         if (d.trialDays) setTrialDaysInput(String(d.trialDays));
+        if (d.subscriptionGraceDays) setSubscriptionGraceDays(String(d.subscriptionGraceDays));
       });
   }
 
@@ -106,11 +130,14 @@ export default function SellerPage() {
           publishableKey,
           webhookSecret: webhookSecret || undefined,
           publicUrl,
-          amountCents: Math.round(parseFloat(amount) * 100),
           currency: "eur",
           productName,
           productDescription,
+          plans: Object.fromEntries(
+            PLAN_KEYS.map((k) => [k, { enabled: planEnabled[k], amountCents: Math.round((parseFloat(planAmounts[k]) || 0) * 100) }])
+          ),
           trialDays: Number(trialDays) || undefined,
+          subscriptionGraceDays: Number(subscriptionGraceDays) || undefined,
         }),
       });
       const data = await res.json();
@@ -216,27 +243,17 @@ export default function SellerPage() {
               </p>
             )}
             <p className="mt-2 text-[11px] text-neutral-500">
-              Dans Stripe, sélectionne uniquement l&apos;événement{" "}
-              <code className="rounded bg-neutral-950 px-1 py-0.5 font-mono">checkout.session.completed</code> — c&apos;est
-              le seul que ce panel traite.
+              Dans Stripe, sélectionne les événements{" "}
+              <code className="rounded bg-neutral-950 px-1 py-0.5 font-mono">checkout.session.completed</code>,{" "}
+              <code className="rounded bg-neutral-950 px-1 py-0.5 font-mono">customer.subscription.updated</code> et{" "}
+              <code className="rounded bg-neutral-950 px-1 py-0.5 font-mono">customer.subscription.deleted</code> —
+              ce sont les seuls que ce panel traite (les deux derniers ne sont utiles que si tu actives un abonnement
+              ci-dessous).
             </p>
           </label>
           <label className="block">
             <span className="mb-1 block text-xs text-neutral-400">Nom du produit</span>
             <input value={productName} onChange={(e) => setProductName(e.target.value)} className={INPUT_CLASS} />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs text-neutral-400">Tarif (EUR)</span>
-            <input value={amount} onChange={(e) => setAmount(e.target.value)} className={INPUT_CLASS} />
-          </label>
-          <label className="col-span-2 block">
-            <span className="mb-1 block text-xs text-neutral-400">Description (affichée sur la page de vente)</span>
-            <textarea
-              value={productDescription}
-              onChange={(e) => setProductDescription(e.target.value)}
-              rows={2}
-              className={INPUT_CLASS}
-            />
           </label>
           <label className="block">
             <span className="mb-1 block text-xs text-neutral-400">Durée d&apos;essai (jours)</span>
@@ -248,14 +265,71 @@ export default function SellerPage() {
               className={INPUT_CLASS}
             />
           </label>
+          <label className="col-span-2 block">
+            <span className="mb-1 block text-xs text-neutral-400">Description (affichée sur la page de vente)</span>
+            <textarea
+              value={productDescription}
+              onChange={(e) => setProductDescription(e.target.value)}
+              rows={2}
+              className={INPUT_CLASS}
+            />
+          </label>
         </div>
+
+        <div>
+          <p className="mb-2 text-xs font-semibold text-neutral-300">Offres proposées</p>
+          <div className="grid grid-cols-3 gap-3">
+            {PLAN_KEYS.map((k) => (
+              <div key={k} className="rounded border border-neutral-700 p-3">
+                <label className="mb-2 flex items-center gap-2 text-sm text-neutral-200">
+                  <input
+                    type="checkbox"
+                    checked={planEnabled[k]}
+                    onChange={(e) => setPlanEnabled({ ...planEnabled, [k]: e.target.checked })}
+                  />
+                  {PLAN_LABELS[k]}
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs text-neutral-400">
+                    Tarif (EUR{k !== "lifetime" ? ` / ${k === "monthly" ? "mois" : "an"}` : ""})
+                  </span>
+                  <input
+                    value={planAmounts[k]}
+                    onChange={(e) => setPlanAmounts({ ...planAmounts, [k]: e.target.value })}
+                    disabled={!planEnabled[k]}
+                    className={`${INPUT_CLASS} disabled:opacity-40`}
+                  />
+                </label>
+              </div>
+            ))}
+          </div>
+          {(planEnabled.monthly || planEnabled.annual) && (
+            <label className="mt-3 block max-w-xs">
+              <span className="mb-1 block text-xs text-neutral-400">
+                Délai de grâce après échéance non payée (jours)
+              </span>
+              <input
+                type="number"
+                min={0}
+                value={subscriptionGraceDays}
+                onChange={(e) => setSubscriptionGraceDays(e.target.value)}
+                className={INPUT_CLASS}
+              />
+              <span className="mt-1 block text-[11px] text-neutral-500">
+                Passé ce délai après la date d&apos;échéance non réglée, les actions du panel vendu (SSH, Docker,
+                sauvegardes, correctifs...) se désactivent automatiquement, jusqu&apos;au renouvellement.
+              </span>
+            </label>
+          )}
+        </div>
+
         <div className="flex items-center gap-3">
           <button
             onClick={saveConfig}
             disabled={saving}
             className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60 disabled:opacity-50"
           >
-            {saving ? "Enregistrement..." : "Enregistrer et synchroniser le tarif"}
+            {saving ? "Enregistrement..." : "Enregistrer et synchroniser les tarifs"}
           </button>
           <a
             href="/api/seller/export-test"
@@ -267,7 +341,10 @@ export default function SellerPage() {
         </div>
         {pricing && (
           <p className="text-xs text-neutral-500">
-            Tarif Stripe actuel : {centsToAmountStr(pricing.amountCents)} {pricing.currency.toUpperCase()}
+            Tarifs Stripe actuels :{" "}
+            {PLAN_KEYS.filter((k) => pricing.plans[k]?.enabled)
+              .map((k) => `${PLAN_LABELS[k]} : ${centsToAmountStr(pricing.plans[k].amountCents)} ${pricing.currency.toUpperCase()}`)
+              .join(" · ") || "aucune offre active"}
           </p>
         )}
       </section>
@@ -319,6 +396,7 @@ export default function SellerPage() {
                 <th className="px-3 py-2 font-medium">Date</th>
                 <th className="px-3 py-2 font-medium">Client</th>
                 <th className="px-3 py-2 font-medium">Montant</th>
+                <th className="px-3 py-2 font-medium">Offre</th>
                 <th className="px-3 py-2 font-medium">Actions</th>
               </tr>
             </thead>
@@ -331,6 +409,22 @@ export default function SellerPage() {
                   <td className="px-3 py-2 text-neutral-300">{s.customerEmail}</td>
                   <td className="px-3 py-2 text-neutral-200">
                     {centsToAmountStr(s.amountCents)} {s.currency.toUpperCase()}
+                  </td>
+                  <td className="px-3 py-2 text-neutral-400">
+                    {PLAN_LABELS[s.productType] ?? s.productType}
+                    {s.subscriptionStatus && (
+                      <span
+                        className={`ml-1.5 rounded border px-1.5 py-0 text-[10px] ${
+                          s.subscriptionStatus === "active"
+                            ? "border-emerald-900 bg-emerald-950/30 text-emerald-400"
+                            : s.subscriptionStatus === "past_due"
+                              ? "border-amber-900 bg-amber-950/30 text-amber-400"
+                              : "border-neutral-700 text-neutral-500"
+                        }`}
+                      >
+                        {s.subscriptionStatus === "active" ? "actif" : s.subscriptionStatus === "past_due" ? "impayé" : "annulé"}
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     <button
