@@ -15,6 +15,7 @@ import {
 import { getTrialDays, setTrialDays } from "@/lib/seller/trialConfig";
 import { getSubscriptionGraceDays, setSubscriptionGraceDays } from "@/lib/seller/subscriptionConfig";
 import { getPanelPublicUrl, setPanelPublicUrl, resolvePublicUrl } from "@/lib/seller/publicUrl";
+import { getKeyRecoveryConfig, setKeyRecoveryConfig } from "@/lib/seller/keyRecovery";
 
 export async function GET(req: NextRequest) {
   return NextResponse.json({
@@ -26,6 +27,7 @@ export async function GET(req: NextRequest) {
     webhookUrl: `${resolvePublicUrl(req.nextUrl.origin)}/api/store/webhook`,
     trialDays: getTrialDays(),
     subscriptionGraceDays: getSubscriptionGraceDays(),
+    keyRecovery: getKeyRecoveryConfig(),
   });
 }
 
@@ -41,6 +43,8 @@ export async function PUT(req: NextRequest) {
     plans?: Record<PlanKey, PlanInput>;
     trialDays?: number;
     subscriptionGraceDays?: number;
+    keyRecoveryEnabled?: boolean;
+    keyRecoveryAmountCents?: number;
   };
 
   if (body.secretKey) setStripeSecretKey(body.secretKey);
@@ -54,6 +58,13 @@ export async function PUT(req: NextRequest) {
   }
   if (body.trialDays) setTrialDays(body.trialDays);
   if (body.subscriptionGraceDays !== undefined) setSubscriptionGraceDays(body.subscriptionGraceDays);
+  if (body.keyRecoveryEnabled !== undefined || body.keyRecoveryAmountCents !== undefined) {
+    const current = getKeyRecoveryConfig();
+    setKeyRecoveryConfig(
+      body.keyRecoveryEnabled ?? current.enabled,
+      body.keyRecoveryAmountCents ?? current.amountCents
+    );
+  }
 
   if (body.currency && body.productName && body.plans) {
     const atLeastOneEnabled = PLAN_KEYS.some((k) => body.plans![k]?.enabled);

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import ReleasesPanel from "@/components/ReleasesPanel";
+import SupportTicketsPanel from "@/components/SupportTicketsPanel";
 
 type PlanKey = "lifetime" | "monthly" | "annual";
 const PLAN_KEYS: PlanKey[] = ["lifetime", "monthly", "annual"];
@@ -26,6 +27,7 @@ type Sale = {
   createdAt: string;
 };
 type LicenseKeyRow = { key: string; saleId: string; createdAt: string; usedAt: string | null; usedByInfo: string | null };
+type KeyRecoveryOrder = { id: string; email: string; amountCents: number; currency: string; saleId: string | null; createdAt: string };
 
 const INPUT_CLASS = "w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100";
 
@@ -67,6 +69,11 @@ export default function SellerPage() {
   const [licenseKeys, setLicenseKeys] = useState<LicenseKeyRow[] | null>(null);
   const [keyTotals, setKeyTotals] = useState({ totalIssued: 0, totalUsed: 0 });
 
+  const [keyRecoveryEnabled, setKeyRecoveryEnabled] = useState(false);
+  const [keyRecoveryAmount, setKeyRecoveryAmount] = useState("9.00");
+  const [recoveryOrders, setRecoveryOrders] = useState<KeyRecoveryOrder[] | null>(null);
+  const [recoveryTotalCents, setRecoveryTotalCents] = useState(0);
+
   function loadConfig() {
     fetch("/api/seller/config")
       .then((r) => r.json())
@@ -91,6 +98,19 @@ export default function SellerPage() {
         }
         if (d.trialDays) setTrialDaysInput(String(d.trialDays));
         if (d.subscriptionGraceDays) setSubscriptionGraceDays(String(d.subscriptionGraceDays));
+        if (d.keyRecovery) {
+          setKeyRecoveryEnabled(!!d.keyRecovery.enabled);
+          setKeyRecoveryAmount(centsToAmountStr(d.keyRecovery.amountCents || 0));
+        }
+      });
+  }
+
+  function loadRecoveryOrders() {
+    fetch("/api/seller/key-recovery-orders")
+      .then((r) => r.json())
+      .then((d) => {
+        setRecoveryOrders(d.orders);
+        setRecoveryTotalCents(d.totalCents);
       });
   }
 
@@ -116,6 +136,7 @@ export default function SellerPage() {
     loadConfig();
     loadSales();
     loadLicenseKeys();
+    loadRecoveryOrders();
   }, []);
 
   async function saveConfig() {
@@ -138,6 +159,8 @@ export default function SellerPage() {
           ),
           trialDays: Number(trialDays) || undefined,
           subscriptionGraceDays: Number(subscriptionGraceDays) || undefined,
+          keyRecoveryEnabled,
+          keyRecoveryAmountCents: Math.round((parseFloat(keyRecoveryAmount) || 0) * 100),
         }),
       });
       const data = await res.json();
@@ -494,6 +517,75 @@ export default function SellerPage() {
           </table>
         </div>
       </section>
+
+      <section className="space-y-3 rounded border border-neutral-800 bg-neutral-900 p-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-neutral-100">Récupération de clé de licence (payante)</h2>
+          <span className="text-sm text-neutral-300">
+            Total encaissé : <strong>{centsToAmountStr(recoveryTotalCents)} €</strong>
+          </span>
+        </div>
+        <p className="text-xs text-neutral-500">
+          Permet à un client ayant acheté une licence lifetime mais ayant perdu sa clé de la retrouver moyennant un
+          paiement — visible sur la page de vente uniquement s&apos;il existe un achat lifetime pour l&apos;email
+          renseigné.
+        </p>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex items-center gap-2 text-sm text-neutral-200">
+            <input type="checkbox" checked={keyRecoveryEnabled} onChange={(e) => setKeyRecoveryEnabled(e.target.checked)} />
+            Activer
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs text-neutral-400">Tarif (EUR)</span>
+            <input
+              value={keyRecoveryAmount}
+              onChange={(e) => setKeyRecoveryAmount(e.target.value)}
+              disabled={!keyRecoveryEnabled}
+              className={`${INPUT_CLASS} w-32 disabled:opacity-40`}
+            />
+          </label>
+          <button
+            onClick={saveConfig}
+            disabled={saving}
+            className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60 disabled:opacity-50"
+          >
+            {saving ? "Enregistrement..." : "Enregistrer"}
+          </button>
+        </div>
+        <div className="overflow-x-auto rounded border border-neutral-800">
+          <table className="w-full text-sm">
+            <thead className="bg-neutral-950 text-left text-xs text-neutral-500">
+              <tr>
+                <th className="px-3 py-2 font-medium">Date</th>
+                <th className="px-3 py-2 font-medium">Email</th>
+                <th className="px-3 py-2 font-medium">Montant</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recoveryOrders?.map((o) => (
+                <tr key={o.id} className="border-t border-neutral-900">
+                  <td className="whitespace-nowrap px-3 py-2 text-neutral-500">
+                    {new Date(`${o.createdAt}Z`).toLocaleString("fr-FR")}
+                  </td>
+                  <td className="px-3 py-2 text-neutral-300">{o.email}</td>
+                  <td className="px-3 py-2 text-neutral-200">
+                    {centsToAmountStr(o.amountCents)} {o.currency.toUpperCase()}
+                  </td>
+                </tr>
+              ))}
+              {recoveryOrders?.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="px-3 py-6 text-center text-neutral-600">
+                    Aucune récupération de clé pour l&apos;instant.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <SupportTicketsPanel />
 
       <ReleasesPanel />
     </div>

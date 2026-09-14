@@ -117,3 +117,14 @@ export function updateSubscriptionState(
 export function listSales(): Sale[] {
   return (getDb().prepare(`SELECT * FROM sales ORDER BY created_at DESC`).all() as SaleRow[]).map(rowToSale);
 }
+
+/** Used by the paid key-recovery flow to confirm (before charging) that this email actually
+ * bought a lifetime license — case-insensitive since Stripe Checkout doesn't normalize case. */
+export function findLatestLifetimeSaleByEmail(email: string): Sale | null {
+  const row = getDb()
+    .prepare(
+      `SELECT * FROM sales WHERE product_type = 'lifetime' AND lower(customer_email) = lower(?) ORDER BY created_at DESC LIMIT 1`
+    )
+    .get(email) as SaleRow | undefined;
+  return row ? rowToSale(row) : null;
+}

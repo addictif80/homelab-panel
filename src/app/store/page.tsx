@@ -15,6 +15,7 @@ const PLAN_NOTE: Record<PlanKey, string> = {
 
 type PlanPricing = { enabled: boolean; amountCents: number };
 type Pricing = { currency: string; productName: string; productDescription: string; plans: Record<PlanKey, PlanPricing> };
+type KeyRecoveryConfig = { enabled: boolean; amountCents: number };
 
 const TABS: { key: string; label: string }[] = [
   { key: "security", label: "Sécurité" },
@@ -105,9 +106,21 @@ function formatAmount(amountCents: number, currency: string): string {
 export default function StorePage() {
   const [pricing, setPricing] = useState<Pricing | null>(null);
   const [trialDays, setTrialDays] = useState<number | null>(null);
+  const [keyRecovery, setKeyRecovery] = useState<KeyRecoveryConfig | null>(null);
   const [loading, setLoading] = useState<PlanKey | null>(null);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("security");
+
+  const [ticketEmail, setTicketEmail] = useState("");
+  const [ticketSubject, setTicketSubject] = useState("");
+  const [ticketMessage, setTicketMessage] = useState("");
+  const [ticketSending, setTicketSending] = useState(false);
+  const [ticketError, setTicketError] = useState("");
+  const [ticketLink, setTicketLink] = useState<string | null>(null);
+
+  const [recoveryEmail, setRecoveryEmail] = useState("");
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [recoveryError, setRecoveryError] = useState("");
 
   useEffect(() => {
     fetch("/api/store/pricing")
@@ -115,8 +128,50 @@ export default function StorePage() {
       .then((d) => {
         setPricing(d.pricing);
         setTrialDays(d.trialDays);
+        setKeyRecovery(d.keyRecovery ?? null);
       });
   }, []);
+
+  async function submitTicket(e: React.FormEvent) {
+    e.preventDefault();
+    setTicketSending(true);
+    setTicketError("");
+    try {
+      const res = await fetch("/api/store/support/tickets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: ticketEmail, subject: ticketSubject, message: ticketMessage }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setTicketLink(`/store/support/${data.id}?token=${data.token}`);
+      setTicketSubject("");
+      setTicketMessage("");
+    } catch (err) {
+      setTicketError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setTicketSending(false);
+    }
+  }
+
+  async function submitRecovery(e: React.FormEvent) {
+    e.preventDefault();
+    setRecoveryLoading(true);
+    setRecoveryError("");
+    try {
+      const res = await fetch("/api/store/key-recovery/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: recoveryEmail }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      window.location.href = data.url;
+    } catch (err) {
+      setRecoveryError(err instanceof Error ? err.message : "Erreur.");
+      setRecoveryLoading(false);
+    }
+  }
 
   const enabledPlans = pricing ? PLAN_KEYS.filter((k) => pricing.plans[k]?.enabled) : [];
   const heroPlan = enabledPlans[0] ?? null;
@@ -151,6 +206,8 @@ export default function StorePage() {
           <div className="hidden items-center gap-9 text-sm text-neutral-400 md:flex">
             <a href="#fonctionnalites" className="hover:text-neutral-100">Fonctionnalités</a>
             <a href="#tarifs" className="hover:text-neutral-100">Tarif</a>
+            <a href="/store/guide" className="hover:text-neutral-100">Guide de déploiement</a>
+            <a href="#support" className="hover:text-neutral-100">Support</a>
           </div>
           <div className="flex items-center gap-4">
             <ThemeToggle />
@@ -386,6 +443,90 @@ export default function StorePage() {
           <p className="mt-8 text-sm text-neutral-500">Tarif indisponible pour le moment.</p>
         )}
         <p className="mt-8 text-xs text-neutral-600">Lien de téléchargement envoyé par email après paiement.</p>
+
+        {keyRecovery?.enabled && (
+          <div className="mx-auto mt-14 max-w-md rounded-xl border border-neutral-800 bg-neutral-900/60 p-6 text-left">
+            <h3 className="text-sm font-semibold text-neutral-100">Licence lifetime perdue ?</h3>
+            <p className="mt-1.5 text-sm text-neutral-400">
+              Retrouve ta clé d&apos;activation moyennant {formatAmount(keyRecovery.amountCents, pricing?.currency ?? "eur")} —
+              renseignée à l&apos;email utilisé pour ton achat initial.
+            </p>
+            <form onSubmit={submitRecovery} className="mt-4 flex flex-wrap gap-2">
+              <input
+                type="email"
+                required
+                value={recoveryEmail}
+                onChange={(e) => setRecoveryEmail(e.target.value)}
+                placeholder="ton@email.fr"
+                className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100"
+              />
+              <button
+                type="submit"
+                disabled={recoveryLoading}
+                className="btn-secondary px-4 py-2 text-sm disabled:opacity-50"
+              >
+                {recoveryLoading ? "Redirection..." : "Payer et recevoir ma clé"}
+              </button>
+            </form>
+            {recoveryError && <p className="mt-2 text-xs text-red-400">{recoveryError}</p>}
+          </div>
+        )}
+      </section>
+
+      {/* Support */}
+      <section id="support" className="border-t border-neutral-800 bg-neutral-900/40 py-24">
+        <div className="mx-auto max-w-xl px-6">
+          <div className="mb-10 text-center">
+            <span className="font-mono text-xs uppercase tracking-wider text-blue-400">Assistance</span>
+            <h2 className="mt-3 text-3xl font-semibold">Une question, un souci ?</h2>
+            <p className="mt-3 text-neutral-400">
+              Ouvre un ticket, tu recevras un email avec un lien pour suivre et compléter la conversation. Pour un
+              problème de mise en place, jette d&apos;abord un œil au{" "}
+              <a href="/store/guide" className="text-blue-400 hover:underline">guide de déploiement</a>.
+            </p>
+          </div>
+
+          {ticketLink ? (
+            <div className="rounded-xl border border-emerald-900 bg-emerald-950/20 p-6 text-center">
+              <p className="text-sm text-emerald-300">
+                Ticket créé — un email de confirmation vient de partir avec ce même lien.
+              </p>
+              <a href={ticketLink} className="btn-primary mt-4 inline-block px-5 py-2 text-sm">
+                Voir mon ticket
+              </a>
+            </div>
+          ) : (
+            <form onSubmit={submitTicket} className="card space-y-3 p-6">
+              <input
+                type="email"
+                required
+                value={ticketEmail}
+                onChange={(e) => setTicketEmail(e.target.value)}
+                placeholder="ton@email.fr"
+                className="w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100"
+              />
+              <input
+                required
+                value={ticketSubject}
+                onChange={(e) => setTicketSubject(e.target.value)}
+                placeholder="Sujet"
+                className="w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100"
+              />
+              <textarea
+                required
+                rows={4}
+                value={ticketMessage}
+                onChange={(e) => setTicketMessage(e.target.value)}
+                placeholder="Décris ton problème..."
+                className="w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100"
+              />
+              {ticketError && <p className="text-sm text-red-400">{ticketError}</p>}
+              <button type="submit" disabled={ticketSending} className="btn-primary w-full py-2.5 text-sm disabled:opacity-50">
+                {ticketSending ? "Envoi..." : "Envoyer le ticket"}
+              </button>
+            </form>
+          )}
+        </div>
       </section>
 
       {/* CTA band */}
@@ -407,7 +548,11 @@ export default function StorePage() {
             {LOGOMARK}
             <span>Homelab Panel</span>
           </div>
-          <a href="/login" className="hover:text-neutral-300">Connexion</a>
+          <div className="flex items-center gap-5">
+            <a href="/store/guide" className="hover:text-neutral-300">Guide de déploiement</a>
+            <a href="#support" className="hover:text-neutral-300">Support</a>
+            <a href="/login" className="hover:text-neutral-300">Connexion</a>
+          </div>
         </div>
       </footer>
     </div>

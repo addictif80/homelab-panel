@@ -1,15 +1,65 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { constructWebhookEvent, getSubscriptionPeriodEnd, extractPeriodEnd, type PlanKey } from "@/lib/seller/stripe";
-import { recordSale, saleExistsForSession, updateSubscriptionState } from "@/lib/seller/sales";
+import { recordSale, saleExistsForSession, updateSubscriptionState, getSale } from "@/lib/seller/sales";
 import { createDownloadToken } from "@/lib/seller/downloadTokens";
-import { createLicenseKey } from "@/lib/seller/licenseKeys";
+import { createLicenseKey, getLicenseKeyForSale } from "@/lib/seller/licenseKeys";
+import { keyRecoveryOrderExists, recordKeyRecoveryOrder } from "@/lib/seller/keyRecovery";
 import { sendMail } from "@/lib/mail";
 import { buttonEmailHtml } from "@/lib/emailTemplates";
 import { logAudit } from "@/lib/db";
 import { resolvePublicUrl } from "@/lib/seller/publicUrl";
 
+/**
+ * The paid key-recovery flow has no `sales` row of its own — it's a fee to re-send a key from an
+ * *existing* lifetime sale, recorded in key_recovery_orders instead. Checked and branched off
+ * before the normal licensing-plan path below, which would otherwise treat it as a fresh purchase.
+ */
+async function handleKeyRecoveryCompleted(session: Stripe.Checkout.Session) {
+  if (keyRecoveryOrderExists(session.id)) return;
+
+  const email = session.customer_details?.email || session.metadata?.email || "";
+  const saleId = session.metadata?.saleId || null;
+  recordKeyRecoveryOrder({
+    stripeSessionId: session.id,
+    email,
+    amountCents: session.amount_total ?? 0,
+    currency: session.currency ?? "eur",
+    saleId,
+  });
+
+  const sale = saleId ? getSale(saleId) : null;
+  const license = sale ? getLicenseKeyForSale(sale.id) : null;
+
+  if (email) {
+    try {
+      if (license) {
+        await sendMail(
+          "Ta clé de licence — Homelab Panel",
+          `Voici ta clé d'activation lifetime :\n${license.key}\n\nColle-la directement dans ton panel (bandeau d'essai expiré ou page d'activation) pour réactiver ton installation.`,
+          email
+        );
+      } else {
+        await sendMail(
+          "Récupération de clé — Homelab Panel",
+          "Nous n'avons pas retrouvé de clé associée à ton achat. Réponds à cet email, on s'en occupe manuellement.",
+          email
+        );
+      }
+    } catch {
+      // Order is recorded either way — the seller can resend manually from /seller if needed.
+    }
+  }
+
+  logAudit("seller.key_recovery_completed", session.id, email);
+}
+
 async function handleCheckoutCompleted(req: NextRequest, session: Stripe.Checkout.Session) {
+  if (session.metadata?.type === "key_recovery") {
+    await handleKeyRecoveryCompleted(session);
+    return;
+  }
+
   const email = session.customer_details?.email;
   if (!email) {
     logAudit("seller.sale_missing_email", session.id);

@@ -284,6 +284,41 @@ function migrate(db: Database.Database) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_pulse_history_time ON pulse_history(recorded_at);
+
+    -- A buyer's support request. access_token is the only credential needed to view/reply to a
+    -- ticket from the public store site — no account required, same spirit as download_tokens.
+    CREATE TABLE IF NOT EXISTS support_tickets (
+      id TEXT PRIMARY KEY,
+      access_token TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS support_ticket_messages (
+      id TEXT PRIMARY KEY,
+      ticket_id TEXT NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+      sender TEXT NOT NULL CHECK (sender IN ('customer','seller')),
+      body TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_support_ticket_messages_ticket ON support_ticket_messages(ticket_id, created_at);
+
+    -- Paid "I lost my lifetime key" flow: kept separate from the sales table (which only ever
+    -- describes a licensing purchase tied to a Stripe Price/plan) so this ad-hoc, price_data-based
+    -- charge doesn't have to fit the PlanKey union.
+    CREATE TABLE IF NOT EXISTS key_recovery_orders (
+      id TEXT PRIMARY KEY,
+      stripe_session_id TEXT UNIQUE NOT NULL,
+      email TEXT NOT NULL,
+      amount_cents INTEGER NOT NULL,
+      currency TEXT NOT NULL,
+      sale_id TEXT REFERENCES sales(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Trial clock starts the instant the database is first created — not on some later "first

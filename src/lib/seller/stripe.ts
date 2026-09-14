@@ -171,6 +171,41 @@ export async function createCheckoutSession(plan: PlanKey, successUrl: string, c
   return session.url;
 }
 
+/**
+ * The paid "I lost my key" flow doesn't have a standing Stripe Price the way the three license
+ * plans do (its amount is a single ad-hoc setting, not something worth round-tripping through
+ * Product/Price sync) — `price_data` builds an inline, one-off price for this session only.
+ */
+export async function createKeyRecoveryCheckoutSession(
+  email: string,
+  amountCents: number,
+  currency: string,
+  successUrl: string,
+  cancelUrl: string,
+  metadata: Record<string, string>
+): Promise<string> {
+  const stripe = getStripeClient();
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    customer_email: email,
+    line_items: [
+      {
+        price_data: {
+          currency,
+          unit_amount: amountCents,
+          product_data: { name: "Récupération de clé de licence — Homelab Panel" },
+        },
+        quantity: 1,
+      },
+    ],
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    metadata,
+  });
+  if (!session.url) throw new Error("Impossible de créer la session de paiement Stripe.");
+  return session.url;
+}
+
 export function constructWebhookEvent(rawBody: string, signature: string): Stripe.Event {
   const stripe = getStripeClient();
   const secret = getWebhookSecret();
