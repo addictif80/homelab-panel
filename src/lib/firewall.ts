@@ -1,6 +1,7 @@
 import { runSshCommand, shellQuote } from "./ssh";
 import { withTimeout } from "./timeout";
 import { getDb } from "./db";
+import { listContainerIps } from "./docker";
 
 const IPV4_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 const BLOCK_TIMEOUT_MS = 30_000;
@@ -33,10 +34,54 @@ function findInfraOwner(ip: string): string | null {
   return row?.name ?? null;
 }
 
-function assertBlockable(ip: string): void {
-  const owner = findInfraOwner(ip);
+const DOCKER_CHECK_TIMEOUT_MS = 8_000;
+
+/**
+ * A "suspicious" IP flagged from logs is sometimes just one of your own Docker containers — its
+ * internal bridge-network address showing up because the app behind a reverse proxy isn't reading
+ * X-Forwarded-For, for instance. Checked per docker-enabled host, best-effort: a host that's
+ * unreachable right now just can't be checked, it doesn't abort the whole lookup.
+ */
+async function findDockerOwner(ip: string): Promise<{ container: string; host: string } | null> {
+  const dockerHosts = getDb().prepare(`SELECT id, name FROM hosts WHERE docker_enabled = 1`).all() as {
+    id: number;
+    name: string;
+  }[];
+
+  for (const host of dockerHosts) {
+    try {
+      const containers = await withTimeout(
+        listContainerIps(host.id),
+        DOCKER_CHECK_TIMEOUT_MS,
+        "Délai dépassé lors de la vérification Docker."
+      );
+      const match = containers.find((c) => c.ip === ip);
+      if (match) return { container: match.name, host: host.name };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/** Full infra sweep before a block — LAN/Tailscale/public host addresses first (instant, DB-only),
+ * then Docker container IPs across every docker-enabled host (SSH-based, slower) — so the caller
+ * can tell the user exactly what they're about to block: which machine, or which container on
+ * which machine, rather than a bare "this looks like infra" refusal. */
+export async function findAnyInfraOwner(ip: string): Promise<string | null> {
+  const hostOwner = findInfraOwner(ip);
+  if (hostOwner) return `l'adresse réseau de la machine "${hostOwner}"`;
+
+  const dockerOwner = await findDockerOwner(ip);
+  if (dockerOwner) return `le conteneur Docker "${dockerOwner.container}" sur "${dockerOwner.host}"`;
+
+  return null;
+}
+
+async function assertBlockable(ip: string): Promise<void> {
+  const owner = await findAnyInfraOwner(ip);
   if (owner) {
-    throw new Error(`${ip} est une adresse de l'infrastructure (${owner}) — blocage refusé pour éviter un auto-verrouillage.`);
+    throw new Error(`${ip} correspond à ${owner} — blocage refusé pour éviter un auto-verrouillage.`);
   }
 }
 
@@ -70,7 +115,7 @@ export type BlockEverywhereResult = { hostId: number; hostName: string; ok: bool
  * a machine mid-setup, ...) just reports its own failure rather than aborting the whole batch.
  */
 export async function blockIpEverywhere(ip: string): Promise<BlockEverywhereResult[]> {
-  assertBlockable(ip);
+  await assertBlockable(ip);
   const hosts = getDb().prepare(`SELECT id, name FROM hosts ORDER BY kind, name`).all() as {
     id: number;
     name: string;
@@ -157,7 +202,7 @@ function firewallBackendScript(ip: string, onUfw: string, onIptables: string): s
  *  - Anything else (Synology DSM, unknown): best-effort raw iptables rule, flagged as such.
  */
 export async function blockIp(hostId: number, ip: string): Promise<{ message: string }> {
-  assertBlockable(ip);
+  await assertBlockable(ip);
   const result = await applyBlockIp(hostId, ip);
   recordBlockedIp(ip);
   return result;

@@ -109,6 +109,8 @@ export default function SecurityPage() {
   const [unblocking, setUnblocking] = useState<string | null>(null);
   const [expandedHosts, setExpandedHosts] = useState<Set<number>>(new Set());
   const [guideHost, setGuideHost] = useState<HostScanResult | null>(null);
+  const [ownerWarning, setOwnerWarning] = useState<string | null>(null);
+  const [checkingOwner, setCheckingOwner] = useState(false);
 
   function toggleHostExpanded(hostId: number) {
     setExpandedHosts((prev) => {
@@ -189,6 +191,13 @@ export default function SecurityPage() {
 
   function openBlockModal(ip: SuspiciousIp) {
     setBlockModal({ ip, scope: "host", targetHostId: ip.hosts[0].hostId });
+    setOwnerWarning(null);
+    setCheckingOwner(true);
+    fetch(`/api/security/check-ip-owner?ip=${encodeURIComponent(ip.ip)}`)
+      .then((r) => r.json())
+      .then((data) => setOwnerWarning(data.owner ?? null))
+      .catch(() => setOwnerWarning(null))
+      .finally(() => setCheckingOwner(false));
   }
 
   async function applyBlock() {
@@ -595,6 +604,18 @@ export default function SecurityPage() {
             <p className="mt-2 text-xs text-neutral-500">
               Repérée sur : {blockModal.ip.hosts.map((h) => h.hostName).join(", ")}
             </p>
+
+            {checkingOwner && (
+              <p className="mt-3 text-xs text-neutral-500">
+                Vérification que cette IP n&apos;appartient pas à ton infrastructure...
+              </p>
+            )}
+            {!checkingOwner && ownerWarning && (
+              <p className="mt-3 rounded border border-red-800 bg-red-950/30 p-2.5 text-xs text-red-300">
+                ⚠ Attention : cette adresse correspond à {ownerWarning}. La bloquer risque de couper l&apos;accès à
+                ta propre infrastructure plutôt qu&apos;à un attaquant.
+              </p>
+            )}
 
             <div className="mt-4 space-y-2">
               <label className="flex items-start gap-2 rounded border border-neutral-700 p-2.5 text-sm">

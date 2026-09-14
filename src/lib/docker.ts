@@ -38,6 +38,30 @@ export async function listContainers(hostId: number): Promise<DockerContainer[]>
     });
 }
 
+export type ContainerIp = { name: string; ip: string };
+
+/** Container name + internal Docker network IP for every running container on this host — used
+ * to recognize a "suspicious" IP flagged in logs as actually being one of your own containers
+ * (e.g. a reverse proxy's bridge IP showing up because X-Forwarded-For isn't configured), rather
+ * than a real external address worth blocking. */
+export async function listContainerIps(hostId: number): Promise<ContainerIp[]> {
+  const { stdout, code } = await execOnHost(
+    hostId,
+    `docker ps -q | xargs -r docker inspect --format '{{.Name}}|{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' 2>/dev/null`
+  );
+  if (code !== 0) return [];
+
+  return stdout
+    .split("\n")
+    .filter(Boolean)
+    .flatMap((line) => {
+      const [namePart, ipsPart] = line.split("|");
+      const name = (namePart ?? "").replace(/^\//, "");
+      const ips = (ipsPart ?? "").trim().split(/\s+/).filter(Boolean);
+      return ips.map((ip) => ({ name, ip }));
+    });
+}
+
 export async function containerAction(
   hostId: number,
   containerId: string,
