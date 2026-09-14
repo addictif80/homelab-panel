@@ -44,7 +44,23 @@ export async function POST(req: NextRequest) {
   }
 
   if (!upstream.ok || !upstream.body) {
-    return NextResponse.json({ error: `Le serveur Ollama a répondu avec une erreur (HTTP ${upstream.status}).` }, { status: 502 });
+    // Ollama's own error responses are JSON like {"error":"model 'x' not found, try pulling it
+    // first"} — read it instead of throwing away the one piece of information that actually
+    // explains a 500 (missing model, out of memory, unsupported request shape...).
+    const detail = await upstream
+      .text()
+      .then((text) => {
+        try {
+          return (JSON.parse(text) as { error?: string }).error ?? text;
+        } catch {
+          return text;
+        }
+      })
+      .catch(() => "");
+    return NextResponse.json(
+      { error: `Le serveur Ollama a répondu avec une erreur (HTTP ${upstream.status})${detail ? ` : ${detail}` : "."}` },
+      { status: 502 }
+    );
   }
 
   return new Response(upstream.body, {

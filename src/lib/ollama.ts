@@ -71,8 +71,9 @@ export async function testOllamaConnection(config: OllamaConfig): Promise<Ollama
 
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
-/** One-shot, non-streaming completion — used where a whole answer is needed at once (the
- * resolution guide's "Demander à l'IA" step) rather than rendered token by token. */
+/** One-shot, non-streaming completion, for a future server-side caller that needs a whole answer
+ * at once rather than token by token (the guide and the assistant page both stream via
+ * /api/ai/chat instead — this one currently has no caller). */
 export async function askOllama(userMessage: string, extraContext?: string): Promise<string> {
   const config = getOllamaConfig();
   if (!config.baseUrl || !config.model) {
