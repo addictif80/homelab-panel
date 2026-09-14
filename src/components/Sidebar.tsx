@@ -11,6 +11,7 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string }[] }[
     label: "Infrastructure",
     items: [
       { href: "/servers", label: "Serveurs physiques" },
+      { href: "/hardware", label: "Santé matérielle" },
       { href: "/proxmox", label: "Serveurs VM" },
       { href: "/docker", label: "Docker" },
       { href: "/ssh", label: "Terminal SSH" },

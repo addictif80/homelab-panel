@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { APP_TEMPLATES } from "@/lib/appTemplates";
+import DockerStacksPanel from "@/components/DockerStacksPanel";
 
 const Terminal = dynamic(() => import("@/components/Terminal"), { ssr: false });
 
@@ -489,6 +490,8 @@ export default function DockerPage() {
           ))}
         </div>
       )}
+
+      <DockerStacksPanel />
     </div>
   );
 }

@@ -23,6 +23,11 @@ const KIND_LABELS: Record<string, string> = {
 };
 
 type PingState = Record<number, "idle" | "checking" | "up" | "down" | "unknown">;
+type Impact = {
+  childHosts: { id: number; name: string; kind: string }[];
+  linkedHosts: { id: number; name: string; link_type: string }[];
+  containers: { id: string; name: string }[];
+};
 
 export default function ServersPage() {
   const [hosts, setHosts] = useState<Host[]>([]);
@@ -30,6 +35,8 @@ export default function ServersPage() {
   const [restarting, setRestarting] = useState<number | null>(null);
   const [confirmingRestart, setConfirmingRestart] = useState<Host | null>(null);
   const [restartMsg, setRestartMsg] = useState("");
+  const [impact, setImpact] = useState<Impact | null>(null);
+  const [impactLoading, setImpactLoading] = useState(false);
 
   useEffect(() => {
     fetch("/api/hosts")
@@ -51,6 +58,17 @@ export default function ServersPage() {
     } catch {
       setPingState((s) => ({ ...s, [id]: "unknown" }));
     }
+  }
+
+  function openRestartConfirm(host: Host) {
+    setConfirmingRestart(host);
+    setImpact(null);
+    setImpactLoading(true);
+    fetch(`/api/hosts/${host.id}/impact`)
+      .then((r) => r.json())
+      .then((d) => setImpact(d))
+      .catch(() => setImpact(null))
+      .finally(() => setImpactLoading(false));
   }
 
   async function confirmRestart() {
@@ -144,7 +162,7 @@ export default function ServersPage() {
                   )}
                   {h.kind === "physical" && (
                     <button
-                      onClick={() => setConfirmingRestart(h)}
+                      onClick={() => openRestartConfirm(h)}
                       disabled={restarting === h.id}
                       className="rounded border border-amber-800 bg-amber-950/30 px-2 py-0.5 text-xs text-amber-300 hover:bg-amber-950/60 disabled:opacity-50"
                     >
@@ -165,9 +183,40 @@ export default function ServersPage() {
           <div className="w-full max-w-md rounded border border-neutral-700 bg-neutral-900 p-5">
             <h2 className="text-sm font-semibold text-neutral-100">Redémarrer « {confirmingRestart.name} » ?</h2>
             <p className="mt-2 text-sm text-neutral-300">
-              La machine va redémarrer immédiatement. Tout service qu&apos;elle héberge (y compris des VM ou
-              conteneurs si c&apos;est un hôte Proxmox/Docker) sera interrompu le temps du redémarrage.
+              La machine va redémarrer immédiatement. Tout service qu&apos;elle héberge sera interrompu le temps du
+              redémarrage.
             </p>
+
+            <div className="mt-3 rounded border border-amber-900/50 bg-amber-950/20 p-3 text-sm">
+              {impactLoading ? (
+                <p className="text-neutral-400">Analyse de l&apos;impact...</p>
+              ) : impact && (impact.childHosts.length || impact.linkedHosts.length || impact.containers.length) ? (
+                <div className="space-y-2 text-amber-200">
+                  <p className="font-medium">Ce qui sera aussi affecté :</p>
+                  {impact.childHosts.length > 0 && (
+                    <p>
+                      <span className="text-neutral-400">VM/CT hébergées : </span>
+                      {impact.childHosts.map((h) => h.name).join(", ")}
+                    </p>
+                  )}
+                  {impact.containers.length > 0 && (
+                    <p>
+                      <span className="text-neutral-400">Conteneurs Docker actifs : </span>
+                      {impact.containers.map((c) => c.name).join(", ")}
+                    </p>
+                  )}
+                  {impact.linkedHosts.length > 0 && (
+                    <p>
+                      <span className="text-neutral-400">Machines liées dans la topologie : </span>
+                      {impact.linkedHosts.map((h) => `${h.name} (${h.link_type})`).join(", ")}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-neutral-500">Aucune VM, conteneur ou machine liée détecté pour cet hôte.</p>
+              )}
+            </div>
+
             <div className="mt-4 flex justify-end gap-2">
               <button
                 onClick={() => setConfirmingRestart(null)}

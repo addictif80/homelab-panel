@@ -319,6 +319,26 @@ function migrate(db: Database.Database) {
     -- Paid "I lost my lifetime key" flow: kept separate from the sales table (which only ever
     -- describes a licensing purchase tied to a Stripe Price/plan) so this ad-hoc, price_data-based
     -- charge doesn't have to fit the PlanKey union.
+    -- Seller-side anti-reset registry for the free trial: keyed by a hashed machine fingerprint
+    -- (see lib/machineFingerprint.ts) rather than anything stored in the client's own database,
+    -- so wiping panel.db to relaunch a fresh trial doesn't also erase the evidence of the first one.
+    CREATE TABLE IF NOT EXISTS trial_fingerprints (
+      fingerprint TEXT PRIMARY KEY,
+      first_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Portainer-style "Stacks": arbitrary docker-compose.yml content the user pastes in, deployed
+    -- to a chosen host in one click via docker compose, rather than being limited to the
+    -- predefined one-click app templates (see lib/appTemplates.ts).
+    CREATE TABLE IF NOT EXISTS docker_stacks (
+      id TEXT PRIMARY KEY,
+      host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      compose_content TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS key_recovery_orders (
       id TEXT PRIMARY KEY,
       stripe_session_id TEXT UNIQUE NOT NULL,

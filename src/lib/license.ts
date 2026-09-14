@@ -2,6 +2,7 @@ import { readFileSync } from "fs";
 import path from "path";
 import { verify, createPublicKey, randomUUID } from "crypto";
 import { getDb } from "./db";
+import { getMachineFingerprint } from "./machineFingerprint";
 
 type LicenseConfig = { trialDays: number; licenseServerUrl: string; licensePublicKey: string };
 
@@ -282,5 +283,44 @@ export async function refreshLicenseIfSubscription(): Promise<void> {
     }
   } catch {
     // See doc comment — intentionally silent.
+  }
+}
+
+/**
+ * Anti-reset measure for the free trial: reports this machine's hashed fingerprint (stable across
+ * a panel.db wipe — see lib/machineFingerprint.ts) to the seller server, which remembers the first
+ * time it ever saw that fingerprint. If the server's answer is *earlier* than what this install's
+ * own database currently believes, that means the local trial_started_at was reset (most likely by
+ * deleting panel.db to relaunch a fresh trial) — so it's pulled back to the true, original date.
+ * A no-op once activated (nothing left to protect), for the seller's own instance, or when no
+ * license server is configured. Best-effort: a network hiccup just leaves the local date as-is
+ * until the next periodic call succeeds.
+ */
+export async function syncTrialStart(): Promise<void> {
+  if (isSellerInstance()) return;
+
+  const row = getLicenseRow();
+  if (row.status === "activated") return;
+
+  const config = getLicenseConfig();
+  if (!config.licenseServerUrl) return;
+
+  try {
+    const res = await fetch(`${config.licenseServerUrl.replace(/\/$/, "")}/api/seller/license/trial-check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fingerprint: getMachineFingerprint() }),
+    });
+    const data = (await res.json()) as { firstSeenAt?: string };
+    if (!res.ok || !data.firstSeenAt) return;
+
+    const serverMs = new Date(data.firstSeenAt).getTime();
+    const localMs = new Date(`${row.trial_started_at}Z`).getTime();
+    if (Number.isFinite(serverMs) && serverMs < localMs) {
+      const sqliteDatetime = new Date(serverMs).toISOString().slice(0, 19).replace("T", " ");
+      getDb().prepare(`UPDATE license SET trial_started_at = ? WHERE id = 1`).run(sqliteDatetime);
+    }
+  } catch {
+    // Best-effort — see doc comment.
   }
 }

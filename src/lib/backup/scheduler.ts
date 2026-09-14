@@ -1,6 +1,7 @@
 import { listPlans } from "./plans";
 import { getLatestRun, isRunInProgress } from "./runs";
 import { runBackupPlan } from "./engine";
+import { isLockdownActive } from "../lockdown";
 
 const CHECK_INTERVAL_MS = 15 * 60 * 1000;
 const FIRST_RUN_DELAY_MS = 90_000;
@@ -12,6 +13,7 @@ const INTERVALS_MS: Record<string, number> = {
 };
 
 async function checkDuePlans() {
+  if (isLockdownActive()) return;
   for (const plan of listPlans()) {
     if (!plan.enabled || plan.schedule === "manual") continue;
     if (isRunInProgress(plan.id)) continue;

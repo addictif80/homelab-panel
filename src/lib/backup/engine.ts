@@ -4,6 +4,7 @@ import { rsyncTransfer, listRemoteDirs, removeRemotePath } from "./transfer";
 import { resolveDockerPaths, type DockerBackupConfig } from "./sources/docker";
 import { dumpDatabase, type DatabaseBackupConfig } from "./sources/database";
 import { dumpProxmoxVm, type ProxmoxVmBackupConfig } from "./sources/proxmox";
+import { dumpPanelConfig, type PanelConfigBackupConfig } from "./sources/panelConfig";
 import { runSshCommand } from "../ssh";
 
 export function joinRemote(base: string, sub: string): string {
@@ -104,6 +105,13 @@ export async function runBackupPlan(planId: string): Promise<string> {
         case "proxmox_vm": {
           const cfg = JSON.parse(plan.sourceConfig) as ProxmoxVmBackupConfig;
           const resolved = await dumpProxmoxVm(plan.sourceHostId, cfg, append);
+          paths = resolved.paths;
+          cleanup = resolved.cleanup;
+          break;
+        }
+        case "panel_config": {
+          const cfg = JSON.parse(plan.sourceConfig || "{}") as PanelConfigBackupConfig;
+          const resolved = await dumpPanelConfig(plan.sourceHostId, cfg, append);
           paths = resolved.paths;
           cleanup = resolved.cleanup;
           break;

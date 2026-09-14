@@ -4,6 +4,7 @@ import { sendMail } from "@/lib/mail";
 import { buttonEmailHtml } from "@/lib/emailTemplates";
 import { resolvePublicUrl } from "@/lib/seller/publicUrl";
 import { logAudit } from "@/lib/db";
+import { notifyAll } from "@/lib/notifications/notify";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -41,5 +42,12 @@ export async function POST(req: NextRequest) {
   }
 
   logAudit("seller.support_ticket_created", ticket.id, trimmedEmail);
+
+  // Best-effort fan-out (email + any configured webhook/ntfy/Discord/Slack) — never throws.
+  await notifyAll(
+    "Nouveau ticket d'assistance",
+    `${trimmedEmail} — ${trimmedSubject}\n\n${trimmedMessage}\n\nRépondre : ${resolvePublicUrl(req.nextUrl.origin)}/seller`
+  );
+
   return NextResponse.json({ id: ticket.id, token: ticket.accessToken });
 }

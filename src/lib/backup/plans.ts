@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { getDb } from "../db";
 
-export type SourceType = "paths" | "docker" | "database" | "proxmox_vm";
+export type SourceType = "paths" | "docker" | "database" | "proxmox_vm" | "panel_config";
 export type Schedule = "manual" | "hourly" | "daily" | "weekly";
 
 export type BackupPlan = {

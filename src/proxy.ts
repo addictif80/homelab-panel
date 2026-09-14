@@ -23,6 +23,7 @@ const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/store/", "/api/download/"];
 const PUBLIC_API_EXACT = [
   "/api/seller/license/validate",
   "/api/seller/license/refresh",
+  "/api/seller/license/trial-check",
   "/api/seller/releases/latest",
   "/api/seller/releases/download",
 ];

@@ -9,6 +9,9 @@ import TrustedDevicesPanel from "@/components/TrustedDevicesPanel";
 import SecurityLogsPanel from "@/components/SecurityLogsPanel";
 import OllamaSettingsPanel from "@/components/OllamaSettingsPanel";
 import SecurityGuide from "@/components/SecurityGuide";
+import PortAuditPanel from "@/components/PortAuditPanel";
+import RecoveryVaultPanel from "@/components/RecoveryVaultPanel";
+import LockdownPanel from "@/components/LockdownPanel";
 
 type Severity = "critical" | "warning" | "info" | "good";
 
@@ -556,7 +559,10 @@ export default function SecurityPage() {
       </div>
 
       <div className="space-y-3">
+        <LockdownPanel />
         <DetectionThresholdsPanel />
+        <PortAuditPanel />
+        <RecoveryVaultPanel />
         <SmtpSettingsPanel />
         <NotificationChannelsPanel />
         <CertificateWatchPanel onChanged={runScan} />

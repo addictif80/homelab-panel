@@ -1,7 +1,7 @@
 import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
 import type { NextRequest } from "next/server";
-import { getDb } from "./db";
+import { getDb, getSetting, setSetting } from "./db";
 
 /** Best-effort caller IP for login-attempt bookkeeping only — never treat this as trustworthy on
  * its own (see MAX_ATTEMPTS_PER_USERNAME below for why the actual lockout doesn't rely on it). */
@@ -32,8 +32,22 @@ function getSessionSecret(): Uint8Array {
 export const SESSION_COOKIE_NAME = SESSION_COOKIE;
 export const SESSION_MAX_AGE = SESSION_TTL_SECONDS;
 
+const SESSION_EPOCH_KEY = "session_epoch";
+
+/** A stateless JWT scheme has no session table to selectively delete rows from — bumping this
+ * counter and embedding it in every token is the only way to invalidate every *other* already-
+ * issued cookie at once (used by the Lockdown feature). The session doing the bumping stays valid
+ * because proxy.ts re-signs its cookie with the new epoch on the very same response. */
+export function getSessionEpoch(): number {
+  return Number(getSetting(SESSION_EPOCH_KEY) || "0");
+}
+
+export function bumpSessionEpoch(): void {
+  setSetting(SESSION_EPOCH_KEY, String(getSessionEpoch() + 1));
+}
+
 export async function createSessionToken(username: string): Promise<string> {
-  return await new SignJWT({ sub: username })
+  return await new SignJWT({ sub: username, epoch: getSessionEpoch() })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${SESSION_TTL_SECONDS}s`)
@@ -46,6 +60,7 @@ export async function verifySessionToken(token: string): Promise<string | null> 
     // Pending-2FA tokens are signed with this same secret but must never authenticate a request
     // on their own — only a token with no scope claim is a real, fully-authenticated session.
     if (payload.scope !== undefined) return null;
+    if ((payload.epoch ?? 0) !== getSessionEpoch()) return null;
     return typeof payload.sub === "string" ? payload.sub : null;
   } catch {
     return null;

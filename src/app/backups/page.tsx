@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import DirectoryPicker from "@/components/DirectoryPicker";
 
 type Host = { id: number; name: string; kind: string; docker_enabled: number; proxmox_node: string | null };
-type SourceType = "paths" | "docker" | "database" | "proxmox_vm";
+type SourceType = "paths" | "docker" | "database" | "proxmox_vm" | "panel_config";
 type Schedule = "manual" | "hourly" | "daily" | "weekly";
 
 type BackupRun = {
@@ -41,6 +41,7 @@ const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
   docker: "Volumes Docker",
   database: "Base de données",
   proxmox_vm: "VM / CT Proxmox",
+  panel_config: "Configuration du panel",
 };
 
 const SCHEDULE_LABELS: Record<Schedule, string> = {
@@ -69,7 +70,27 @@ export default function BackupsPage() {
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [activeRun, setActiveRun] = useState<BackupRun | null>(null);
   const [restoring, setRestoring] = useState<{ plan: BackupPlan; run: BackupRun; path: string } | null>(null);
+  const [importingRunId, setImportingRunId] = useState<string | null>(null);
+  const [importMsg, setImportMsg] = useState("");
   const logRef = useRef<HTMLPreElement>(null);
+
+  async function importPanelConfig(runId: string) {
+    if (!confirm("Ça va remplacer l'inventaire, les identifiants et les intégrations actuels par ceux de cette sauvegarde. Continuer ?")) {
+      return;
+    }
+    setImportingRunId(runId);
+    setImportMsg("");
+    try {
+      const res = await fetch(`/api/backups/runs/${runId}/import-panel-config`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setImportMsg(`Restauré : ${data.summary.filter((s: { rows: number }) => s.rows > 0).map((s: { table: string; rows: number }) => `${s.table} (${s.rows})`).join(", ") || "rien"}.`);
+    } catch (err) {
+      setImportMsg(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setImportingRunId(null);
+    }
+  }
 
   const loadPlans = useCallback(async () => {
     const res = await fetch("/api/backups");
@@ -244,15 +265,25 @@ export default function BackupsPage() {
                             <span className={s.color}>{s.text}</span>
                             {run.status === "success" && run.paths.length > 0 && (
                               <div className="flex flex-wrap gap-1">
-                                {run.paths.map((p) => (
+                                {plan.sourceType === "panel_config" ? (
                                   <button
-                                    key={p}
-                                    onClick={() => setRestoring({ plan, run, path: p })}
-                                    className="rounded border border-neutral-700 px-1.5 py-0.5 text-neutral-300 hover:bg-neutral-800"
+                                    onClick={() => importPanelConfig(run.id)}
+                                    disabled={importingRunId === run.id}
+                                    className="rounded border border-amber-800 bg-amber-950/30 px-1.5 py-0.5 text-amber-300 hover:bg-amber-950/60 disabled:opacity-50"
                                   >
-                                    Restaurer {p}
+                                    {importingRunId === run.id ? "Import..." : "Importer dans le panel"}
                                   </button>
-                                ))}
+                                ) : (
+                                  run.paths.map((p) => (
+                                    <button
+                                      key={p}
+                                      onClick={() => setRestoring({ plan, run, path: p })}
+                                      className="rounded border border-neutral-700 px-1.5 py-0.5 text-neutral-300 hover:bg-neutral-800"
+                                    >
+                                      Restaurer {p}
+                                    </button>
+                                  ))
+                                )}
                               </div>
                             )}
                           </div>
@@ -268,6 +299,7 @@ export default function BackupsPage() {
         })}
         {plans?.length === 0 && <p className="text-sm text-neutral-500">Aucun plan de sauvegarde pour l&apos;instant.</p>}
       </div>
+      {importMsg && <p className="text-sm text-neutral-400">{importMsg}</p>}
 
       {activeRunId && activeRun && (
         <div className="fixed bottom-4 right-4 z-40 w-full max-w-lg rounded border border-neutral-700 bg-neutral-950 shadow-xl">
