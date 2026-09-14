@@ -97,17 +97,20 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
   );
 }
 
-function PublicIps({ ips }: { ips: string[] }) {
-  if (ips.length === 0) return null;
+type PublicIpEntry = { ip: string; owners: string[] };
+
+function PublicIps({ entries }: { entries: PublicIpEntry[] }) {
+  if (entries.length === 0) return null;
   return (
     <div className="mt-4 border-t border-neutral-800 pt-3">
       <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-wider text-neutral-600">
-        IP publique{ips.length > 1 ? "s" : ""}
+        IP publique{entries.length > 1 ? "s" : ""}
       </p>
-      <div className="space-y-0.5 px-3">
-        {ips.map((ip) => (
+      <div className="space-y-1 px-3">
+        {entries.map(({ ip, owners }) => (
           <p key={ip} className="font-mono text-xs text-neutral-400">
             {ip}
+            {owners.length > 0 && <span className="text-neutral-600"> ({owners.join(", ")})</span>}
           </p>
         ))}
       </div>
@@ -118,7 +121,7 @@ function PublicIps({ ips }: { ips: string[] }) {
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const [publicIps, setPublicIps] = useState<string[]>([]);
+  const [publicIps, setPublicIps] = useState<PublicIpEntry[]>([]);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
@@ -132,14 +135,20 @@ export default function Sidebar() {
         .then((res) => (res.ok ? res.json() : null))
         .catch(() => null),
     ]).then(([hostsData, panelIpData]) => {
-      // Several physical machines can share one public IP (same ISP line/box, or a router's WAN
-      // IP already picked up automatically from Box & routeurs) — dedupe so it's a list of
-      // distinct exit points, not one row per host.
-      const ips = (hostsData?.hosts as { public_ip: string | null }[] | undefined)
-        ?.map((h) => h.public_ip)
-        .filter((ip): ip is string => !!ip) ?? [];
-      if (panelIpData?.ip) ips.push(panelIpData.ip);
-      setPublicIps(Array.from(new Set(ips)));
+      // Several machines can share one public IP (same ISP line/box) — group by IP so each row
+      // names every owner instead of repeating the same address once per host.
+      const owners = new Map<string, Set<string>>();
+      const addOwner = (ip: string | null | undefined, name: string) => {
+        if (!ip) return;
+        const set = owners.get(ip) ?? new Set<string>();
+        set.add(name);
+        owners.set(ip, set);
+      };
+      (hostsData?.hosts as { name: string; public_ip: string | null }[] | undefined)?.forEach((h) =>
+        addOwner(h.public_ip, h.name)
+      );
+      if (panelIpData?.ip) addOwner(panelIpData.ip, "Panel");
+      setPublicIps(Array.from(owners.entries()).map(([ip, names]) => ({ ip, owners: Array.from(names) })));
     });
   }, []);
 
@@ -182,7 +191,7 @@ export default function Sidebar() {
           <ThemeToggle />
         </div>
         <NavLinks pathname={pathname} />
-        <PublicIps ips={publicIps} />
+        <PublicIps entries={publicIps} />
         <button
           onClick={handleLogout}
           className="mt-4 rounded-md px-3 py-1.5 text-left text-sm text-neutral-500 hover:bg-neutral-800/70 hover:text-neutral-200"
@@ -222,7 +231,7 @@ export default function Sidebar() {
             </button>
           </div>
           <NavLinks pathname={pathname} onNavigate={() => setMobileOpen(false)} />
-          <PublicIps ips={publicIps} />
+          <PublicIps entries={publicIps} />
           <button
             onClick={handleLogout}
             className="mt-4 rounded-md px-3 py-2 text-left text-sm text-neutral-500 hover:bg-neutral-800/70 hover:text-neutral-200"
