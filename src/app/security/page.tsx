@@ -7,6 +7,8 @@ import NotificationChannelsPanel from "@/components/NotificationChannelsPanel";
 import CertificateWatchPanel from "@/components/CertificateWatchPanel";
 import TrustedDevicesPanel from "@/components/TrustedDevicesPanel";
 import SecurityLogsPanel from "@/components/SecurityLogsPanel";
+import OllamaSettingsPanel from "@/components/OllamaSettingsPanel";
+import SecurityGuide from "@/components/SecurityGuide";
 
 type Severity = "critical" | "warning" | "info" | "good";
 
@@ -106,6 +108,7 @@ export default function SecurityPage() {
   const [blockedIps, setBlockedIps] = useState<{ ip: string; blockedAt: string }[]>([]);
   const [unblocking, setUnblocking] = useState<string | null>(null);
   const [expandedHosts, setExpandedHosts] = useState<Set<number>>(new Set());
+  const [guideHost, setGuideHost] = useState<HostScanResult | null>(null);
 
   function toggleHostExpanded(hostId: number) {
     setExpandedHosts((prev) => {
@@ -409,7 +412,17 @@ export default function SecurityPage() {
                       {host.hostOs ? ` · ${host.hostOs}` : ""}
                     </span>
                   </div>
-                  <span className={`rounded border px-2 py-0.5 text-xs ${style.badge}`}>{style.label}</span>
+                  <div className="flex items-center gap-2">
+                    {!host.error && activeFindings(host).length > 0 && (
+                      <button
+                        onClick={() => setGuideHost(host)}
+                        className="rounded border border-blue-800 bg-blue-950/40 px-2 py-0.5 text-xs text-blue-300 hover:bg-blue-950/70"
+                      >
+                        Guide de résolution
+                      </button>
+                    )}
+                    <span className={`rounded border px-2 py-0.5 text-xs ${style.badge}`}>{style.label}</span>
+                  </div>
                 </div>
 
                 <div className="p-4">
@@ -539,6 +552,7 @@ export default function SecurityPage() {
         <NotificationChannelsPanel />
         <CertificateWatchPanel onChanged={runScan} />
         <TrustedDevicesPanel />
+        <OllamaSettingsPanel />
       </div>
 
       {confirming && (
@@ -642,6 +656,17 @@ export default function SecurityPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {guideHost && (
+        <SecurityGuide
+          host={guideHost}
+          onClose={() => setGuideHost(null)}
+          onHostUpdated={(updated) => {
+            setResults((prev) => (prev ? prev.map((h) => (h.hostId === updated.hostId ? updated : h)) : prev));
+            setGuideHost(updated);
+          }}
+        />
       )}
     </div>
   );

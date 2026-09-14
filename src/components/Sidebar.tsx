@@ -35,6 +35,7 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string }[] }[
     items: [
       { href: "/security", label: "Sécurité" },
       { href: "/backups", label: "Sauvegardes" },
+      { href: "/assistant", label: "Assistant IA" },
     ],
   },
   {
