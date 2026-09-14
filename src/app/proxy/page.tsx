@@ -198,7 +198,7 @@ export default function ProxyPage() {
                 <input
                   value={form.domainNames}
                   onChange={(e) => setForm({ ...form, domainNames: e.target.value })}
-                  placeholder="app.abhd.fr"
+                  placeholder="app.exemple.fr"
                   className={INPUT_CLASS}
                 />
               </label>

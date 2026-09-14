@@ -67,7 +67,7 @@ export default function UptimePage() {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="https://uptime.abhd.fr ou http://192.168.0.50:3001"
+            placeholder="https://uptime.exemple.fr ou http://192.168.1.50:3001"
             className="flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100"
           />
           <button

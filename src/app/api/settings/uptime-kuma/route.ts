@@ -16,7 +16,7 @@ export async function PUT(req: NextRequest) {
   try {
     normalized = new URL(url).toString();
   } catch {
-    return NextResponse.json({ error: "URL invalide (ex: https://uptime.abhd.fr ou http://192.168.0.50:3001)." }, { status: 400 });
+    return NextResponse.json({ error: "URL invalide (ex: https://uptime.exemple.fr ou http://192.168.1.50:3001)." }, { status: 400 });
   }
   setSetting(KEY, normalized);
   return NextResponse.json({ ok: true, url: normalized });

@@ -68,7 +68,7 @@ export default function CertificateWatchPanel({ onChanged }: { onChanged?: () =>
             <input
               value={newDomain}
               onChange={(e) => setNewDomain(e.target.value)}
-              placeholder="homelab.abhd.fr"
+              placeholder="homelab.exemple.fr"
               className="flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm text-neutral-100"
             />
             <button

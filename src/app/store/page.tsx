@@ -282,7 +282,7 @@ export default function StorePage() {
                 <div>
                   <Row ok text="PermitRootLogin par mot de passe" value="désactivé" />
                   <Row ok text="Fail2ban" value="actif" />
-                  <Row text="Certificat homelab.abhd.fr" value="87 jours restants" />
+                  <Row text="Certificat homelab.exemple.fr" value="87 jours restants" />
                   <p className="mt-3 text-xs text-neutral-500">
                     Chaque ligne à surveiller vient avec une explication simple et un bouton pour corriger.
                   </p>
