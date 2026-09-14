@@ -22,7 +22,10 @@ const SKIP_DIRS = [
 // excluded via SKIP_DIRS above; these are individual files that must never ship either.
 // license.json is excluded from the plain glob because it's re-written below with this
 // specific export's real trial length / activation key instead of the repo's placeholder.
-const IGNORE_FILES = [".env", ".env.local", ".env*.local", "license.json"];
+// src/lib/seed.ts holds the seller's own real hardware names, LAN IPs and network topology (dev/
+// demo convenience, gated behind SELLER_MODE in db.ts) — excluding the file itself, not just its
+// effect, means a buyer reading their own source can't see the seller's home network layout.
+const IGNORE_FILES = [".env", ".env.local", ".env*.local", "license.json", "src/lib/seed.ts"];
 
 export type ExportLicenseConfig = {
   trialDays: number;

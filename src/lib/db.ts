@@ -22,8 +22,17 @@ export function getDb(): Database.Database {
     db.pragma("foreign_keys = ON");
     migrate(db);
     global.__homelabDb = db;
-    // Lazy import avoids a circular dependency (seed.ts calls back into getDb()).
-    require("./seed").seedIfEmpty();
+    // Seeds the seller's own real inventory for local dev/demo convenience — never on a customer
+    // install, which must start with an empty inventory, not the seller's actual server names,
+    // LAN IPs and network topology. Not a NEXT_PUBLIC_ var, same reasoning as license.ts's
+    // isSellerInstance(): it gates a server-side decision, so it can't be set from a customer's
+    // own build environment. seed.ts itself is also excluded from the exported client zip (see
+    // exportBuild.ts) — this check is what makes that exclusion safe to do without crashing a
+    // fresh customer install on the require() below.
+    if (process.env.SELLER_MODE === "true") {
+      // Lazy import avoids a circular dependency (seed.ts calls back into getDb()).
+      require("./seed").seedIfEmpty();
+    }
   }
   return global.__homelabDb;
 }
