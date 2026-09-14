@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOllamaConfig, buildSystemPrompt, type ChatMessage } from "@/lib/ollama";
 
+// Opts this route out of Next.js's route-level fetch caching/memoization — the upstream call
+// must run fresh, streamed straight through, every single time, never served from a cache entry.
+export const dynamic = "force-dynamic";
+
 /**
  * Streams straight through from Ollama's own /api/chat (newline-delimited JSON, one
  * `{message:{content},done}` object per line) instead of buffering a full answer server-side —
@@ -28,12 +32,15 @@ export async function POST(req: NextRequest) {
         messages: [{ role: "system", content: buildSystemPrompt(config, context) }, ...messages],
       }),
       signal: AbortSignal.timeout(180_000),
+      cache: "no-store",
     });
   } catch (err) {
-    return NextResponse.json(
-      { error: `Connexion au serveur Ollama impossible : ${err instanceof Error ? err.message : "erreur inconnue"}.` },
-      { status: 502 }
-    );
+    // "fetch failed" from undici is a generic wrapper — the actionable detail (ECONNREFUSED,
+    // ECONNRESET, DNS failure...) lives one level down in `cause`, so surface that too rather
+    // than just the opaque top-level message.
+    const cause = err instanceof Error && err.cause instanceof Error ? err.cause.message : undefined;
+    const reason = [err instanceof Error ? err.message : "erreur inconnue", cause].filter(Boolean).join(" — ");
+    return NextResponse.json({ error: `Connexion au serveur Ollama impossible : ${reason}.` }, { status: 502 });
   }
 
   if (!upstream.ok || !upstream.body) {
