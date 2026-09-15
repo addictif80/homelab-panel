@@ -14,6 +14,7 @@ export type Sale = {
   stripeSubscriptionId: string | null;
   subscriptionStatus: SubscriptionStatus;
   currentPeriodEnd: string | null;
+  notes: string | null;
   createdAt: string;
 };
 
@@ -27,6 +28,7 @@ type SaleRow = {
   stripe_subscription_id: string | null;
   subscription_status: SubscriptionStatus;
   current_period_end: string | null;
+  notes: string | null;
   created_at: string;
 };
 
@@ -41,6 +43,7 @@ function rowToSale(row: SaleRow): Sale {
     stripeSubscriptionId: row.stripe_subscription_id,
     subscriptionStatus: row.subscription_status,
     currentPeriodEnd: row.current_period_end,
+    notes: row.notes,
     createdAt: row.created_at,
   };
 }
@@ -58,12 +61,13 @@ export function recordSale(input: {
   stripeSubscriptionId?: string;
   subscriptionStatus?: SubscriptionStatus;
   currentPeriodEnd?: string | null;
+  notes?: string | null;
 }): Sale {
   const id = randomUUID();
   getDb()
     .prepare(
-      `INSERT INTO sales (id, stripe_session_id, customer_email, amount_cents, currency, product_type, stripe_subscription_id, subscription_status, current_period_end)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO sales (id, stripe_session_id, customer_email, amount_cents, currency, product_type, stripe_subscription_id, subscription_status, current_period_end, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -74,7 +78,8 @@ export function recordSale(input: {
       input.productType,
       input.stripeSubscriptionId ?? null,
       input.subscriptionStatus ?? null,
-      input.currentPeriodEnd ?? null
+      input.currentPeriodEnd ?? null,
+      input.notes ?? null
     );
   const row = getDb().prepare(`SELECT * FROM sales WHERE id = ?`).get(id) as SaleRow;
   return rowToSale(row);

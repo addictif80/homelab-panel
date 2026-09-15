@@ -316,6 +316,25 @@ function migrate(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_support_ticket_messages_ticket ON support_ticket_messages(ticket_id, created_at);
 
+    -- Promo codes: mirrors a Stripe Coupon + PromotionCode pair created alongside each row, so
+    -- Stripe remains the actual source of truth for redemption counting and discount application
+    -- at Checkout (this table exists for the seller admin UI and quick local validation, not as a
+    -- second enforcement engine).
+    CREATE TABLE IF NOT EXISTS promo_codes (
+      id TEXT PRIMARY KEY,
+      code TEXT UNIQUE NOT NULL,
+      discount_type TEXT NOT NULL CHECK (discount_type IN ('percent','amount')),
+      discount_value INTEGER NOT NULL,
+      applicable_plans TEXT NOT NULL DEFAULT '["lifetime","monthly","annual"]',
+      max_redemptions INTEGER,
+      valid_from TEXT,
+      valid_until TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      stripe_coupon_id TEXT,
+      stripe_promotion_code_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     -- Paid "I lost my lifetime key" flow: kept separate from the sales table (which only ever
     -- describes a licensing purchase tied to a Stripe Price/plan) so this ad-hoc, price_data-based
     -- charge doesn't have to fit the PlanKey union.
@@ -405,6 +424,11 @@ function migrate(db: Database.Database) {
     db.exec(`ALTER TABLE sales ADD COLUMN stripe_subscription_id TEXT`);
     db.exec(`ALTER TABLE sales ADD COLUMN subscription_status TEXT`);
     db.exec(`ALTER TABLE sales ADD COLUMN current_period_end TEXT`);
+  }
+  if (!salesColumns.some((c) => c.name === "notes")) {
+    // Only ever set for manually-generated keys (no real Stripe payment) — a place to record why
+    // (a reviewer copy, a partner deal, a refund goodwill gesture...).
+    db.exec(`ALTER TABLE sales ADD COLUMN notes TEXT`);
   }
 
   ensureVaultKdfSalt(db);

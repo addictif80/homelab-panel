@@ -22,6 +22,27 @@ function rowToKey(row: KeyRow): LicenseKey {
   return { key: row.key, saleId: row.sale_id, createdAt: row.created_at, usedAt: row.used_at, usedByInfo: row.used_by_info };
 }
 
+export type LicenseKeyWithOrigin = LicenseKey & { amountCents: number; saleNotes: string | null; customerEmail: string };
+
+/** Same as listLicenseKeys() but joined with the originating sale — lets the seller UI tell a real
+ * purchase apart from a manually-generated key (amountCents === 0 and, usually, a note explaining
+ * why) without a separate lookup per row. */
+export function listLicenseKeysWithOrigin(): LicenseKeyWithOrigin[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT k.*, s.amount_cents, s.notes as sale_notes, s.customer_email
+       FROM license_keys k JOIN sales s ON s.id = k.sale_id
+       ORDER BY k.created_at DESC`
+    )
+    .all() as (KeyRow & { amount_cents: number; sale_notes: string | null; customer_email: string })[];
+  return rows.map((row) => ({
+    ...rowToKey(row),
+    amountCents: row.amount_cents,
+    saleNotes: row.sale_notes,
+    customerEmail: row.customer_email,
+  }));
+}
+
 function generateKey(): string {
   const chunk = () => randomBytes(2).toString("hex").toUpperCase();
   return `HLP-${chunk()}-${chunk()}-${chunk()}-${chunk()}`;

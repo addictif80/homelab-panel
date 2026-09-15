@@ -122,6 +122,12 @@ export default function StorePage() {
   const [recoveryLoading, setRecoveryLoading] = useState(false);
   const [recoveryError, setRecoveryError] = useState("");
 
+  const [promoInput, setPromoInput] = useState("");
+  const [promoValidating, setPromoValidating] = useState(false);
+  const [promoError, setPromoError] = useState("");
+  const [appliedPromo, setAppliedPromo] = useState("");
+  const [promoDiscounts, setPromoDiscounts] = useState<Partial<Record<PlanKey, string>>>({});
+
   useEffect(() => {
     fetch("/api/store/pricing")
       .then((r) => r.json())
@@ -183,7 +189,7 @@ export default function StorePage() {
       const res = await fetch("/api/store/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan }),
+        body: JSON.stringify({ plan, promoCode: appliedPromo || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -191,6 +197,38 @@ export default function StorePage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur.");
       setLoading(null);
+    }
+  }
+
+  async function applyPromo() {
+    if (!promoInput.trim()) return;
+    setPromoValidating(true);
+    setPromoError("");
+    setPromoDiscounts({});
+    try {
+      const results = await Promise.all(
+        enabledPlans.map(async (plan) => {
+          const res = await fetch("/api/store/promo-codes/validate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code: promoInput, plan }),
+          });
+          const data = await res.json();
+          return { plan, valid: res.ok && data.valid, label: data.discountedLabel as string | undefined, error: data.error as string | undefined };
+        })
+      );
+      const valid = results.filter((r) => r.valid);
+      if (valid.length === 0) {
+        setPromoError(results[0]?.error || "Code promo invalide.");
+        setAppliedPromo("");
+        return;
+      }
+      setPromoDiscounts(Object.fromEntries(valid.map((r) => [r.plan, r.label])));
+      setAppliedPromo(promoInput.trim());
+    } catch {
+      setPromoError("Erreur de validation du code.");
+    } finally {
+      setPromoValidating(false);
     }
   }
 
@@ -415,6 +453,24 @@ export default function StorePage() {
         <h2 className="mt-3 text-3xl font-semibold">Choisis la formule qui te convient</h2>
         {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
 
+        <div className="mx-auto mt-6 flex max-w-xs items-center gap-2">
+          <input
+            value={promoInput}
+            onChange={(e) => setPromoInput(e.target.value.toUpperCase())}
+            placeholder="Code promo"
+            className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-100"
+          />
+          <button
+            onClick={applyPromo}
+            disabled={promoValidating || !promoInput.trim()}
+            className="btn-secondary shrink-0 px-3 py-1.5 text-xs disabled:opacity-50"
+          >
+            {promoValidating ? "..." : "Appliquer"}
+          </button>
+        </div>
+        {promoError && <p className="mt-1.5 text-xs text-red-400">{promoError}</p>}
+        {appliedPromo && !promoError && <p className="mt-1.5 text-xs text-emerald-400">Code {appliedPromo} appliqué.</p>}
+
         {pricing && enabledPlans.length > 0 ? (
           <div className={`mx-auto mt-10 grid gap-6 ${enabledPlans.length === 1 ? "max-w-sm" : enabledPlans.length === 2 ? "max-w-2xl sm:grid-cols-2" : "max-w-4xl sm:grid-cols-3"}`}>
             {enabledPlans.map((k) => (
@@ -424,7 +480,16 @@ export default function StorePage() {
                   {k === "lifetime" ? pricing.productDescription : " "}
                 </p>
                 <p className="mt-4 font-display text-4xl font-semibold">
-                  {formatAmount(pricing.plans[k].amountCents, pricing.currency)}
+                  {promoDiscounts[k] ? (
+                    <>
+                      <span className="mr-2 text-lg text-neutral-600 line-through">
+                        {formatAmount(pricing.plans[k].amountCents, pricing.currency)}
+                      </span>
+                      {promoDiscounts[k]}
+                    </>
+                  ) : (
+                    formatAmount(pricing.plans[k].amountCents, pricing.currency)
+                  )}
                   <span className="text-lg text-neutral-500">{PLAN_SUFFIX[k]}</span>
                 </p>
                 <p className="mt-2 font-mono text-xs uppercase tracking-wider text-neutral-500">{PLAN_NOTE[k]}</p>

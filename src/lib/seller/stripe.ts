@@ -154,7 +154,12 @@ export async function syncPricing(input: {
  * object later) so the webhook can tell a monthly subscription from an annual one — and the sale
  * from a lifetime purchase — without an extra round trip to Stripe.
  */
-export async function createCheckoutSession(plan: PlanKey, successUrl: string, cancelUrl: string): Promise<string> {
+export async function createCheckoutSession(
+  plan: PlanKey,
+  successUrl: string,
+  cancelUrl: string,
+  promotionCodeId?: string
+): Promise<string> {
   const stripe = getStripeClient();
   const pricing = getPricing();
   const planPricing = pricing?.plans[plan];
@@ -166,6 +171,9 @@ export async function createCheckoutSession(plan: PlanKey, successUrl: string, c
     success_url: successUrl,
     cancel_url: cancelUrl,
     metadata: { plan },
+    // Pre-applying a code we already validated skips Stripe's own promo-code entry field —
+    // otherwise let the customer type one directly on Stripe's hosted page.
+    ...(promotionCodeId ? { discounts: [{ promotion_code: promotionCodeId }] } : { allow_promotion_codes: true }),
   });
   if (!session.url) throw new Error("Impossible de créer la session de paiement Stripe.");
   return session.url;
@@ -204,6 +212,50 @@ export async function createKeyRecoveryCheckoutSession(
   });
   if (!session.url) throw new Error("Impossible de créer la session de paiement Stripe.");
   return session.url;
+}
+
+export type PromoDiscountType = "percent" | "amount";
+
+/**
+ * Creates the actual Stripe Coupon (the discount rule) and PromotionCode (the redeemable code
+ * text, plus expiry/redemption-limit enforcement) backing one seller-configured promo code.
+ * Stripe enforces `max_redemptions` and `expires_at` itself at the moment a code is used — this
+ * app's own `promo_codes` table is a convenience mirror for the admin UI, never the authority.
+ */
+export async function createPromoCodeOnStripe(input: {
+  code: string;
+  discountType: PromoDiscountType;
+  discountValue: number;
+  currency: string;
+  maxRedemptions?: number | null;
+  validUntil?: string | null;
+}): Promise<{ couponId: string; promotionCodeId: string }> {
+  const stripe = getStripeClient();
+  const coupon = await stripe.coupons.create(
+    input.discountType === "percent"
+      ? { percent_off: input.discountValue, duration: "once" }
+      : { amount_off: input.discountValue, currency: input.currency, duration: "once" }
+  );
+  const promotionCode = await stripe.promotionCodes.create({
+    promotion: { type: "coupon", coupon: coupon.id },
+    code: input.code,
+    ...(input.maxRedemptions ? { max_redemptions: input.maxRedemptions } : {}),
+    ...(input.validUntil ? { expires_at: Math.floor(new Date(input.validUntil).getTime() / 1000) } : {}),
+  });
+  return { couponId: coupon.id, promotionCodeId: promotionCode.id };
+}
+
+export async function setPromotionCodeActiveOnStripe(promotionCodeId: string, active: boolean): Promise<void> {
+  const stripe = getStripeClient();
+  await stripe.promotionCodes.update(promotionCodeId, { active });
+}
+
+/** Live redemption count, straight from Stripe — the only accurate source, since enforcement
+ * happens there, not in this app's local mirror. */
+export async function getPromotionCodeRedemptions(promotionCodeId: string): Promise<number> {
+  const stripe = getStripeClient();
+  const promotionCode = await stripe.promotionCodes.retrieve(promotionCodeId);
+  return promotionCode.times_redeemed;
 }
 
 export function constructWebhookEvent(rawBody: string, signature: string): Stripe.Event {

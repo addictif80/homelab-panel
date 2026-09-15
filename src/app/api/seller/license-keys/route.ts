@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { listLicenseKeys } from "@/lib/seller/licenseKeys";
+import { listLicenseKeysWithOrigin } from "@/lib/seller/licenseKeys";
 
 export async function GET() {
-  const keys = listLicenseKeys();
+  const keys = listLicenseKeysWithOrigin();
   return NextResponse.json({
     keys,
     totalIssued: keys.length,
