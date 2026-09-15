@@ -1,0 +1,10 @@
+import { NextRequest, NextResponse } from "next/server";
+import { closeSession } from "@/lib/terminalPollSessions";
+
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const username = req.headers.get("x-panel-user");
+  if (!username) return NextResponse.json({ error: "Non authentifié." }, { status: 401 });
+  const { id } = await params;
+  closeSession(id, username);
+  return NextResponse.json({ ok: true });
+}
