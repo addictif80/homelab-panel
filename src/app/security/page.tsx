@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import DetectionThresholdsPanel from "@/components/DetectionThresholdsPanel";
+import NotificationScheduleSettingsPanel from "@/components/NotificationScheduleSettingsPanel";
 import SmtpSettingsPanel from "@/components/SmtpSettingsPanel";
 import NotificationChannelsPanel from "@/components/NotificationChannelsPanel";
 import CertificateWatchPanel from "@/components/CertificateWatchPanel";
@@ -565,6 +566,7 @@ export default function SecurityPage() {
         <RecoveryVaultPanel />
         <SmtpSettingsPanel />
         <NotificationChannelsPanel />
+        <NotificationScheduleSettingsPanel />
         <CertificateWatchPanel onChanged={runScan} />
         <TrustedDevicesPanel />
         <OllamaSettingsPanel />
