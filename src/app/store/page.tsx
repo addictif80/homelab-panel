@@ -16,6 +16,7 @@ const PLAN_NOTE: Record<PlanKey, string> = {
 type PlanPricing = { enabled: boolean; amountCents: number };
 type Pricing = { currency: string; productName: string; productDescription: string; plans: Record<PlanKey, PlanPricing> };
 type KeyRecoveryConfig = { enabled: boolean; amountCents: number };
+type LandingCta = { enabled: boolean; text: string; buttonLabel: string; buttonUrl: string };
 
 const TABS: { key: string; label: string }[] = [
   { key: "security", label: "Sécurité" },
@@ -194,6 +195,8 @@ export default function StorePage() {
   const [pricing, setPricing] = useState<Pricing | null>(null);
   const [trialDays, setTrialDays] = useState<number | null>(null);
   const [keyRecovery, setKeyRecovery] = useState<KeyRecoveryConfig | null>(null);
+  const [landingCta, setLandingCta] = useState<LandingCta | null>(null);
+  const [ctaDismissed, setCtaDismissed] = useState(false);
   const [loading, setLoading] = useState<PlanKey | null>(null);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("security");
@@ -222,6 +225,7 @@ export default function StorePage() {
         setPricing(d.pricing);
         setTrialDays(d.trialDays);
         setKeyRecovery(d.keyRecovery ?? null);
+        setLandingCta(d.landingCta ?? null);
       });
   }, []);
 
@@ -321,6 +325,28 @@ export default function StorePage() {
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100">
+      {/* Optional seller-configured promo banner */}
+      {landingCta?.enabled && landingCta.text && !ctaDismissed && (
+        <div className="relative sticky top-0 z-30 flex items-center justify-center gap-3 bg-blue-600 px-10 py-2.5 text-center text-sm text-white">
+          <span className="min-w-0 truncate">{landingCta.text}</span>
+          {landingCta.buttonLabel && landingCta.buttonUrl && (
+            <a
+              href={landingCta.buttonUrl}
+              className="shrink-0 rounded-full bg-white/15 px-3 py-1 text-xs font-medium hover:bg-white/25"
+            >
+              {landingCta.buttonLabel}
+            </a>
+          )}
+          <button
+            onClick={() => setCtaDismissed(true)}
+            aria-label="Fermer le bandeau"
+            className="absolute right-4 shrink-0 text-white/70 hover:text-white"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Nav */}
       <nav className="sticky top-0 z-20 border-b border-neutral-800 bg-neutral-950/90 py-4 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6">

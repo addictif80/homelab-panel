@@ -111,6 +111,11 @@ export default function SellerPage() {
   const [recoveryOrders, setRecoveryOrders] = useState<KeyRecoveryOrder[] | null>(null);
   const [recoveryTotalCents, setRecoveryTotalCents] = useState(0);
 
+  const [ctaEnabled, setCtaEnabled] = useState(false);
+  const [ctaText, setCtaText] = useState("");
+  const [ctaButtonLabel, setCtaButtonLabel] = useState("");
+  const [ctaButtonUrl, setCtaButtonUrl] = useState("");
+
   function loadConfig() {
     fetch("/api/seller/config")
       .then((r) => r.json())
@@ -138,6 +143,12 @@ export default function SellerPage() {
         if (d.keyRecovery) {
           setKeyRecoveryEnabled(!!d.keyRecovery.enabled);
           setKeyRecoveryAmount(centsToAmountStr(d.keyRecovery.amountCents || 0));
+        }
+        if (d.landingCta) {
+          setCtaEnabled(!!d.landingCta.enabled);
+          setCtaText(d.landingCta.text || "");
+          setCtaButtonLabel(d.landingCta.buttonLabel || "");
+          setCtaButtonUrl(d.landingCta.buttonUrl || "");
         }
       });
   }
@@ -272,6 +283,10 @@ export default function SellerPage() {
           subscriptionGraceDays: Number(subscriptionGraceDays) || undefined,
           keyRecoveryEnabled,
           keyRecoveryAmountCents: Math.round((parseFloat(keyRecoveryAmount) || 0) * 100),
+          landingCtaEnabled: ctaEnabled,
+          landingCtaText: ctaText,
+          landingCtaButtonLabel: ctaButtonLabel,
+          landingCtaButtonUrl: ctaButtonUrl,
         }),
       });
       const data = await res.json();
@@ -881,6 +896,58 @@ export default function SellerPage() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="space-y-3 rounded border border-neutral-800 bg-neutral-900 p-4">
+        <h2 className="text-sm font-semibold text-neutral-100">Bandeau d&apos;appel à l&apos;action (landing page)</h2>
+        <p className="text-xs text-neutral-500">
+          Bannière promotionnelle optionnelle affichée en haut de la page publique <code>/store</code> — utile pour
+          une offre de lancement ou un code promo temporaire. La landing page n&apos;étant pas incluse dans le
+          téléchargement client, ce réglage se pilote uniquement depuis l&apos;espace vendeur.
+        </p>
+        <label className="flex items-center gap-2 text-sm text-neutral-200">
+          <input type="checkbox" checked={ctaEnabled} onChange={(e) => setCtaEnabled(e.target.checked)} />
+          Afficher le bandeau
+        </label>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block sm:col-span-2">
+            <span className="mb-1 block text-xs text-neutral-400">Texte</span>
+            <input
+              value={ctaText}
+              onChange={(e) => setCtaText(e.target.value)}
+              placeholder="Offre de lancement : -20% avec le code LAUNCH20"
+              disabled={!ctaEnabled}
+              className={`${INPUT_CLASS} w-full disabled:opacity-40`}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs text-neutral-400">Texte du bouton</span>
+            <input
+              value={ctaButtonLabel}
+              onChange={(e) => setCtaButtonLabel(e.target.value)}
+              placeholder="En profiter"
+              disabled={!ctaEnabled}
+              className={`${INPUT_CLASS} w-full disabled:opacity-40`}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs text-neutral-400">Lien du bouton</span>
+            <input
+              value={ctaButtonUrl}
+              onChange={(e) => setCtaButtonUrl(e.target.value)}
+              placeholder="#tarifs ou https://..."
+              disabled={!ctaEnabled}
+              className={`${INPUT_CLASS} w-full disabled:opacity-40`}
+            />
+          </label>
+        </div>
+        <button
+          onClick={saveConfig}
+          disabled={saving}
+          className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60 disabled:opacity-50"
+        >
+          {saving ? "Enregistrement..." : "Enregistrer"}
+        </button>
       </section>
 
       <SupportTicketsPanel />

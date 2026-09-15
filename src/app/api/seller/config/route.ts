@@ -16,6 +16,7 @@ import { getTrialDays, setTrialDays } from "@/lib/seller/trialConfig";
 import { getSubscriptionGraceDays, setSubscriptionGraceDays } from "@/lib/seller/subscriptionConfig";
 import { getPanelPublicUrl, setPanelPublicUrl, resolvePublicUrl } from "@/lib/seller/publicUrl";
 import { getKeyRecoveryConfig, setKeyRecoveryConfig } from "@/lib/seller/keyRecovery";
+import { getLandingCta, setLandingCta } from "@/lib/seller/landingCta";
 
 export async function GET(req: NextRequest) {
   return NextResponse.json({
@@ -28,6 +29,7 @@ export async function GET(req: NextRequest) {
     trialDays: getTrialDays(),
     subscriptionGraceDays: getSubscriptionGraceDays(),
     keyRecovery: getKeyRecoveryConfig(),
+    landingCta: getLandingCta(),
   });
 }
 
@@ -45,6 +47,10 @@ export async function PUT(req: NextRequest) {
     subscriptionGraceDays?: number;
     keyRecoveryEnabled?: boolean;
     keyRecoveryAmountCents?: number;
+    landingCtaEnabled?: boolean;
+    landingCtaText?: string;
+    landingCtaButtonLabel?: string;
+    landingCtaButtonUrl?: string;
   };
 
   if (body.secretKey) setStripeSecretKey(body.secretKey);
@@ -64,6 +70,20 @@ export async function PUT(req: NextRequest) {
       body.keyRecoveryEnabled ?? current.enabled,
       body.keyRecoveryAmountCents ?? current.amountCents
     );
+  }
+  if (
+    body.landingCtaEnabled !== undefined ||
+    body.landingCtaText !== undefined ||
+    body.landingCtaButtonLabel !== undefined ||
+    body.landingCtaButtonUrl !== undefined
+  ) {
+    const current = getLandingCta();
+    setLandingCta({
+      enabled: body.landingCtaEnabled ?? current.enabled,
+      text: body.landingCtaText ?? current.text,
+      buttonLabel: body.landingCtaButtonLabel ?? current.buttonLabel,
+      buttonUrl: body.landingCtaButtonUrl ?? current.buttonUrl,
+    });
   }
 
   if (body.currency && body.productName && body.plans) {

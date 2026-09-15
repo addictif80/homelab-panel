@@ -1,18 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import DetectionThresholdsPanel from "@/components/DetectionThresholdsPanel";
-import NotificationScheduleSettingsPanel from "@/components/NotificationScheduleSettingsPanel";
-import SmtpSettingsPanel from "@/components/SmtpSettingsPanel";
-import NotificationChannelsPanel from "@/components/NotificationChannelsPanel";
-import CertificateWatchPanel from "@/components/CertificateWatchPanel";
-import TrustedDevicesPanel from "@/components/TrustedDevicesPanel";
+import Link from "next/link";
 import SecurityLogsPanel from "@/components/SecurityLogsPanel";
-import OllamaSettingsPanel from "@/components/OllamaSettingsPanel";
 import SecurityGuide from "@/components/SecurityGuide";
-import PortAuditPanel from "@/components/PortAuditPanel";
-import RecoveryVaultPanel from "@/components/RecoveryVaultPanel";
-import LockdownPanel from "@/components/LockdownPanel";
 
 type Severity = "critical" | "warning" | "info" | "good";
 
@@ -279,7 +270,9 @@ export default function SecurityPage() {
           <h1 className="text-lg font-semibold text-neutral-100">Centre de sécurité</h1>
           <p className="mt-1 text-sm text-neutral-400">
             Analyse l&apos;ensemble de ton infrastructure (machines physiques, VM, VPS, NAS, routeur) et propose des
-            corrections simples, à valider toi-même avant chaque action.
+            corrections simples, à valider toi-même avant chaque action. Notifications, sensibilité de détection et
+            autres réglages sont dans{" "}
+            <Link href="/settings" className="text-blue-400 hover:underline">Réglages</Link>.
           </p>
         </div>
         <button
@@ -557,19 +550,6 @@ export default function SecurityPage() {
               </div>
             );
           })}
-      </div>
-
-      <div className="space-y-3">
-        <LockdownPanel />
-        <DetectionThresholdsPanel />
-        <PortAuditPanel />
-        <RecoveryVaultPanel />
-        <SmtpSettingsPanel />
-        <NotificationChannelsPanel />
-        <NotificationScheduleSettingsPanel />
-        <CertificateWatchPanel onChanged={runScan} />
-        <TrustedDevicesPanel />
-        <OllamaSettingsPanel />
       </div>
 
       {confirming && (
