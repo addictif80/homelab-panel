@@ -316,6 +316,21 @@ function migrate(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_support_ticket_messages_ticket ON support_ticket_messages(ticket_id, created_at);
 
+    -- One-click Docker app templates — seeded once from a curated built-in list (see
+    -- lib/appTemplates.ts) but fully editable/deletable/addable from the panel afterwards, unlike
+    -- the old hardcoded-in-source-only list.
+    CREATE TABLE IF NOT EXISTS app_templates (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      image TEXT NOT NULL,
+      ports_json TEXT NOT NULL DEFAULT '[]',
+      volumes_json TEXT NOT NULL DEFAULT '[]',
+      env_json TEXT NOT NULL DEFAULT '[]',
+      restart_policy TEXT NOT NULL DEFAULT 'unless-stopped',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     -- Promo codes: mirrors a Stripe Coupon + PromotionCode pair created alongside each row, so
     -- Stripe remains the actual source of truth for redemption counting and discount application
     -- at Checkout (this table exists for the seller admin UI and quick local validation, not as a
@@ -372,6 +387,8 @@ function migrate(db: Database.Database) {
   // Trial clock starts the instant the database is first created — not on some later "first
   // visit", which would let someone stall the countdown by just not opening the app.
   db.exec(`INSERT OR IGNORE INTO license (id, status) VALUES (1, 'trial')`);
+
+  seedAppTemplatesIfEmpty(db);
 
   const userColumns = db.prepare(`PRAGMA table_info(users)`).all() as { name: string }[];
   if (!userColumns.some((c) => c.name === "role")) {
@@ -443,6 +460,101 @@ function migrate(db: Database.Database) {
  * data encrypted under the old hardcoded literal — for those, the legacy value has to be pinned
  * as-is, or every stored SSH key/password/API token/signing key becomes permanently undecryptable.
  */
+/** A small curated set of common self-hosted apps, seeded once as ordinary editable rows — not a
+ * hardcoded UI list — so a fresh install starts with useful defaults but a customer can rename,
+ * edit, delete, or add their own without touching source code. Never re-seeds an install that
+ * already has templates (including one where the customer deleted every built-in on purpose). */
+function seedAppTemplatesIfEmpty(db: Database.Database) {
+  const { c } = db.prepare(`SELECT COUNT(*) as c FROM app_templates`).get() as { c: number };
+  if (c > 0) return;
+
+  const BUILTIN_TEMPLATES = [
+    {
+      id: "portainer",
+      name: "Portainer",
+      description: "Interface de gestion Docker complète, en complément de ce panel.",
+      image: "portainer/portainer-ce:latest",
+      ports: ["9000:9000"],
+      volumes: ["/var/run/docker.sock:/var/run/docker.sock", "./portainer/data:/data"],
+      env: [],
+    },
+    {
+      id: "pihole",
+      name: "Pi-hole",
+      description: "Bloqueur de publicités DNS pour tout le réseau local.",
+      image: "pihole/pihole:latest",
+      ports: ["53:53/tcp", "53:53/udp", "8081:80"],
+      volumes: ["./pihole/etc-pihole:/etc/pihole", "./pihole/etc-dnsmasq.d:/etc/dnsmasq.d"],
+      env: ["TZ=Europe/Paris", "WEBPASSWORD=changeme"],
+    },
+    {
+      id: "vaultwarden",
+      name: "Vaultwarden",
+      description: "Serveur Bitwarden léger et auto-hébergé pour la gestion de mots de passe.",
+      image: "vaultwarden/server:latest",
+      ports: ["8082:80"],
+      volumes: ["./vaultwarden/data:/data"],
+      env: ["SIGNUPS_ALLOWED=false"],
+    },
+    {
+      id: "uptime-kuma",
+      name: "Uptime Kuma",
+      description: "Supervision de disponibilité (uptime) avec belles pages de statut.",
+      image: "louislam/uptime-kuma:latest",
+      ports: ["3001:3001"],
+      volumes: ["./uptime-kuma/data:/app/data"],
+      env: [],
+    },
+    {
+      id: "adminer",
+      name: "Adminer",
+      description: "Client web léger pour administrer des bases MySQL/PostgreSQL/SQLite.",
+      image: "adminer:latest",
+      ports: ["8083:8080"],
+      volumes: [],
+      env: [],
+    },
+    {
+      id: "watchtower",
+      name: "Watchtower",
+      description: "Met automatiquement à jour les images des autres conteneurs sur cette machine.",
+      image: "containrrr/watchtower:latest",
+      ports: [],
+      volumes: ["/var/run/docker.sock:/var/run/docker.sock"],
+      env: [],
+    },
+    {
+      id: "homepage",
+      name: "Homepage",
+      description: "Tableau de bord d'accueil listant tous tes services auto-hébergés.",
+      image: "ghcr.io/gethomepage/homepage:latest",
+      ports: ["3003:3000"],
+      volumes: ["./homepage/config:/app/config"],
+      env: [],
+    },
+    {
+      id: "n8n",
+      name: "n8n",
+      description: "Automatisation de workflows (façon Zapier), auto-hébergée.",
+      image: "n8nio/n8n:latest",
+      ports: ["5678:5678"],
+      volumes: ["./n8n/data:/home/node/.n8n"],
+      env: ["TZ=Europe/Paris"],
+    },
+  ];
+
+  const insert = db.prepare(
+    `INSERT INTO app_templates (id, name, description, image, ports_json, volumes_json, env_json, restart_policy)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'unless-stopped')`
+  );
+  const insertAll = db.transaction((templates: typeof BUILTIN_TEMPLATES) => {
+    for (const t of templates) {
+      insert.run(t.id, t.name, t.description, t.image, JSON.stringify(t.ports), JSON.stringify(t.volumes), JSON.stringify(t.env));
+    }
+  });
+  insertAll(BUILTIN_TEMPLATES);
+}
+
 function ensureVaultKdfSalt(db: Database.Database) {
   const existing = db.prepare(`SELECT value FROM settings WHERE key = 'vault_kdf_salt'`).get();
   if (existing) return;

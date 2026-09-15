@@ -4,6 +4,21 @@ function execOnHost(hostId: number, rawCommand: string) {
   return runSshCommand(hostId, rawCommand, { sudo: true });
 }
 
+// Some hosts print something before the actual command output on every SSH exec — a login
+// banner, a PAM MOTD, a custom shell profile (seen in practice on CyberPanel-managed boxes, whose
+// shell prints a banner starting with "This serve...", and others printing ASCII-art banners) —
+// which corrupts JSON.parse() on the very first line. Prefixing the real command with a marker
+// echo and discarding everything before it strips that noise regardless of what it is or where it
+// comes from, without needing to special-case any particular panel or shell.
+const OUTPUT_MARKER = "__HLP_DOCKER_OUTPUT__";
+
+async function execOnHostClean(hostId: number, rawCommand: string) {
+  const result = await execOnHost(hostId, `echo ${OUTPUT_MARKER}; ${rawCommand}`);
+  const idx = result.stdout.indexOf(OUTPUT_MARKER);
+  const stdout = idx === -1 ? result.stdout : result.stdout.slice(idx + OUTPUT_MARKER.length).replace(/^\r?\n/, "");
+  return { ...result, stdout };
+}
+
 export type DockerContainer = {
   id: string;
   name: string;
@@ -15,7 +30,7 @@ export type DockerContainer = {
 };
 
 export async function listContainers(hostId: number): Promise<DockerContainer[]> {
-  const { stdout, stderr, code } = await execOnHost(
+  const { stdout, stderr, code } = await execOnHostClean(
     hostId,
     `docker ps -a --format '{{json .}}'`
   );
@@ -45,7 +60,7 @@ export type ContainerIp = { name: string; ip: string };
  * (e.g. a reverse proxy's bridge IP showing up because X-Forwarded-For isn't configured), rather
  * than a real external address worth blocking. */
 export async function listContainerIps(hostId: number): Promise<ContainerIp[]> {
-  const { stdout, code } = await execOnHost(
+  const { stdout, code } = await execOnHostClean(
     hostId,
     `docker ps -q | xargs -r docker inspect --format '{{.Name}}|{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' 2>/dev/null`
   );
@@ -111,7 +126,7 @@ type ContainerInspect = {
 export async function pullAndRecreate(hostId: number, containerId: string): Promise<string[]> {
   const log: string[] = [];
 
-  const inspectRes = await execOnHost(hostId, `docker inspect ${shellQuote(containerId)}`);
+  const inspectRes = await execOnHostClean(hostId, `docker inspect ${shellQuote(containerId)}`);
   if (inspectRes.code !== 0) throw new Error(inspectRes.stderr || "Conteneur introuvable.");
   const [info] = JSON.parse(inspectRes.stdout) as ContainerInspect[];
 
@@ -185,13 +200,13 @@ export async function checkForUpdates(hostId: number): Promise<ImageUpdateStatus
   const results: ImageUpdateStatus[] = [];
   for (const [image, group] of byImage) {
     try {
-      const currentRes = await execOnHost(hostId, `docker inspect --format '{{.Image}}' ${shellQuote(group[0].id)}`);
+      const currentRes = await execOnHostClean(hostId, `docker inspect --format '{{.Image}}' ${shellQuote(group[0].id)}`);
       const currentId = currentRes.stdout.trim();
 
       const pullRes = await execOnHost(hostId, `docker pull ${shellQuote(image)}`);
       if (pullRes.code !== 0) throw new Error(pullRes.stderr || "Échec du pull.");
 
-      const latestRes = await execOnHost(hostId, `docker inspect --format '{{.Id}}' ${shellQuote(image)}`);
+      const latestRes = await execOnHostClean(hostId, `docker inspect --format '{{.Id}}' ${shellQuote(image)}`);
       const latestId = latestRes.stdout.trim();
 
       const updateAvailable = !!currentId && !!latestId && currentId !== latestId;

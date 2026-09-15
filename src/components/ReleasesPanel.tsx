@@ -14,7 +14,12 @@ export default function ReleasesPanel() {
   function load() {
     fetch("/api/seller/releases")
       .then((r) => r.json())
-      .then((d) => setReleases(d.releases));
+      .then((d) => {
+        setReleases(d.releases);
+        // Pre-fills with the version actually deployed here — publishing the wrong number because
+        // it was left blank/stale is the one mistake this field exists to prevent.
+        setVersion((current) => current || d.packageVersion || "");
+      });
   }
 
   useEffect(() => {

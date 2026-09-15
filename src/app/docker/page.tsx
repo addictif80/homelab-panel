@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { APP_TEMPLATES } from "@/lib/appTemplates";
+import AppTemplatesPanel, { type AppTemplate } from "@/components/AppTemplatesPanel";
 import DockerStacksPanel from "@/components/DockerStacksPanel";
 
 const Terminal = dynamic(() => import("@/components/Terminal"), { ssr: false });
@@ -169,9 +169,9 @@ export default function DockerPage() {
     }
   }
 
-  function useTemplate(t: (typeof APP_TEMPLATES)[number]) {
+  function useTemplate(t: AppTemplate) {
     setRunImage(t.image);
-    setRunName(t.id);
+    setRunName(t.name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, ""));
     setRunPorts(t.ports.join("\n"));
     setRunVolumes(t.volumes.join("\n"));
     setRunEnv(t.env.join("\n"));
@@ -234,21 +234,7 @@ export default function DockerPage() {
         </div>
       </div>
 
-      {showTemplates && (
-        <div className="grid grid-cols-1 gap-3 rounded border border-neutral-800 p-4 sm:grid-cols-2 lg:grid-cols-3">
-          {APP_TEMPLATES.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => useTemplate(t)}
-              className="rounded border border-neutral-700 p-3 text-left hover:border-blue-600 hover:bg-blue-900/10"
-            >
-              <p className="font-medium text-neutral-100">{t.name}</p>
-              <p className="mt-1 text-xs text-neutral-400">{t.description}</p>
-              <p className="mt-2 font-mono text-[11px] text-neutral-500">{t.image}</p>
-            </button>
-          ))}
-        </div>
-      )}
+      {showTemplates && <AppTemplatesPanel onUse={useTemplate} />}
 
       {showRunForm && (
         <form onSubmit={submitRun} className="max-w-lg space-y-3 rounded border border-neutral-800 p-4">

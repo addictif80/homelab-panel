@@ -1,3 +1,6 @@
+import { randomUUID } from "crypto";
+import { getDb } from "./db";
+
 export type AppTemplate = {
   id: string;
   name: string;
@@ -9,88 +12,86 @@ export type AppTemplate = {
   restartPolicy: string;
 };
 
-/** A small curated set of common self-hosted apps — one-click prefill for the "run a container"
- * form on /docker, not a full app-store. Volumes use relative paths under the app's own name so
- * multiple templates never collide by default; the user can edit before launching. */
-export const APP_TEMPLATES: AppTemplate[] = [
-  {
-    id: "portainer",
-    name: "Portainer",
-    description: "Interface de gestion Docker complète, en complément de ce panel.",
-    image: "portainer/portainer-ce:latest",
-    ports: ["9000:9000"],
-    volumes: ["/var/run/docker.sock:/var/run/docker.sock", "./portainer/data:/data"],
-    env: [],
-    restartPolicy: "unless-stopped",
-  },
-  {
-    id: "pihole",
-    name: "Pi-hole",
-    description: "Bloqueur de publicités DNS pour tout le réseau local.",
-    image: "pihole/pihole:latest",
-    ports: ["53:53/tcp", "53:53/udp", "8081:80"],
-    volumes: ["./pihole/etc-pihole:/etc/pihole", "./pihole/etc-dnsmasq.d:/etc/dnsmasq.d"],
-    env: ["TZ=Europe/Paris", "WEBPASSWORD=changeme"],
-    restartPolicy: "unless-stopped",
-  },
-  {
-    id: "vaultwarden",
-    name: "Vaultwarden",
-    description: "Serveur Bitwarden léger et auto-hébergé pour la gestion de mots de passe.",
-    image: "vaultwarden/server:latest",
-    ports: ["8082:80"],
-    volumes: ["./vaultwarden/data:/data"],
-    env: ["SIGNUPS_ALLOWED=false"],
-    restartPolicy: "unless-stopped",
-  },
-  {
-    id: "uptime-kuma",
-    name: "Uptime Kuma",
-    description: "Supervision de disponibilité (uptime) avec belles pages de statut.",
-    image: "louislam/uptime-kuma:latest",
-    ports: ["3001:3001"],
-    volumes: ["./uptime-kuma/data:/app/data"],
-    env: [],
-    restartPolicy: "unless-stopped",
-  },
-  {
-    id: "adminer",
-    name: "Adminer",
-    description: "Client web léger pour administrer des bases MySQL/PostgreSQL/SQLite.",
-    image: "adminer:latest",
-    ports: ["8083:8080"],
-    volumes: [],
-    env: [],
-    restartPolicy: "unless-stopped",
-  },
-  {
-    id: "watchtower",
-    name: "Watchtower",
-    description: "Met automatiquement à jour les images des autres conteneurs sur cette machine.",
-    image: "containrrr/watchtower:latest",
-    ports: [],
-    volumes: ["/var/run/docker.sock:/var/run/docker.sock"],
-    env: [],
-    restartPolicy: "unless-stopped",
-  },
-  {
-    id: "homepage",
-    name: "Homepage",
-    description: "Tableau de bord d'accueil listant tous tes services auto-hébergés.",
-    image: "ghcr.io/gethomepage/homepage:latest",
-    ports: ["3003:3000"],
-    volumes: ["./homepage/config:/app/config"],
-    env: [],
-    restartPolicy: "unless-stopped",
-  },
-  {
-    id: "n8n",
-    name: "n8n",
-    description: "Automatisation de workflows (façon Zapier), auto-hébergée.",
-    image: "n8nio/n8n:latest",
-    ports: ["5678:5678"],
-    volumes: ["./n8n/data:/home/node/.n8n"],
-    env: ["TZ=Europe/Paris"],
-    restartPolicy: "unless-stopped",
-  },
-];
+type TemplateRow = {
+  id: string;
+  name: string;
+  description: string;
+  image: string;
+  ports_json: string;
+  volumes_json: string;
+  env_json: string;
+  restart_policy: string;
+};
+
+function rowToTemplate(row: TemplateRow): AppTemplate {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    image: row.image,
+    ports: JSON.parse(row.ports_json),
+    volumes: JSON.parse(row.volumes_json),
+    env: JSON.parse(row.env_json),
+    restartPolicy: row.restart_policy,
+  };
+}
+
+/** One-click prefill for the "run a container" form on /docker — seeded with a curated built-in
+ * set (see db.ts's seedAppTemplatesIfEmpty) but fully editable from the panel afterwards, not a
+ * fixed list baked into source. */
+export function listAppTemplates(): AppTemplate[] {
+  return (getDb().prepare(`SELECT * FROM app_templates ORDER BY name`).all() as TemplateRow[]).map(rowToTemplate);
+}
+
+export type AppTemplateInput = {
+  name: string;
+  description: string;
+  image: string;
+  ports: string[];
+  volumes: string[];
+  env: string[];
+  restartPolicy: string;
+};
+
+export function createAppTemplate(input: AppTemplateInput): AppTemplate {
+  const id = randomUUID();
+  getDb()
+    .prepare(
+      `INSERT INTO app_templates (id, name, description, image, ports_json, volumes_json, env_json, restart_policy)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      id,
+      input.name,
+      input.description,
+      input.image,
+      JSON.stringify(input.ports),
+      JSON.stringify(input.volumes),
+      JSON.stringify(input.env),
+      input.restartPolicy || "unless-stopped"
+    );
+  return rowToTemplate(getDb().prepare(`SELECT * FROM app_templates WHERE id = ?`).get(id) as TemplateRow);
+}
+
+export function updateAppTemplate(id: string, input: AppTemplateInput): AppTemplate {
+  const db = getDb();
+  const existing = db.prepare(`SELECT 1 FROM app_templates WHERE id = ?`).get(id);
+  if (!existing) throw new Error("Modèle introuvable.");
+  db.prepare(
+    `UPDATE app_templates SET name = ?, description = ?, image = ?, ports_json = ?, volumes_json = ?, env_json = ?, restart_policy = ? WHERE id = ?`
+  ).run(
+    input.name,
+    input.description,
+    input.image,
+    JSON.stringify(input.ports),
+    JSON.stringify(input.volumes),
+    JSON.stringify(input.env),
+    input.restartPolicy || "unless-stopped",
+    id
+  );
+  return rowToTemplate(db.prepare(`SELECT * FROM app_templates WHERE id = ?`).get(id) as TemplateRow);
+}
+
+export function deleteAppTemplate(id: string): void {
+  getDb().prepare(`DELETE FROM app_templates WHERE id = ?`).run(id);
+}
