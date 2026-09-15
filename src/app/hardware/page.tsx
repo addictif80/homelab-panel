@@ -5,7 +5,13 @@ import { useEffect, useState } from "react";
 type Host = { id: number; name: string; kind: string };
 
 type TemperatureReading = { label: string; celsius: number };
-type DiskHealth = { device: string; healthy: boolean | null; temperatureC: number | null; reallocatedSectors: number | null };
+type DiskHealth = {
+  device: string;
+  healthy: boolean | null;
+  temperatureC: number | null;
+  reallocatedSectors: number | null;
+  note: string | null;
+};
 type UpsStatus = { status: string; chargePercent: number | null };
 type HardwareHealth = { temperatures: TemperatureReading[]; disks: DiskHealth[]; ups: UpsStatus | null; toolsMissing: string[] };
 
@@ -91,15 +97,18 @@ export default function HardwarePage() {
                       <p className="text-xs font-medium text-neutral-400">Disques (SMART)</p>
                       <div className="mt-1 space-y-1">
                         {state.health.disks.map((d) => (
-                          <div key={d.device} className="flex items-center gap-2 text-xs">
-                            <span className="font-mono text-neutral-300">/dev/{d.device}</span>
-                            <span className={d.healthy === false ? "text-red-400" : d.healthy ? "text-emerald-400" : "text-neutral-500"}>
-                              {d.healthy === false ? "FAILED" : d.healthy ? "PASSED" : "inconnu"}
-                            </span>
-                            {d.temperatureC !== null && <span className={tempColor(d.temperatureC)}>{d.temperatureC}°C</span>}
-                            {d.reallocatedSectors !== null && d.reallocatedSectors > 0 && (
-                              <span className="text-amber-400">{d.reallocatedSectors} secteurs réalloués</span>
-                            )}
+                          <div key={d.device}>
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="font-mono text-neutral-300">/dev/{d.device}</span>
+                              <span className={d.healthy === false ? "text-red-400" : d.healthy ? "text-emerald-400" : "text-neutral-500"}>
+                                {d.healthy === false ? "FAILED" : d.healthy ? "PASSED" : "inconnu"}
+                              </span>
+                              {d.temperatureC !== null && <span className={tempColor(d.temperatureC)}>{d.temperatureC}°C</span>}
+                              {d.reallocatedSectors !== null && d.reallocatedSectors > 0 && (
+                                <span className="text-amber-400">{d.reallocatedSectors} secteurs réalloués</span>
+                              )}
+                            </div>
+                            {d.note && <p className="mt-0.5 pl-1 text-[11px] text-neutral-500">{d.note}</p>}
                           </div>
                         ))}
                       </div>

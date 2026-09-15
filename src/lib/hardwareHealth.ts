@@ -8,7 +8,13 @@ import { runSshCommand, shellQuote } from "./ssh";
  */
 
 export type TemperatureReading = { label: string; celsius: number };
-export type DiskHealth = { device: string; healthy: boolean | null; temperatureC: number | null; reallocatedSectors: number | null };
+export type DiskHealth = {
+  device: string;
+  healthy: boolean | null;
+  temperatureC: number | null;
+  reallocatedSectors: number | null;
+  note: string | null;
+};
 export type UpsStatus = { status: string; chargePercent: number | null };
 
 export type HardwareHealth = {
@@ -36,14 +42,36 @@ function parseSensors(output: string): TemperatureReading[] {
   return readings;
 }
 
-function parseSmart(output: string): { healthy: boolean | null; temperatureC: number | null; reallocatedSectors: number | null } {
-  const healthy = /PASSED/i.test(output) ? true : /FAILED/i.test(output) ? false : null;
+/**
+ * Only the dedicated "overall-health self-assessment" line is authoritative for PASSED/FAILED —
+ * matching the bare word "FAILED" anywhere in smartctl's output (the previous approach) also
+ * catches generic error text like "Smartctl: Device Open Failed" or "A mandatory SMART command
+ * failed: exiting", which smartctl prints when it simply *can't read* the disk (wrong device type,
+ * permissions...) — not when the disk itself is actually failing. That misreading is especially
+ * likely on a hardware RAID controller (Dell PERC, HP Smart Array...), where /dev/sdX is a virtual
+ * disk smartctl can't query directly without being told the right `-d` type — see
+ * getSmartctlTargets() below, which tries to detect that automatically via `smartctl --scan`.
+ */
+function parseSmart(output: string): { healthy: boolean | null; temperatureC: number | null; reallocatedSectors: number | null; note: string | null } {
+  const healthLine = output.match(/overall-health self-assessment test result:\s*(\S+)/i);
+  const healthy = healthLine ? /PASSED/i.test(healthLine[1]) : null;
   const tempMatch = output.match(/(?:Temperature_Celsius|Airflow_Temperature_Cel).*?\n?.*?\s(\d+)\s*(?:\(|$)/m);
   const reallocMatch = output.match(/Reallocated_Sector_Ct.*?\s(\d+)\s*$/m);
+
+  let note: string | null = null;
+  if (!healthLine) {
+    const errorLine = output
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => /open failed|command failed|unable to (detect|open|read)|no such device|permission denied/i.test(l));
+    note = errorLine || "Impossible de lire l'état SMART (type de périphérique non détecté).";
+  }
+
   return {
     healthy,
     temperatureC: tempMatch ? Number(tempMatch[1]) : null,
     reallocatedSectors: reallocMatch ? Number(reallocMatch[1]) : null,
+    note,
   };
 }
 
@@ -69,6 +97,37 @@ async function getUpsStatus(hostId: number): Promise<UpsStatus | null> {
   return null;
 }
 
+type SmartTarget = { device: string; label: string; typeArg: string | null };
+
+/**
+ * `smartctl --scan` asks smartctl itself which `-d TYPE` each device needs — the right way to
+ * reach a disk sitting behind a hardware RAID controller (Dell PERC, HP Smart Array, LSI
+ * MegaRAID...), where a plain `smartctl -H /dev/sda` talks to the RAID controller's own virtual
+ * disk instead of the physical drive and fails to read anything meaningful. Falls back to plain
+ * lsblk enumeration (no `-d` type) when `--scan` finds nothing, which still works for ordinary
+ * direct-attached disks.
+ */
+async function getSmartctlTargets(hostId: number): Promise<SmartTarget[]> {
+  const scanRes = await runSshCommand(hostId, "smartctl --scan 2>/dev/null", { sudo: true }).catch(() => null);
+  if (scanRes?.code === 0 && scanRes.stdout.trim()) {
+    const scanned = scanRes.stdout
+      .split("\n")
+      .map((line) => line.match(/^(\S+)\s+-d\s+(\S+)/))
+      .filter((m): m is RegExpMatchArray => !!m)
+      .map((m) => ({ device: m[1], label: m[1].replace(/^\/dev\//, ""), typeArg: m[2] }));
+    if (scanned.length > 0) return scanned;
+  }
+
+  const lsblkRes = await runSshCommand(hostId, "lsblk -d -n -o NAME,TYPE 2>/dev/null").catch(() => null);
+  return (lsblkRes?.stdout || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.endsWith(" disk") || l.endsWith("\tdisk"))
+    .map((l) => l.split(/\s+/)[0])
+    .filter(Boolean)
+    .map((name) => ({ device: `/dev/${name}`, label: name, typeArg: null }));
+}
+
 export async function getHardwareHealth(hostId: number): Promise<HardwareHealth> {
   const toolsMissing: string[] = [];
 
@@ -77,20 +136,17 @@ export async function getHardwareHealth(hostId: number): Promise<HardwareHealth>
   if (temperatures.length === 0) toolsMissing.push("lm-sensors");
 
   const disks: DiskHealth[] = [];
-  const lsblkRes = await runSshCommand(hostId, "lsblk -d -n -o NAME,TYPE 2>/dev/null").catch(() => null);
-  const diskNames = (lsblkRes?.stdout || "")
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.endsWith(" disk") || l.endsWith("\tdisk"))
-    .map((l) => l.split(/\s+/)[0])
-    .filter(Boolean);
+  const targets = await getSmartctlTargets(hostId);
 
   let smartAvailable = false;
-  for (const device of diskNames) {
-    const smart = await runSshCommand(hostId, `smartctl -H -A /dev/${device} 2>/dev/null`, { sudo: true }).catch(() => null);
+  for (const target of targets) {
+    const typeFlag = target.typeArg ? `-d ${shellQuote(target.typeArg)} ` : "";
+    const smart = await runSshCommand(hostId, `smartctl -H -A ${typeFlag}${shellQuote(target.device)} 2>&1`, { sudo: true }).catch(
+      () => null
+    );
     if (!smart || smart.code === 127 || /command not found|not recognized/i.test(smart.stderr || "")) continue;
     smartAvailable = true;
-    disks.push({ device, ...parseSmart(smart.stdout) });
+    disks.push({ device: target.label, ...parseSmart(smart.stdout) });
   }
   if (!smartAvailable) toolsMissing.push("smartmontools");
 
