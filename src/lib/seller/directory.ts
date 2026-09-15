@@ -11,7 +11,9 @@ export type DirectorySubmission = {
   ownerName: string;
   serviceName: string;
   serviceUrl: string;
+  description: string;
   faviconDataUrl: string | null;
+  screenshotDataUrl: string | null;
   status: DirectorySubmissionStatus;
   createdAt: string;
   reviewedAt: string | null;
@@ -24,7 +26,9 @@ type SubmissionRow = {
   owner_name: string;
   service_name: string;
   service_url: string;
+  description: string;
   favicon_data_url: string | null;
+  screenshot_data_url: string | null;
   status: DirectorySubmissionStatus;
   created_at: string;
   reviewed_at: string | null;
@@ -38,7 +42,9 @@ function rowToSubmission(row: SubmissionRow): DirectorySubmission {
     ownerName: row.owner_name,
     serviceName: row.service_name,
     serviceUrl: row.service_url,
+    description: row.description,
     faviconDataUrl: row.favicon_data_url,
+    screenshotDataUrl: row.screenshot_data_url,
     status: row.status,
     createdAt: row.created_at,
     reviewedAt: row.reviewed_at,
@@ -97,7 +103,9 @@ export function upsertDirectorySubmission(input: {
   ownerName: string;
   serviceName: string;
   serviceUrl: string;
+  description: string;
   faviconDataUrl: string | null;
+  screenshotDataUrl: string | null;
 }): DirectorySubmission {
   const existing = getDb()
     .prepare(`SELECT id FROM directory_submissions WHERE license_key = ? AND instance_id = ? AND service_url = ?`)
@@ -106,16 +114,28 @@ export function upsertDirectorySubmission(input: {
   const id = existing?.id ?? randomUUID();
   getDb()
     .prepare(
-      `INSERT INTO directory_submissions (id, license_key, instance_id, owner_name, service_name, service_url, favicon_data_url, status, reviewed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NULL)
+      `INSERT INTO directory_submissions (id, license_key, instance_id, owner_name, service_name, service_url, description, favicon_data_url, screenshot_data_url, status, reviewed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL)
        ON CONFLICT(license_key, instance_id, service_url) DO UPDATE SET
          owner_name = excluded.owner_name,
          service_name = excluded.service_name,
+         description = excluded.description,
          favicon_data_url = excluded.favicon_data_url,
+         screenshot_data_url = excluded.screenshot_data_url,
          status = 'pending',
          reviewed_at = NULL`
     )
-    .run(id, input.licenseKey, input.instanceId, input.ownerName, input.serviceName, input.serviceUrl, input.faviconDataUrl);
+    .run(
+      id,
+      input.licenseKey,
+      input.instanceId,
+      input.ownerName,
+      input.serviceName,
+      input.serviceUrl,
+      input.description,
+      input.faviconDataUrl,
+      input.screenshotDataUrl
+    );
 
   return getDirectorySubmission(id)!;
 }

@@ -8,7 +8,9 @@ type ServiceLink = {
   id: string;
   name: string;
   url: string;
+  description: string;
   faviconDataUrl: string | null;
+  screenshotDataUrl: string | null;
   showPublic: boolean;
   clickCount: number;
   directoryOptIn: boolean;
@@ -57,15 +59,20 @@ export default function ServicesPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formName, setFormName] = useState("");
   const [formUrl, setFormUrl] = useState("");
+  const [formDescription, setFormDescription] = useState("");
   const [formPublic, setFormPublic] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  const [screenshotCaptureAvailable, setScreenshotCaptureAvailable] = useState(true);
 
   function load() {
     setLoading(true);
     fetch("/api/service-links")
       .then((r) => r.json())
-      .then((d) => setLinks(d.links))
+      .then((d) => {
+        setLinks(d.links);
+        setScreenshotCaptureAvailable(!!d.screenshotCaptureAvailable);
+      })
       .catch(() => setError("Impossible de charger les services."))
       .finally(() => setLoading(false));
   }
@@ -78,6 +85,7 @@ export default function ServicesPage() {
     setEditingId(null);
     setFormName("");
     setFormUrl("");
+    setFormDescription("");
     setFormPublic(false);
     setFormError("");
     setShowForm(true);
@@ -87,6 +95,7 @@ export default function ServicesPage() {
     setEditingId(link.id);
     setFormName(link.name);
     setFormUrl(link.url);
+    setFormDescription(link.description);
     setFormPublic(link.showPublic);
     setFormError("");
     setShowForm(true);
@@ -100,7 +109,7 @@ export default function ServicesPage() {
       const res = await fetch(editingId ? `/api/service-links/${editingId}` : "/api/service-links", {
         method: editingId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: formName, url: formUrl, showPublic: formPublic }),
+        body: JSON.stringify({ name: formName, url: formUrl, description: formDescription, showPublic: formPublic }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -195,6 +204,17 @@ export default function ServicesPage() {
               className="input"
             />
           </div>
+          <div>
+            <label className="mb-1 block text-xs text-neutral-400">Description (optionnel)</label>
+            <textarea
+              value={formDescription}
+              onChange={(e) => setFormDescription(e.target.value)}
+              placeholder="Stockage de fichiers et photos, accessible aussi depuis le mobile."
+              rows={2}
+              maxLength={500}
+              className="input"
+            />
+          </div>
           <label className="flex items-center gap-2 text-sm text-neutral-300">
             <input type="checkbox" checked={formPublic} onChange={(e) => setFormPublic(e.target.checked)} />
             Afficher sur la page publique (/board)
@@ -209,8 +229,16 @@ export default function ServicesPage() {
             </button>
           </div>
           <p className="text-xs text-neutral-500">
-            Le favicon est récupéré automatiquement depuis le service (utile même si la page publique est ouverte
-            depuis l&apos;extérieur de ton réseau).
+            Le favicon{screenshotCaptureAvailable ? " et une capture d'écran sont" : " est"} récupéré
+            {screenshotCaptureAvailable ? "s" : ""} automatiquement depuis le service (utile même si la page
+            publique est ouverte depuis l&apos;extérieur de ton réseau) — seulement si l&apos;URL change.
+            {!screenshotCaptureAvailable && (
+              <>
+                {" "}
+                Capture d&apos;écran indisponible : aucun navigateur Chromium détecté sur ce serveur (installe{" "}
+                <code>chromium</code> ou <code>google-chrome</code>, ou renseigne <code>CHROMIUM_PATH</code>).
+              </>
+            )}
           </p>
         </form>
       )}
@@ -221,7 +249,11 @@ export default function ServicesPage() {
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {links.map((link) => (
-          <div key={link.id} className="rounded border border-neutral-800 bg-neutral-900 p-4">
+          <div key={link.id} className="overflow-hidden rounded border border-neutral-800 bg-neutral-900">
+            {link.screenshotDataUrl && (
+              <img src={link.screenshotDataUrl} alt="" className="h-32 w-full border-b border-neutral-800 object-cover object-top" />
+            )}
+            <div className="p-4">
             <div className="flex items-start gap-3">
               <FaviconOrInitial link={link} />
               <div className="min-w-0 flex-1">
@@ -229,6 +261,8 @@ export default function ServicesPage() {
                 <p className="truncate text-xs text-neutral-500">{hostLabel(link.url)}</p>
               </div>
             </div>
+
+            {link.description && <p className="mt-2 text-xs leading-relaxed text-neutral-400">{link.description}</p>}
 
             <div className="mt-3 flex items-center justify-between text-xs text-neutral-500">
               <span>{link.clickCount} clic{link.clickCount !== 1 ? "s" : ""}</span>
@@ -258,6 +292,7 @@ export default function ServicesPage() {
               <button onClick={() => deleteLink(link)} className="btn-danger py-1 text-xs">
                 Supprimer
               </button>
+            </div>
             </div>
           </div>
         ))}

@@ -14,7 +14,9 @@ export async function POST(req: NextRequest) {
     ownerName?: string;
     serviceName?: string;
     serviceUrl?: string;
+    description?: string;
     faviconDataUrl?: string | null;
+    screenshotDataUrl?: string | null;
   };
 
   const { key, instanceId, ownerName, serviceName, serviceUrl } = body;
@@ -39,7 +41,9 @@ export async function POST(req: NextRequest) {
     ownerName: ownerName.trim().slice(0, 100),
     serviceName: serviceName.trim().slice(0, 100),
     serviceUrl: serviceUrl.trim(),
+    description: (body.description ?? "").trim().slice(0, 500),
     faviconDataUrl: body.faviconDataUrl ?? null,
+    screenshotDataUrl: body.screenshotDataUrl ?? null,
   });
 
   logAudit("seller.directory_submitted", submission.id, `${ownerName} — ${serviceName}`);

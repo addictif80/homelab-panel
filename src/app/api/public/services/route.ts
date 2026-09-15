@@ -8,7 +8,9 @@ export async function GET() {
     id: l.id,
     name: l.name,
     url: l.url,
+    description: l.description,
     faviconDataUrl: l.faviconDataUrl,
+    screenshotDataUrl: l.screenshotDataUrl,
   }));
   return NextResponse.json({ links });
 }

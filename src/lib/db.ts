@@ -406,7 +406,12 @@ function migrate(db: Database.Database) {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       url TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
       favicon_data_url TEXT,
+      -- Best-effort (see lib/screenshot.ts): only populated when a Chromium binary is found on
+      -- this host, cached as a data URL for the same reason the favicon is — a public board
+      -- visitor has no way to reach an internal-only service to render it themselves.
+      screenshot_data_url TEXT,
       show_public INTEGER NOT NULL DEFAULT 0,
       click_count INTEGER NOT NULL DEFAULT 0,
       -- "Annuaire public" opt-in: submitted to the seller's central directory (see
@@ -431,7 +436,9 @@ function migrate(db: Database.Database) {
       owner_name TEXT NOT NULL,
       service_name TEXT NOT NULL,
       service_url TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
       favicon_data_url TEXT,
+      screenshot_data_url TEXT,
       status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       reviewed_at TEXT,
@@ -498,6 +505,26 @@ function migrate(db: Database.Database) {
     // that periodic call is what actually detects a revocation for an install that would otherwise
     // never phone home again).
     db.exec(`ALTER TABLE license_keys ADD COLUMN revoked_at TEXT`);
+  }
+
+  const serviceLinkColumns = db.prepare(`PRAGMA table_info(service_links)`).all() as { name: string }[];
+  if (!serviceLinkColumns.some((c) => c.name === "description")) {
+    db.exec(`ALTER TABLE service_links ADD COLUMN description TEXT NOT NULL DEFAULT ''`);
+  }
+  if (!serviceLinkColumns.some((c) => c.name === "screenshot_data_url")) {
+    // Best-effort (see lib/screenshot.ts) — only populated when a Chromium binary is found on
+    // this host, cached as a data URL for the same reason the favicon is.
+    db.exec(`ALTER TABLE service_links ADD COLUMN screenshot_data_url TEXT`);
+  }
+
+  const directorySubmissionColumns = db.prepare(`PRAGMA table_info(directory_submissions)`).all() as {
+    name: string;
+  }[];
+  if (!directorySubmissionColumns.some((c) => c.name === "description")) {
+    db.exec(`ALTER TABLE directory_submissions ADD COLUMN description TEXT NOT NULL DEFAULT ''`);
+  }
+  if (!directorySubmissionColumns.some((c) => c.name === "screenshot_data_url")) {
+    db.exec(`ALTER TABLE directory_submissions ADD COLUMN screenshot_data_url TEXT`);
   }
 
   const salesColumns = db.prepare(`PRAGMA table_info(sales)`).all() as { name: string }[];

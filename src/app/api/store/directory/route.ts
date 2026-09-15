@@ -9,7 +9,9 @@ export async function GET() {
     ownerName: s.ownerName,
     serviceName: s.serviceName,
     serviceUrl: s.serviceUrl,
+    description: s.description,
     faviconDataUrl: s.faviconDataUrl,
+    screenshotDataUrl: s.screenshotDataUrl,
   }));
   return NextResponse.json({ entries });
 }

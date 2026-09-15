@@ -23,7 +23,9 @@ export type DirectorySubmitInput = {
   ownerName: string;
   serviceName: string;
   serviceUrl: string;
+  description: string;
   faviconDataUrl: string | null;
+  screenshotDataUrl: string | null;
 };
 
 export type DirectorySubmitResult =

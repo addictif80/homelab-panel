@@ -22,7 +22,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       ownerName,
       serviceName: link.name,
       serviceUrl: link.url,
+      description: link.description,
       faviconDataUrl: link.faviconDataUrl,
+      screenshotDataUrl: link.screenshotDataUrl,
     });
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
     setServiceLinkDirectoryState(id, { optIn: true, status: result.status, submissionId: result.submissionId });

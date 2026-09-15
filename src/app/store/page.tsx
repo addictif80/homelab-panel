@@ -17,7 +17,15 @@ type PlanPricing = { enabled: boolean; amountCents: number };
 type Pricing = { currency: string; productName: string; productDescription: string; plans: Record<PlanKey, PlanPricing> };
 type KeyRecoveryConfig = { enabled: boolean; amountCents: number };
 type LandingCta = { enabled: boolean; text: string; buttonLabel: string; buttonUrl: string };
-type DirectoryEntry = { id: string; ownerName: string; serviceName: string; serviceUrl: string; faviconDataUrl: string | null };
+type DirectoryEntry = {
+  id: string;
+  ownerName: string;
+  serviceName: string;
+  serviceUrl: string;
+  description: string;
+  faviconDataUrl: string | null;
+  screenshotDataUrl: string | null;
+};
 
 const TABS: { key: string; label: string }[] = [
   { key: "security", label: "Sécurité" },
@@ -573,18 +581,26 @@ export default function StorePage() {
                 href={entry.serviceUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-3.5 rounded-2xl border border-neutral-800 bg-gradient-to-b from-neutral-900 to-neutral-950 p-5 shadow-xl shadow-black/20 transition-transform hover:-translate-y-0.5"
+                className="flex flex-col overflow-hidden rounded-2xl border border-neutral-800 bg-gradient-to-b from-neutral-900 to-neutral-950 shadow-xl shadow-black/20 transition-transform hover:-translate-y-0.5"
               >
-                {entry.faviconDataUrl ? (
-                  <img src={entry.faviconDataUrl} alt="" className="h-10 w-10 shrink-0 rounded-lg" />
-                ) : (
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-600/20 text-base font-semibold text-blue-300">
-                    {entry.serviceName.charAt(0).toUpperCase() || "?"}
-                  </div>
+                {entry.screenshotDataUrl && (
+                  <img src={entry.screenshotDataUrl} alt="" className="h-36 w-full border-b border-neutral-800 object-cover object-top" />
                 )}
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-neutral-100">{entry.serviceName}</p>
-                  <p className="truncate text-xs text-neutral-500">{entry.ownerName}</p>
+                <div className="flex items-center gap-3.5 p-5">
+                  {entry.faviconDataUrl ? (
+                    <img src={entry.faviconDataUrl} alt="" className="h-10 w-10 shrink-0 rounded-lg" />
+                  ) : (
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-600/20 text-base font-semibold text-blue-300">
+                      {entry.serviceName.charAt(0).toUpperCase() || "?"}
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-neutral-100">{entry.serviceName}</p>
+                    <p className="truncate text-xs text-neutral-500">{entry.ownerName}</p>
+                    {entry.description && (
+                      <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-neutral-400">{entry.description}</p>
+                    )}
+                  </div>
                 </div>
               </a>
             ))}

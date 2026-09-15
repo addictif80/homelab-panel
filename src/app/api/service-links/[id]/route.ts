@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { deleteServiceLink, fetchFavicon, getServiceLink, updateServiceLink } from "@/lib/serviceLinks";
+import { captureScreenshot } from "@/lib/screenshot";
 import { logAudit } from "@/lib/db";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -29,11 +30,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   if (body.showPublic !== undefined) update.showPublic = !!body.showPublic;
+  if (body.description !== undefined) update.description = String(body.description).trim().slice(0, 500);
 
-  // Only re-fetch the favicon when the URL actually changed (or it's explicitly requested), so
-  // toggling "show_public" or renaming a link doesn't cost a round-trip to the target service.
+  // Only re-fetch the favicon/screenshot when the URL actually changed (or it's explicitly
+  // requested), so toggling "show_public", renaming a link, or editing its description doesn't
+  // cost a round-trip (and, for the screenshot, a whole headless-browser launch) to the target
+  // service every time.
   if (urlChanged || body.refetchFavicon) {
-    update.faviconDataUrl = await fetchFavicon(update.url ?? existing.url);
+    const [faviconDataUrl, screenshotDataUrl] = await Promise.all([
+      fetchFavicon(update.url ?? existing.url),
+      captureScreenshot(update.url ?? existing.url),
+    ]);
+    update.faviconDataUrl = faviconDataUrl;
+    update.screenshotDataUrl = screenshotDataUrl;
   }
 
   const link = updateServiceLink(id, update);

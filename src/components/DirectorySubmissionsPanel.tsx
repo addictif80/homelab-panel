@@ -8,7 +8,9 @@ type Submission = {
   ownerName: string;
   serviceName: string;
   serviceUrl: string;
+  description: string;
   faviconDataUrl: string | null;
+  screenshotDataUrl: string | null;
   status: Status;
   createdAt: string;
 };
@@ -92,6 +94,9 @@ export default function DirectorySubmissionsPanel() {
       <div className="divide-y divide-neutral-800 rounded border border-neutral-800">
         {visible.map((s) => (
           <div key={s.id} className="flex items-center gap-3 p-3 text-sm">
+            {s.screenshotDataUrl && (
+              <img src={s.screenshotDataUrl} alt="" className="h-12 w-20 shrink-0 rounded border border-neutral-800 object-cover object-top" />
+            )}
             {s.faviconDataUrl ? (
               <img src={s.faviconDataUrl} alt="" className="h-8 w-8 shrink-0 rounded" />
             ) : (
@@ -104,6 +109,7 @@ export default function DirectorySubmissionsPanel() {
                 {s.serviceName} <span className="text-neutral-500">— {s.ownerName}</span>
               </p>
               <p className="truncate text-xs text-neutral-500">{s.serviceUrl}</p>
+              {s.description && <p className="truncate text-xs text-neutral-500">{s.description}</p>}
             </div>
             <span className={`shrink-0 rounded border px-2 py-0.5 text-[11px] ${STATUS_STYLE[s.status]}`}>
               {STATUS_LABEL[s.status]}

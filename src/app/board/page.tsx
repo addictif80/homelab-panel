@@ -7,7 +7,9 @@ type PublicLink = {
   id: string;
   name: string;
   url: string;
+  description: string;
   faviconDataUrl: string | null;
+  screenshotDataUrl: string | null;
 };
 
 function hostLabel(url: string): string {
@@ -77,18 +79,28 @@ export default function BoardPage() {
             {links.map((link) => (
               <div
                 key={link.id}
-                className="flex flex-col justify-between rounded-2xl border border-neutral-800 bg-gradient-to-b from-neutral-900 to-neutral-950 p-6 shadow-xl shadow-black/20 transition-transform hover:-translate-y-0.5"
+                className="flex flex-col justify-between overflow-hidden rounded-2xl border border-neutral-800 bg-gradient-to-b from-neutral-900 to-neutral-950 shadow-xl shadow-black/20 transition-transform hover:-translate-y-0.5"
               >
-                <div className="flex items-center gap-3.5">
-                  <FaviconOrInitial link={link} />
-                  <div className="min-w-0">
-                    <p className="truncate text-base font-semibold text-neutral-100">{link.name}</p>
-                    <p className="truncate text-xs text-neutral-500">{hostLabel(link.url)}</p>
+                {link.screenshotDataUrl && (
+                  <img src={link.screenshotDataUrl} alt="" className="h-40 w-full border-b border-neutral-800 object-cover object-top" />
+                )}
+                <div className="flex flex-1 flex-col justify-between p-6">
+                  <div>
+                    <div className="flex items-center gap-3.5">
+                      <FaviconOrInitial link={link} />
+                      <div className="min-w-0">
+                        <p className="truncate text-base font-semibold text-neutral-100">{link.name}</p>
+                        <p className="truncate text-xs text-neutral-500">{hostLabel(link.url)}</p>
+                      </div>
+                    </div>
+                    {link.description && (
+                      <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-neutral-400">{link.description}</p>
+                    )}
                   </div>
+                  <button onClick={() => visit(link)} className="btn-primary mt-6 w-full py-2.5 text-sm">
+                    Accéder
+                  </button>
                 </div>
-                <button onClick={() => visit(link)} className="btn-primary mt-6 w-full py-2.5 text-sm">
-                  Accéder
-                </button>
               </div>
             ))}
           </div>

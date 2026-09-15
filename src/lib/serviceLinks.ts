@@ -7,7 +7,9 @@ export type ServiceLink = {
   id: string;
   name: string;
   url: string;
+  description: string;
   faviconDataUrl: string | null;
+  screenshotDataUrl: string | null;
   showPublic: boolean;
   clickCount: number;
   directoryOptIn: boolean;
@@ -20,7 +22,9 @@ type ServiceLinkRow = {
   id: string;
   name: string;
   url: string;
+  description: string;
   favicon_data_url: string | null;
+  screenshot_data_url: string | null;
   show_public: number;
   click_count: number;
   directory_opt_in: number;
@@ -34,7 +38,9 @@ function rowToLink(row: ServiceLinkRow): ServiceLink {
     id: row.id,
     name: row.name,
     url: row.url,
+    description: row.description,
     faviconDataUrl: row.favicon_data_url,
+    screenshotDataUrl: row.screenshot_data_url,
     showPublic: !!row.show_public,
     clickCount: row.click_count,
     directoryOptIn: !!row.directory_opt_in,
@@ -96,28 +102,46 @@ export async function fetchFavicon(pageUrl: string): Promise<string | null> {
   }
 }
 
-export function createServiceLink(input: { name: string; url: string; faviconDataUrl: string | null; showPublic: boolean }): ServiceLink {
+export function createServiceLink(input: {
+  name: string;
+  url: string;
+  description: string;
+  faviconDataUrl: string | null;
+  screenshotDataUrl: string | null;
+  showPublic: boolean;
+}): ServiceLink {
   const id = randomUUID();
   getDb()
     .prepare(
-      `INSERT INTO service_links (id, name, url, favicon_data_url, show_public) VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO service_links (id, name, url, description, favicon_data_url, screenshot_data_url, show_public) VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(id, input.name, input.url, input.faviconDataUrl, input.showPublic ? 1 : 0);
+    .run(id, input.name, input.url, input.description, input.faviconDataUrl, input.screenshotDataUrl, input.showPublic ? 1 : 0);
   return getServiceLink(id)!;
 }
 
 export function updateServiceLink(
   id: string,
-  input: Partial<{ name: string; url: string; faviconDataUrl: string | null; showPublic: boolean }>
+  input: Partial<{
+    name: string;
+    url: string;
+    description: string;
+    faviconDataUrl: string | null;
+    screenshotDataUrl: string | null;
+    showPublic: boolean;
+  }>
 ): ServiceLink | null {
   const current = getServiceLink(id);
   if (!current) return null;
   getDb()
-    .prepare(`UPDATE service_links SET name = ?, url = ?, favicon_data_url = ?, show_public = ? WHERE id = ?`)
+    .prepare(
+      `UPDATE service_links SET name = ?, url = ?, description = ?, favicon_data_url = ?, screenshot_data_url = ?, show_public = ? WHERE id = ?`
+    )
     .run(
       input.name ?? current.name,
       input.url ?? current.url,
+      input.description ?? current.description,
       input.faviconDataUrl !== undefined ? input.faviconDataUrl : current.faviconDataUrl,
+      input.screenshotDataUrl !== undefined ? input.screenshotDataUrl : current.screenshotDataUrl,
       (input.showPublic ?? current.showPublic) ? 1 : 0,
       id
     );
