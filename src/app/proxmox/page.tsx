@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import MigrationJobLog from "@/components/MigrationJobLog";
 
 type Host = { id: number; name: string; kind: string; proxmox_node: string | null };
 type Resource = {
@@ -60,6 +61,15 @@ export default function ProxmoxPage() {
   const [newSnapDesc, setNewSnapDesc] = useState("");
   const [newSnapRam, setNewSnapRam] = useState(false);
   const [snapBusy, setSnapBusy] = useState<string | null>(null);
+
+  const [migrating, setMigrating] = useState<AggregatedResource | null>(null);
+  const [migrateDestHostId, setMigrateDestHostId] = useState<number | null>(null);
+  const [migrateNewVmid, setMigrateNewVmid] = useState("");
+  const [migrateStorage, setMigrateStorage] = useState("");
+  const [migrateOnline, setMigrateOnline] = useState(false);
+  const [migrateJobId, setMigrateJobId] = useState<string | null>(null);
+  const [migrateError, setMigrateError] = useState("");
+  const [migrateStarting, setMigrateStarting] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -176,6 +186,50 @@ export default function ProxmoxPage() {
       setError(err instanceof Error ? err.message : "Erreur");
     } finally {
       setCreating(false);
+    }
+  }
+
+  function openMigrate(r: AggregatedResource) {
+    setMigrating(r);
+    setMigrateDestHostId(null);
+    setMigrateNewVmid("");
+    setMigrateStorage("");
+    setMigrateOnline(false);
+    setMigrateJobId(null);
+    setMigrateError("");
+  }
+
+  async function startVmMigration() {
+    if (!migrating || !migrateDestHostId) return;
+    const destNode = hosts.find((h) => h.id === migrateDestHostId)?.proxmox_node;
+    if (!destNode) {
+      setMigrateError("La machine de destination n'a pas de nœud Proxmox renseigné.");
+      return;
+    }
+    setMigrateStarting(true);
+    setMigrateError("");
+    try {
+      const res = await fetch(`/api/proxmox/${migrating.hostId}/vm/migrate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          node: migrating.node,
+          type: migrating.type,
+          vmid: migrating.vmid,
+          destHostId: migrateDestHostId,
+          destNode,
+          newVmid: migrateNewVmid ? Number(migrateNewVmid) : undefined,
+          storage: migrateStorage || undefined,
+          online: migrateOnline,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setMigrateJobId(data.jobId);
+    } catch (err) {
+      setMigrateError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setMigrateStarting(false);
     }
   }
 
@@ -538,6 +592,12 @@ export default function ProxmoxPage() {
                       Snapshots
                     </button>
                     <button
+                      onClick={() => openMigrate(r)}
+                      className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+                    >
+                      Migrer
+                    </button>
+                    <button
                       onClick={() => deleteVm(r)}
                       disabled={pending === `${r.vmid}-delete`}
                       className="rounded border border-red-900 px-2 py-0.5 text-xs text-red-300 hover:bg-red-950/40"
@@ -636,6 +696,96 @@ export default function ProxmoxPage() {
                   </li>
                 ))}
               </ul>
+            )}
+          </div>
+        </div>
+      )}
+
+      {migrating && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded border border-neutral-700 bg-neutral-900 p-5">
+            <h2 className="text-sm font-semibold text-neutral-100">
+              Migrer {migrating.type === "qemu" ? "la VM" : "le CT"} « {migrating.name || `#${migrating.vmid}`} »
+            </h2>
+            {!migrateJobId ? (
+              <>
+                <p className="mt-2 text-sm text-neutral-400">
+                  Si les deux nœuds font partie du même cluster Proxmox, la migration native (avec disques locaux)
+                  est utilisée. Sinon, un export/import (vzdump + restauration) est fait à la place — la VM/CT sera
+                  arrêtée le temps de l&apos;export.
+                </p>
+                <label className="mt-4 block">
+                  <span className="mb-1 block text-xs text-neutral-400">Nœud de destination</span>
+                  <select
+                    value={migrateDestHostId ?? ""}
+                    onChange={(e) => setMigrateDestHostId(Number(e.target.value))}
+                    className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100"
+                  >
+                    <option value="">Choisir...</option>
+                    {hosts
+                      .filter((h) => h.proxmox_node && h.id !== migrating.hostId)
+                      .map((h) => (
+                        <option key={h.id} value={h.id}>
+                          {h.name} ({h.proxmox_node})
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-neutral-400">Nouveau VMID (si repli export/import)</span>
+                    <input
+                      value={migrateNewVmid}
+                      onChange={(e) => setMigrateNewVmid(e.target.value)}
+                      placeholder={String(migrating.vmid)}
+                      className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-neutral-400">Stockage cible (optionnel)</span>
+                    <input
+                      value={migrateStorage}
+                      onChange={(e) => setMigrateStorage(e.target.value)}
+                      placeholder="local-lvm"
+                      className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100"
+                    />
+                  </label>
+                </div>
+                {migrating.type === "qemu" && (
+                  <label className="mt-3 flex items-center gap-2 text-sm text-neutral-300">
+                    <input type="checkbox" checked={migrateOnline} onChange={(e) => setMigrateOnline(e.target.checked)} />
+                    Migration à chaud (si même cluster) — sans coupure de service
+                  </label>
+                )}
+                {migrateError && <p className="mt-2 text-sm text-red-400">{migrateError}</p>}
+                <div className="mt-4 flex justify-end gap-2">
+                  <button
+                    onClick={() => setMigrating(null)}
+                    className="rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={startVmMigration}
+                    disabled={migrateStarting || !migrateDestHostId}
+                    className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60 disabled:opacity-50"
+                  >
+                    {migrateStarting ? "Démarrage..." : "Lancer la migration"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="mt-3 space-y-3">
+                <MigrationJobLog jobId={migrateJobId} onDone={loadAll} />
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => setMigrating(null)}
+                    className="rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800"
+                  >
+                    Fermer
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>

@@ -256,6 +256,40 @@ export async function rollbackSnapshot(
   return proxmoxRequest(hostId, `/nodes/${node}/${type}/${vmid}/snapshot/${encodeURIComponent(name)}/rollback`, "POST");
 }
 
+/**
+ * Only works when both nodes belong to the same Proxmox cluster — Proxmox handles the actual
+ * disk/config transfer entirely on its own side (this just kicks it off and hands back a task ID
+ * to poll). Callers should treat any error here as "not clustered" and fall back to an
+ * export/import path (see vmMigration.ts) rather than surfacing it as a hard failure.
+ */
+export async function migrateVm(
+  hostId: number,
+  node: string,
+  type: "qemu" | "lxc",
+  vmid: number,
+  targetNode: string,
+  opts: { online?: boolean; withLocalDisks?: boolean } = {}
+): Promise<string> {
+  const params = new URLSearchParams();
+  params.set("target", targetNode);
+  if (type === "qemu") {
+    if (opts.online) params.set("online", "1");
+    if (opts.withLocalDisks) params.set("with-local-disks", "1");
+  } else {
+    // LXC migration is offline-only in stock Proxmox: `restart` shuts the container down, moves
+    // it, and starts it back up on the target node.
+    params.set("restart", "1");
+  }
+  const upid = await proxmoxRequest(hostId, `/nodes/${node}/${type}/${vmid}/migrate`, "POST", params);
+  return upid as string;
+}
+
+export type ProxmoxTaskStatus = { status: "running" | "stopped"; exitstatus?: string };
+
+export async function getTaskStatus(hostId: number, node: string, upid: string): Promise<ProxmoxTaskStatus> {
+  return (await proxmoxRequest(hostId, `/nodes/${node}/tasks/${encodeURIComponent(upid)}/status`)) as ProxmoxTaskStatus;
+}
+
 export async function deleteSnapshot(
   hostId: number,
   node: string,

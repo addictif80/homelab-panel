@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import AppTemplatesPanel, { type AppTemplate } from "@/components/AppTemplatesPanel";
 import DockerStacksPanel from "@/components/DockerStacksPanel";
+import MigrationJobLog from "@/components/MigrationJobLog";
 
 const Terminal = dynamic(() => import("@/components/Terminal"), { ssr: false });
 
@@ -44,6 +45,12 @@ export default function DockerPage() {
   const [updatesAvailable, setUpdatesAvailable] = useState<Set<string>>(new Set());
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [migrating, setMigrating] = useState<Container | null>(null);
+  const [migrateDestHostId, setMigrateDestHostId] = useState<number | null>(null);
+  const [migrateRemoveSource, setMigrateRemoveSource] = useState(false);
+  const [migrateJobId, setMigrateJobId] = useState<string | null>(null);
+  const [migrateError, setMigrateError] = useState("");
+  const [migrateStarting, setMigrateStarting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -112,6 +119,34 @@ export default function DockerPage() {
       setRecreateLog((l) => [...(l ?? []), `Erreur: ${err instanceof Error ? err.message : "inconnue"}`]);
     } finally {
       setPending(null);
+    }
+  }
+
+  function openMigrate(c: Container) {
+    setMigrating(c);
+    setMigrateDestHostId(null);
+    setMigrateRemoveSource(false);
+    setMigrateJobId(null);
+    setMigrateError("");
+  }
+
+  async function startMigration() {
+    if (!migrating || !migrateDestHostId) return;
+    setMigrateStarting(true);
+    setMigrateError("");
+    try {
+      const res = await fetch(`/api/docker/${migrating.hostId}/containers/${migrating.id}/migrate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ destHostId: migrateDestHostId, removeSource: migrateRemoveSource }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setMigrateJobId(data.jobId);
+    } catch (err) {
+      setMigrateError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setMigrateStarting(false);
     }
   }
 
@@ -406,6 +441,12 @@ export default function DockerPage() {
                       Logs
                     </button>
                     <button
+                      onClick={() => openMigrate(c)}
+                      className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+                    >
+                      Migrer
+                    </button>
+                    <button
                       onClick={() => runAction(c, "remove")}
                       className="rounded border border-neutral-700 px-2 py-0.5 text-xs text-red-400 hover:bg-neutral-800"
                     >
@@ -457,6 +498,77 @@ export default function DockerPage() {
             <div className="flex-1 rounded border border-neutral-800 bg-black p-2">
               <Terminal hostId={terminalFor.hostId} containerId={terminalFor.id} />
             </div>
+          </div>
+        </div>
+      )}
+
+      {migrating && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded border border-neutral-700 bg-neutral-900 p-5">
+            <h2 className="text-sm font-semibold text-neutral-100">
+              Migrer « {migrating.name} » ({migrating.hostName})
+            </h2>
+            {!migrateJobId ? (
+              <>
+                <p className="mt-2 text-sm text-neutral-400">
+                  L&apos;image, les volumes et les données seront transférés vers la machine choisie, puis le
+                  conteneur y sera recréé à l&apos;identique.
+                </p>
+                <label className="mt-4 block">
+                  <span className="mb-1 block text-xs text-neutral-400">Machine de destination</span>
+                  <select
+                    value={migrateDestHostId ?? ""}
+                    onChange={(e) => setMigrateDestHostId(Number(e.target.value))}
+                    className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100"
+                  >
+                    <option value="">Choisir...</option>
+                    {hostStatuses
+                      .filter((h) => !h.error && h.hostId !== migrating.hostId)
+                      .map((h) => (
+                        <option key={h.hostId} value={h.hostId}>
+                          {h.hostName}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label className="mt-3 flex items-center gap-2 text-sm text-neutral-300">
+                  <input
+                    type="checkbox"
+                    checked={migrateRemoveSource}
+                    onChange={(e) => setMigrateRemoveSource(e.target.checked)}
+                  />
+                  Supprimer le conteneur source une fois la migration réussie
+                </label>
+                {migrateError && <p className="mt-2 text-sm text-red-400">{migrateError}</p>}
+                <div className="mt-4 flex justify-end gap-2">
+                  <button
+                    onClick={() => setMigrating(null)}
+                    className="rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={startMigration}
+                    disabled={migrateStarting || !migrateDestHostId}
+                    className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60 disabled:opacity-50"
+                  >
+                    {migrateStarting ? "Démarrage..." : "Lancer la migration"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="mt-3 space-y-3">
+                <MigrationJobLog jobId={migrateJobId} onDone={load} />
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => setMigrating(null)}
+                    className="rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800"
+                  >
+                    Fermer
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

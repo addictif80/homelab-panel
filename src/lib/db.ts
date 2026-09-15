@@ -316,6 +316,19 @@ function migrate(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_support_ticket_messages_ticket ON support_ticket_messages(ticket_id, created_at);
 
+    -- Background job tracking shared by Docker container migration and Proxmox VM/CT migration —
+    -- both can run for minutes (image/volume transfer, vzdump+restore), so the API starts the job
+    -- and returns a job id immediately rather than holding the HTTP request open.
+    CREATE TABLE IF NOT EXISTS migration_jobs (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL CHECK (kind IN ('docker','vm')),
+      status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','success','failed')),
+      log TEXT NOT NULL DEFAULT '',
+      result_json TEXT,
+      started_at TEXT NOT NULL DEFAULT (datetime('now')),
+      finished_at TEXT
+    );
+
     -- One-click Docker app templates — seeded once from a curated built-in list (see
     -- lib/appTemplates.ts) but fully editable/deletable/addable from the panel afterwards, unlike
     -- the old hardcoded-in-source-only list.

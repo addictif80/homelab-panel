@@ -12,7 +12,7 @@ function execOnHost(hostId: number, rawCommand: string) {
 // comes from, without needing to special-case any particular panel or shell.
 const OUTPUT_MARKER = "__HLP_DOCKER_OUTPUT__";
 
-async function execOnHostClean(hostId: number, rawCommand: string) {
+export async function execOnHostClean(hostId: number, rawCommand: string) {
   const result = await execOnHost(hostId, `echo ${OUTPUT_MARKER}; ${rawCommand}`);
   const idx = result.stdout.indexOf(OUTPUT_MARKER);
   const stdout = idx === -1 ? result.stdout : result.stdout.slice(idx + OUTPUT_MARKER.length).replace(/^\r?\n/, "");
@@ -111,7 +111,9 @@ export async function tailContainerFile(
   return stdout;
 }
 
-type ContainerInspect = {
+export type ContainerMount = { Type: "bind" | "volume" | string; Name?: string; Source: string; Destination: string };
+
+export type ContainerInspect = {
   Name: string;
   Config: { Image: string; Env: string[] | null; ExposedPorts: Record<string, unknown> | null };
   HostConfig: {
@@ -120,28 +122,23 @@ type ContainerInspect = {
     RestartPolicy: { Name: string };
     NetworkMode: string;
   };
+  Mounts: ContainerMount[];
 };
 
-/** Pulls the latest image and recreates the container with the same run configuration. */
-export async function pullAndRecreate(hostId: number, containerId: string): Promise<string[]> {
-  const log: string[] = [];
-
+export async function inspectContainer(hostId: number, containerId: string): Promise<ContainerInspect> {
   const inspectRes = await execOnHostClean(hostId, `docker inspect ${shellQuote(containerId)}`);
   if (inspectRes.code !== 0) throw new Error(inspectRes.stderr || "Conteneur introuvable.");
   const [info] = JSON.parse(inspectRes.stdout) as ContainerInspect[];
+  return info;
+}
 
-  const image = info.Config.Image;
-  const name = info.Name.replace(/^\//, "");
-
-  log.push(`Pull de l'image ${image}...`);
-  const pullRes = await execOnHost(hostId, `docker pull ${shellQuote(image)}`);
-  log.push(pullRes.stdout.trim());
-  if (pullRes.code !== 0) throw new Error(pullRes.stderr || "Échec du pull.");
-
-  log.push(`Suppression du conteneur ${name}...`);
-  const rmRes = await execOnHost(hostId, `docker rm -f ${shellQuote(containerId)}`);
-  if (rmRes.code !== 0) throw new Error(rmRes.stderr || "Échec de la suppression.");
-
+/** Builds the `docker run` argument list to recreate a container from its own `docker inspect`
+ * output — shared between recreating in place (pullAndRecreate) and recreating on a different
+ * host after migrating its image and data there (dockerMigration.ts). Binds/named volumes are
+ * carried over as the exact same strings Docker itself reported, since Docker's own `-v
+ * name:/path` and `-v /host/path:/path` syntaxes are indistinguishable in HostConfig.Binds and
+ * don't need to be told apart here — only migration's data-transfer step cares which is which. */
+export function buildRunArgs(info: ContainerInspect, name: string, image: string): string[] {
   const args = ["run", "-d", "--name", shellQuote(name)];
   if (info.HostConfig.RestartPolicy?.Name) {
     args.push("--restart", shellQuote(info.HostConfig.RestartPolicy.Name));
@@ -161,8 +158,27 @@ export async function pullAndRecreate(hostId: number, containerId: string): Prom
     args.push("-e", shellQuote(env));
   }
   args.push(shellQuote(image));
+  return args;
+}
 
-  const runCmd = `docker ${args.join(" ")}`;
+/** Pulls the latest image and recreates the container with the same run configuration. */
+export async function pullAndRecreate(hostId: number, containerId: string): Promise<string[]> {
+  const log: string[] = [];
+
+  const info = await inspectContainer(hostId, containerId);
+  const image = info.Config.Image;
+  const name = info.Name.replace(/^\//, "");
+
+  log.push(`Pull de l'image ${image}...`);
+  const pullRes = await execOnHost(hostId, `docker pull ${shellQuote(image)}`);
+  log.push(pullRes.stdout.trim());
+  if (pullRes.code !== 0) throw new Error(pullRes.stderr || "Échec du pull.");
+
+  log.push(`Suppression du conteneur ${name}...`);
+  const rmRes = await execOnHost(hostId, `docker rm -f ${shellQuote(containerId)}`);
+  if (rmRes.code !== 0) throw new Error(rmRes.stderr || "Échec de la suppression.");
+
+  const runCmd = `docker ${buildRunArgs(info, name, image).join(" ")}`;
   log.push(`Recréation: ${runCmd}`);
   const runRes = await execOnHost(hostId, runCmd);
   if (runRes.code !== 0) throw new Error(runRes.stderr || "Échec de la recréation.");
