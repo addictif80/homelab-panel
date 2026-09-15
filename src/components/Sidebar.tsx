@@ -6,7 +6,14 @@ import { usePathname, useRouter } from "next/navigation";
 import ThemeToggle from "./ThemeToggle";
 
 const NAV_SECTIONS: { label: string; items: { href: string; label: string }[] }[] = [
-  { label: "", items: [{ href: "/", label: "Vue d'ensemble" }, { href: "/brain", label: "Vue vivante" }] },
+  {
+    label: "",
+    items: [
+      { href: "/", label: "Vue d'ensemble" },
+      { href: "/brain", label: "Vue vivante" },
+      { href: "/services", label: "Services" },
+    ],
+  },
   {
     label: "Infrastructure",
     items: [

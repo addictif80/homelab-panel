@@ -395,6 +395,22 @@ function migrate(db: Database.Database) {
       sale_id TEXT REFERENCES sales(id) ON DELETE SET NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- Bookmark-style dashboard of hosted services (name + URL + favicon), optionally surfaced on
+    -- the unauthenticated public board (see /board and /api/public/services). The favicon is
+    -- fetched and cached server-side as a data URL rather than hotlinked, since a visitor to the
+    -- public board has no reason to be able to reach an internal-only service's own origin to load
+    -- its icon. click_count is shared between the internal page and the public board — both call
+    -- the same increment endpoint, so it reflects total engagement either way.
+    CREATE TABLE IF NOT EXISTS service_links (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      url TEXT NOT NULL,
+      favicon_data_url TEXT,
+      show_public INTEGER NOT NULL DEFAULT 0,
+      click_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Trial clock starts the instant the database is first created — not on some later "first

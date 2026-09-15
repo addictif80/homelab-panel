@@ -16,8 +16,8 @@ const PUBLIC_PWA_ASSETS = [
   "/apple-touch-icon.png",
 ];
 const PUBLIC_PATHS = ["/login", "/setup", ...PUBLIC_PWA_ASSETS];
-const PUBLIC_PATH_PREFIXES = ["/store"];
-const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/store/", "/api/download/"];
+const PUBLIC_PATH_PREFIXES = ["/store", "/board"];
+const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/store/", "/api/download/", "/api/public/"];
 // Carved out of the otherwise auth-gated /api/seller/ prefix: every buyer's own self-hosted
 // instance calls this one endpoint from the outside to activate, with no session of ours.
 const PUBLIC_API_EXACT = [
