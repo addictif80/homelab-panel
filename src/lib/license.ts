@@ -271,21 +271,27 @@ export async function activateWithKey(key: string): Promise<{ ok: true } | { ok:
 }
 
 /**
- * Called periodically (see licenseRenewalScheduler.ts) — a no-op for a seller instance, a
- * never-activated trial, or a lifetime license (nothing to refresh, it never expires). Only a
- * subscription instance actually calls home, to pick up its subscription's current paid-through
- * date. Best-effort: a network hiccup or unreachable seller server just leaves the cached
- * certificate in place — its own validUntil + graceDays already provides the fallback cutoff, so
- * a paying customer isn't punished for a transient failure to phone home.
+ * Called periodically (see licenseRenewalScheduler.ts) — a no-op for a seller instance or a
+ * never-activated trial. Runs for *any* activated license, lifetime included — not just
+ * subscriptions — because it's also the only mechanism that can ever detect a self-service
+ * revocation (see /api/license/revoke): a lifetime certificate is otherwise checked purely
+ * offline against the embedded public key, with no other reason to ever contact the seller again,
+ * so a cloned/leaked copy of an activated install would keep working forever if nothing periodic
+ * ever asked the server "is this still good?". For a subscription this also happens to pick up
+ * the current paid-through date, same as before.
+ *
+ * Best-effort otherwise: a network hiccup or unreachable seller server just leaves the cached
+ * certificate in place — a paying customer isn't punished for a transient failure to phone home,
+ * and a lifetime license keeps working offline exactly as before between these checks.
  */
-export async function refreshLicenseIfSubscription(): Promise<void> {
+export async function refreshLicenseCertificate(): Promise<void> {
   if (isSellerInstance()) return;
 
   const row = getLicenseRow();
   if (row.status !== "activated" || !row.activation_key) return;
 
   const payload = getVerifiedCertificatePayload(row);
-  if (!payload || payload.licenseType !== "subscription") return;
+  if (!payload) return;
 
   const config = getLicenseConfig();
   if (!config.licenseServerUrl) return;
@@ -296,12 +302,60 @@ export async function refreshLicenseIfSubscription(): Promise<void> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key: row.activation_key, instanceId: getOrCreateInstanceId() }),
     });
-    const data = (await res.json()) as { valid?: boolean; certificate?: Certificate };
+    const data = (await res.json()) as { valid?: boolean; revoked?: boolean; certificate?: Certificate };
     if (res.ok && data.valid && data.certificate) {
       getDb().prepare(`UPDATE license SET certificate_json = ? WHERE id = 1`).run(JSON.stringify(data.certificate));
+    } else if (data.revoked) {
+      // This exact key was revoked — by definition not by this install if it's still the one
+      // holding the now-superseded key (the legitimate owner's revoke flow already swapped its
+      // local row to the new key before this could ever run against the old one). Clearing
+      // activation drops it back to the trial gate, which for a long-activated instance is
+      // already expired — i.e. read-only until someone activates it with a real key again.
+      getDb()
+        .prepare(`UPDATE license SET status = 'trial', activation_key = NULL, activated_at = NULL, certificate_json = NULL WHERE id = 1`)
+        .run();
     }
   } catch {
     // See doc comment — intentionally silent.
+  }
+}
+
+/**
+ * Self-service "I think someone else has my key" flow. Requires the seller's own signature over a
+ * fresh key + this instance's id — a stolen key text alone can't trigger this against someone
+ * else's install (see revokeAndReissueKey's ownership check). On success, this instance's local
+ * credentials are swapped to the new key immediately, so it keeps working without needing to
+ * re-enter anything; the old key is rejected by the seller from this point on, which is what
+ * eventually locks out any other copy still using it (see refreshLicenseCertificate above).
+ */
+export async function revokeAndReplaceLicense(): Promise<{ ok: true; newKey: string } | { ok: false; error: string }> {
+  if (isSellerInstance()) return { ok: false, error: "Non disponible sur l'instance du vendeur." };
+
+  const config = getLicenseConfig();
+  const row = getLicenseRow();
+  if (!config.licenseServerUrl || !row.activation_key) {
+    return { ok: false, error: "Aucune licence active à révoquer sur cette installation." };
+  }
+
+  try {
+    const res = await fetch(`${config.licenseServerUrl.replace(/\/$/, "")}/api/seller/license/revoke`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: row.activation_key, instanceId: getOrCreateInstanceId() }),
+    });
+    const data = (await res.json()) as { valid?: boolean; newKey?: string; certificate?: Certificate; error?: string };
+    if (!res.ok || !data.valid || !data.newKey || !data.certificate) {
+      return { ok: false, error: data.error || "Échec de la révocation." };
+    }
+
+    getDb()
+      .prepare(
+        `UPDATE license SET activation_key = ?, activated_at = datetime('now'), certificate_json = ? WHERE id = 1`
+      )
+      .run(data.newKey, JSON.stringify(data.certificate));
+    return { ok: true, newKey: data.newKey };
+  } catch {
+    return { ok: false, error: "Impossible de contacter le serveur de licence — vérifie la connexion Internet." };
   }
 }
 

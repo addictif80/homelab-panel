@@ -16,6 +16,7 @@ type KeyRow = {
   used_at: string | null;
   used_by_info: string | null;
   instance_id: string | null;
+  revoked_at: string | null;
 };
 
 function rowToKey(row: KeyRow): LicenseKey {
@@ -86,6 +87,7 @@ export type ValidateResult = { valid: true } | { valid: false; error: string };
 export function validateAndConsumeKey(key: string, instanceInfo?: string, instanceId?: string): ValidateResult {
   const row = getDb().prepare(`SELECT * FROM license_keys WHERE key = ?`).get(key) as KeyRow | undefined;
   if (!row) return { valid: false, error: "Clé inconnue." };
+  if (row.revoked_at) return { valid: false, error: "Cette clé a été révoquée." };
   if (row.used_at) return { valid: false, error: "Cette clé a déjà été utilisée." };
 
   const result = getDb()
@@ -102,11 +104,13 @@ export function validateAndConsumeKey(key: string, instanceInfo?: string, instan
 
 /** Used by /api/seller/license/refresh to check the caller's instanceId against the one bound at
  * activation, before re-issuing a signed certificate for an already-used key. */
-export function getKeyInstanceBinding(key: string): { usedAt: string | null; instanceId: string | null } | null {
-  const row = getDb().prepare(`SELECT used_at, instance_id FROM license_keys WHERE key = ?`).get(key) as
-    | { used_at: string | null; instance_id: string | null }
+export function getKeyInstanceBinding(
+  key: string
+): { usedAt: string | null; instanceId: string | null; revokedAt: string | null } | null {
+  const row = getDb().prepare(`SELECT used_at, instance_id, revoked_at FROM license_keys WHERE key = ?`).get(key) as
+    | { used_at: string | null; instance_id: string | null; revoked_at: string | null }
     | undefined;
-  return row ? { usedAt: row.used_at, instanceId: row.instance_id } : null;
+  return row ? { usedAt: row.used_at, instanceId: row.instance_id, revokedAt: row.revoked_at } : null;
 }
 
 /** Adopts an instanceId for a key that was activated before instance binding existed (instance_id
@@ -114,4 +118,32 @@ export function getKeyInstanceBinding(key: string): { usedAt: string | null; ins
  * instead of being locked out. No-op once a binding already exists. */
 export function bindKeyInstanceId(key: string, instanceId: string): void {
   getDb().prepare(`UPDATE license_keys SET instance_id = ? WHERE key = ? AND instance_id IS NULL`).run(instanceId, key);
+}
+
+export type RevokeResult = { ok: true; newKey: string } | { ok: false; error: string };
+
+/**
+ * Self-service "I think someone else has my key" flow: the caller must already hold a valid,
+ * activated, instance-bound key (same trust model as /refresh — the key text alone isn't enough,
+ * it must come from the very instance that activated it). Marks the current key revoked — so
+ * /validate and /refresh reject it for anyone else still holding a copy — and immediately issues
+ * and binds a replacement key on the same sale to this same instance, so the legitimate caller
+ * never has to re-type anything.
+ */
+export function revokeAndReissueKey(oldKey: string, instanceId: string): RevokeResult {
+  const row = getDb().prepare(`SELECT * FROM license_keys WHERE key = ?`).get(oldKey) as KeyRow | undefined;
+  if (!row) return { ok: false, error: "Clé inconnue." };
+  if (row.revoked_at) return { ok: false, error: "Cette clé a déjà été révoquée." };
+  if (!row.used_at) return { ok: false, error: "Cette clé n'a jamais été activée." };
+  if (row.instance_id && row.instance_id !== instanceId) {
+    return { ok: false, error: "Cette clé est liée à une autre installation." };
+  }
+
+  const newKey = createLicenseKey(row.sale_id);
+  getDb()
+    .prepare(`UPDATE license_keys SET used_at = datetime('now'), instance_id = ? WHERE key = ?`)
+    .run(instanceId, newKey.key);
+  getDb().prepare(`UPDATE license_keys SET revoked_at = datetime('now') WHERE key = ?`).run(oldKey);
+
+  return { ok: true, newKey: newKey.key };
 }

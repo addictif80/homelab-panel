@@ -75,6 +75,7 @@ export type LicenseCheckResult = { ok: true } | { ok: false; error: string; stat
 export function checkLicenseForDirectory(key: string, instanceId: string): LicenseCheckResult {
   const binding = getKeyInstanceBinding(key);
   if (!binding) return { ok: false, error: "Clé inconnue.", status: 400 };
+  if (binding.revokedAt) return { ok: false, error: "Cette clé a été révoquée.", status: 403 };
   if (!binding.usedAt) return { ok: false, error: "Cette clé n'a jamais été activée.", status: 400 };
 
   if (binding.instanceId) {

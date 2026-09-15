@@ -28,6 +28,10 @@ export default function LicensePanel() {
   const [activating, setActivating] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [confirmingRevoke, setConfirmingRevoke] = useState(false);
+  const [revoking, setRevoking] = useState(false);
+  const [revokeError, setRevokeError] = useState("");
+  const [revokedKey, setRevokedKey] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/license/status")
@@ -54,6 +58,24 @@ export default function LicensePanel() {
       setError(err instanceof Error ? err.message : "Erreur.");
     } finally {
       setActivating(false);
+    }
+  }
+
+  async function revoke() {
+    setRevoking(true);
+    setRevokeError("");
+    try {
+      const res = await fetch("/api/license/revoke", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setRevokedKey(data.newKey);
+      setConfirmingRevoke(false);
+      const refreshed = await (await fetch("/api/license/status")).json();
+      setStatus(refreshed);
+    } catch (err) {
+      setRevokeError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setRevoking(false);
     }
   }
 
@@ -118,6 +140,47 @@ export default function LicensePanel() {
               pas régularisé. Le panel se réactive automatiquement dès que le renouvellement est confirmé.
             </p>
           )}
+
+          {revokedKey && (
+            <div className="rounded border border-emerald-900 bg-emerald-950/20 p-2.5 text-xs text-emerald-300">
+              Ancienne clé révoquée — cette installation utilise maintenant <code className="text-emerald-200">{revokedKey}</code>.
+              Note-la si tu la gardais ailleurs (elle a remplacé l&apos;ancienne partout où elle apparaît).
+            </div>
+          )}
+
+          <div className="border-t border-neutral-800 pt-2.5">
+            {!confirmingRevoke ? (
+              <button
+                onClick={() => setConfirmingRevoke(true)}
+                className="text-xs text-neutral-500 hover:text-amber-400"
+              >
+                Cette licence est peut-être utilisée par quelqu&apos;un d&apos;autre ?
+              </button>
+            ) : (
+              <div className="space-y-2 rounded border border-amber-900 bg-amber-950/20 p-2.5">
+                <p className="text-xs text-amber-200">
+                  Ça révoque définitivement la clé actuelle (plus jamais utilisable, où que ce soit) et en émet une
+                  nouvelle pour cette installation, appliquée immédiatement — rien à retaper ici.
+                </p>
+                {revokeError && <p className="text-xs text-red-400">{revokeError}</p>}
+                <div className="flex gap-2">
+                  <button
+                    onClick={revoke}
+                    disabled={revoking}
+                    className="rounded border border-amber-700 bg-amber-900/40 px-2.5 py-1 text-xs text-amber-200 hover:bg-amber-900/60 disabled:opacity-50"
+                  >
+                    {revoking ? "Révocation..." : "Révoquer et obtenir une nouvelle clé"}
+                  </button>
+                  <button
+                    onClick={() => setConfirmingRevoke(false)}
+                    className="rounded border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+                  >
+                    Annuler
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         <div className="mt-3 space-y-2">

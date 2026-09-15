@@ -488,6 +488,17 @@ function migrate(db: Database.Database) {
     // enough to mint a valid certificate for a different installation.
     db.exec(`ALTER TABLE license_keys ADD COLUMN instance_id TEXT`);
   }
+  if (!licenseKeyColumns.some((c) => c.name === "revoked_at")) {
+    // Self-service revocation ("I think someone else has my key"): the customer's own instance
+    // calls /api/seller/license/revoke, which marks the current key revoked here and immediately
+    // issues + binds a replacement on the same sale. A revoked key is rejected by /validate and
+    // /refresh from then on, so a cloned/leaked copy of this install stops getting a fresh signed
+    // certificate the next time its periodic refresh runs (see license.ts's refreshLicenseCertificate,
+    // which — unlike before — now also runs for lifetime licenses, not just subscriptions, since
+    // that periodic call is what actually detects a revocation for an install that would otherwise
+    // never phone home again).
+    db.exec(`ALTER TABLE license_keys ADD COLUMN revoked_at TEXT`);
+  }
 
   const salesColumns = db.prepare(`PRAGMA table_info(sales)`).all() as { name: string }[];
   if (!salesColumns.some((c) => c.name === "product_type")) {
