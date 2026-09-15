@@ -76,7 +76,11 @@ async function captureScreenshotInner(url: string, executablePath: string): Prom
     await page.goto(url, { waitUntil: "networkidle2", timeout: NAVIGATION_TIMEOUT_MS });
     const buffer = await page.screenshot({ type: "jpeg", quality: 60 });
     return `data:image/jpeg;base64,${Buffer.from(buffer).toString("base64")}`;
-  } catch {
+  } catch (err) {
+    // Best-effort by design (never blocks creating/editing a link), but silent failure makes this
+    // impossible to diagnose remotely — log it so pm2/journalctl shows the real cause (Chromium
+    // launch failure, unreachable URL, self-signed cert, navigation timeout...).
+    console.error(`[screenshot] Échec de la capture pour ${url} :`, err);
     return null;
   } finally {
     await browser?.close().catch(() => {});
