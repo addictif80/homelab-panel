@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 
@@ -28,9 +28,13 @@ export default function SshPage() {
 function SshPageInner() {
   const searchParams = useSearchParams();
   const [hosts, setHosts] = useState<Host[]>([]);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [sessionKey, setSessionKey] = useState(0);
-  const [status, setStatus] = useState<string>("");
+  // Every host a terminal has been opened for stays mounted (just hidden, never unmounted) once
+  // opened, so switching the active tab — or, on mobile, closing the modal — never tears down its
+  // WebSocket. Only the explicit "✕ close" on a tab actually disconnects it.
+  const [openIds, setOpenIds] = useState<number[]>([]);
+  const [activeId, setActiveId] = useState<number | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [statusByHost, setStatusByHost] = useState<Record<number, string>>({});
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [showCredForm, setShowCredForm] = useState(false);
   const [credKind, setCredKind] = useState<"ssh_key" | "ssh_password" | "sudo_password">("ssh_password");
@@ -38,7 +42,25 @@ function SshPageInner() {
   const [credSecret, setCredSecret] = useState("");
   const [credError, setCredError] = useState("");
 
-  const selectedHost = hosts.find((h) => h.id === selectedId) ?? null;
+  const selectedHost = hosts.find((h) => h.id === activeId) ?? null;
+
+  function openHost(hostId: number) {
+    setOpenIds((ids) => (ids.includes(hostId) ? ids : [...ids, hostId]));
+    setActiveId(hostId);
+    setModalOpen(true);
+  }
+
+  function closeHost(hostId: number) {
+    setOpenIds((ids) => {
+      const next = ids.filter((id) => id !== hostId);
+      setActiveId((current) => {
+        if (current !== hostId) return current;
+        return next.length > 0 ? next[next.length - 1] : null;
+      });
+      if (next.length === 0) setModalOpen(false);
+      return next;
+    });
+  }
 
   useEffect(() => {
     fetch("/api/hosts")
@@ -46,10 +68,7 @@ function SshPageInner() {
       .then((d) => {
         setHosts(d.hosts);
         const preselect = Number(searchParams.get("hostId"));
-        if (preselect && d.hosts.some((h: Host) => h.id === preselect)) {
-          setSelectedId(preselect);
-          setSessionKey((k) => k + 1);
-        }
+        if (preselect && d.hosts.some((h: Host) => h.id === preselect)) openHost(preselect);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -72,19 +91,30 @@ function SshPageInner() {
   }, []);
 
   useEffect(() => {
-    if (selectedId) loadCredentials(selectedId);
-  }, [selectedId, loadCredentials]);
+    if (activeId) loadCredentials(activeId);
+  }, [activeId, loadCredentials]);
 
-  const handleStatusChange = useCallback((s: string, message?: string) => {
-    setStatus(message ? `${s}: ${message}` : s);
-  }, []);
+  // A fresh arrow function on every render would change identity and re-trigger Terminal's
+  // connection effect (see its `onStatusChange` dependency) — memoizing one stable callback per
+  // host, reused across renders, keeps switching tabs from looking like a reconnect.
+  const statusHandlers = useRef<Map<number, (status: string, message?: string) => void>>(new Map());
+  function getStatusHandler(hostId: number) {
+    let handler = statusHandlers.current.get(hostId);
+    if (!handler) {
+      handler = (status, message) => {
+        setStatusByHost((prev) => ({ ...prev, [hostId]: message ? `${status}: ${message}` : status }));
+      };
+      statusHandlers.current.set(hostId, handler);
+    }
+    return handler;
+  }
 
   async function addCredential(e: React.FormEvent) {
     e.preventDefault();
-    if (!selectedId) return;
+    if (!activeId) return;
     setCredError("");
     try {
-      const res = await fetch(`/api/hosts/${selectedId}/credentials`, {
+      const res = await fetch(`/api/hosts/${activeId}/credentials`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind: credKind, label: credLabel, secret: credSecret }),
@@ -94,21 +124,21 @@ function SshPageInner() {
       setCredSecret("");
       setCredLabel("");
       setShowCredForm(false);
-      loadCredentials(selectedId);
+      loadCredentials(activeId);
     } catch (err) {
       setCredError(err instanceof Error ? err.message : "Erreur");
     }
   }
 
   async function deleteCredential(credId: number) {
-    if (!selectedId) return;
-    await fetch(`/api/hosts/${selectedId}/credentials/${credId}`, { method: "DELETE" });
-    loadCredentials(selectedId);
+    if (!activeId) return;
+    await fetch(`/api/hosts/${activeId}/credentials/${credId}`, { method: "DELETE" });
+    loadCredentials(activeId);
   }
 
   return (
-    <div className="flex h-[calc(100vh-3rem)] gap-4">
-      <div className="w-64 shrink-0 space-y-4 overflow-auto">
+    <div className="flex h-[calc(100vh-3rem)] flex-col gap-4 md:flex-row">
+      <div className="w-full shrink-0 space-y-4 overflow-auto md:w-64">
         <div>
           <h1 className="text-lg font-semibold">Terminal SSH</h1>
           <p className="text-xs text-neutral-500">Sélectionne une machine</p>
@@ -117,18 +147,17 @@ function SshPageInner() {
           {hosts.map((h) => (
             <button
               key={h.id}
-              onClick={() => {
-                setSelectedId(h.id);
-                setSessionKey((k) => k + 1);
-                setStatus("");
-              }}
+              onClick={() => openHost(h.id)}
               className={`block w-full rounded px-3 py-2 text-left text-sm ${
-                selectedId === h.id
+                activeId === h.id
                   ? "bg-blue-600/20 text-blue-300"
-                  : "text-neutral-400 hover:bg-neutral-900"
+                  : openIds.includes(h.id)
+                    ? "bg-neutral-900 text-neutral-200"
+                    : "text-neutral-400 hover:bg-neutral-900"
               }`}
             >
               {h.name}
+              {openIds.includes(h.id) && <span className="ml-1.5 text-emerald-400">●</span>}
               <div className="text-xs text-neutral-500">
                 {h.tailscale_ip || h.lan_ip || h.public_ip || "pas d'IP"}
               </div>
@@ -209,19 +238,71 @@ function SshPageInner() {
         )}
       </div>
 
-      <div className="flex-1 rounded border border-neutral-800 bg-black p-2">
-        {selectedId ? (
-          <Terminal key={sessionKey} hostId={selectedId} onStatusChange={handleStatusChange} />
+      {/* On mobile this panel is a fullscreen modal, only shown when a terminal was opened —
+          closing it (✕ or backdrop) just hides it, it never tears down the connection underneath.
+          On desktop (md+) it's always the visible right-hand column, whatever modalOpen is. */}
+      <div
+        className={`flex-1 flex-col ${
+          modalOpen
+            ? "fixed inset-0 z-50 bg-black/90 p-3 md:static md:z-auto md:bg-transparent md:p-0"
+            : "hidden"
+        } md:flex`}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) setModalOpen(false);
+        }}
+      >
+        {activeId ? (
+          <div className="flex h-full flex-col rounded border border-neutral-800 bg-black p-2">
+            <div className="mb-2 flex items-center gap-1 overflow-x-auto">
+              {openIds.map((id) => {
+                const h = hosts.find((hh) => hh.id === id);
+                return (
+                  <div
+                    key={id}
+                    className={`flex shrink-0 items-center gap-1.5 rounded px-2 py-1 text-xs ${
+                      id === activeId ? "bg-blue-600/20 text-blue-300" : "bg-neutral-900 text-neutral-400"
+                    }`}
+                  >
+                    <button onClick={() => openHost(id)}>{h?.name ?? `#${id}`}</button>
+                    <button
+                      onClick={() => closeHost(id)}
+                      aria-label={`Fermer la connexion à ${h?.name ?? id}`}
+                      className="text-neutral-500 hover:text-red-400"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
+              <button
+                onClick={() => setModalOpen(false)}
+                className="ml-auto shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-900 md:hidden"
+              >
+                Fermer (reste connecté)
+              </button>
+            </div>
+            <div className="relative flex-1">
+              {openIds.map((id) => (
+                <div key={id} className={id === activeId ? "absolute inset-0" : "hidden"}>
+                  <Terminal hostId={id} onStatusChange={getStatusHandler(id)} />
+                </div>
+              ))}
+            </div>
+          </div>
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-neutral-500">
+          <div className="hidden h-full items-center justify-center text-sm text-neutral-500 md:flex">
             Sélectionne une machine pour ouvrir un terminal.
           </div>
         )}
       </div>
 
-      {status && (
-        <div className="fixed bottom-4 right-4 rounded bg-neutral-900 px-3 py-1.5 text-xs text-neutral-300 shadow">
-          {status}
+      {activeId !== null && statusByHost[activeId] && (
+        <div
+          className={`${
+            modalOpen ? "" : "hidden md:block"
+          } fixed bottom-4 right-4 z-[60] rounded bg-neutral-900 px-3 py-1.5 text-xs text-neutral-300 shadow`}
+        >
+          {statusByHost[activeId]}
         </div>
       )}
     </div>
