@@ -1,6 +1,8 @@
 import { randomUUID } from "crypto";
 import { getDb } from "./db";
 
+export type DirectoryStatus = "none" | "pending" | "approved" | "rejected";
+
 export type ServiceLink = {
   id: string;
   name: string;
@@ -8,6 +10,9 @@ export type ServiceLink = {
   faviconDataUrl: string | null;
   showPublic: boolean;
   clickCount: number;
+  directoryOptIn: boolean;
+  directoryStatus: DirectoryStatus;
+  directorySubmissionId: string | null;
   createdAt: string;
 };
 
@@ -18,6 +23,9 @@ type ServiceLinkRow = {
   favicon_data_url: string | null;
   show_public: number;
   click_count: number;
+  directory_opt_in: number;
+  directory_status: DirectoryStatus;
+  directory_submission_id: string | null;
   created_at: string;
 };
 
@@ -29,6 +37,9 @@ function rowToLink(row: ServiceLinkRow): ServiceLink {
     faviconDataUrl: row.favicon_data_url,
     showPublic: !!row.show_public,
     clickCount: row.click_count,
+    directoryOptIn: !!row.directory_opt_in,
+    directoryStatus: row.directory_status,
+    directorySubmissionId: row.directory_submission_id,
     createdAt: row.created_at,
   };
 }
@@ -115,6 +126,17 @@ export function updateServiceLink(
 
 export function deleteServiceLink(id: string): void {
   getDb().prepare(`DELETE FROM service_links WHERE id = ?`).run(id);
+}
+
+export function setServiceLinkDirectoryState(
+  id: string,
+  state: { optIn: boolean; status: DirectoryStatus; submissionId: string | null }
+): void {
+  getDb()
+    .prepare(
+      `UPDATE service_links SET directory_opt_in = ?, directory_status = ?, directory_submission_id = ? WHERE id = ?`
+    )
+    .run(state.optIn ? 1 : 0, state.status, state.submissionId, id);
 }
 
 export function incrementServiceLinkClick(id: string): number | null {

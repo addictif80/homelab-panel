@@ -10,6 +10,7 @@ import OllamaSettingsPanel from "@/components/OllamaSettingsPanel";
 import PortAuditPanel from "@/components/PortAuditPanel";
 import RecoveryVaultPanel from "@/components/RecoveryVaultPanel";
 import LockdownPanel from "@/components/LockdownPanel";
+import DirectorySettingsPanel from "@/components/DirectorySettingsPanel";
 
 export default function SettingsPage() {
   return (
@@ -34,6 +35,7 @@ export default function SettingsPage() {
         <CertificateWatchPanel />
         <TrustedDevicesPanel />
         <OllamaSettingsPanel />
+        <DirectorySettingsPanel />
       </div>
     </div>
   );

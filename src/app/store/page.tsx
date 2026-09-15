@@ -17,6 +17,7 @@ type PlanPricing = { enabled: boolean; amountCents: number };
 type Pricing = { currency: string; productName: string; productDescription: string; plans: Record<PlanKey, PlanPricing> };
 type KeyRecoveryConfig = { enabled: boolean; amountCents: number };
 type LandingCta = { enabled: boolean; text: string; buttonLabel: string; buttonUrl: string };
+type DirectoryEntry = { id: string; ownerName: string; serviceName: string; serviceUrl: string; faviconDataUrl: string | null };
 
 const TABS: { key: string; label: string }[] = [
   { key: "security", label: "Sécurité" },
@@ -197,6 +198,7 @@ export default function StorePage() {
   const [keyRecovery, setKeyRecovery] = useState<KeyRecoveryConfig | null>(null);
   const [landingCta, setLandingCta] = useState<LandingCta | null>(null);
   const [ctaDismissed, setCtaDismissed] = useState(false);
+  const [directoryEntries, setDirectoryEntries] = useState<DirectoryEntry[]>([]);
   const [loading, setLoading] = useState<PlanKey | null>(null);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("security");
@@ -227,6 +229,9 @@ export default function StorePage() {
         setKeyRecovery(d.keyRecovery ?? null);
         setLandingCta(d.landingCta ?? null);
       });
+    fetch("/api/store/directory")
+      .then((r) => r.json())
+      .then((d) => setDirectoryEntries(d.entries ?? []));
   }, []);
 
   async function submitTicket(e: React.FormEvent) {
@@ -549,6 +554,43 @@ export default function StorePage() {
           </div>
         </div>
       </section>
+
+      {/* Directory of customer instances that opted in */}
+      {directoryEntries.length > 0 && (
+        <section id="annuaire" className="mx-auto max-w-6xl px-6 py-24">
+          <div className="mb-14 text-center">
+            <span className="font-mono text-xs uppercase tracking-wider text-blue-400">Annuaire</span>
+            <h2 className="mt-3 text-3xl font-semibold">Des services hébergés par nos clients</h2>
+            <p className="mx-auto mt-3 max-w-xl text-neutral-400">
+              Chaque instance choisit elle-même ce qu&apos;elle publie ici — validé au cas par cas avant mise en
+              ligne.
+            </p>
+          </div>
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {directoryEntries.map((entry) => (
+              <a
+                key={entry.id}
+                href={entry.serviceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3.5 rounded-2xl border border-neutral-800 bg-gradient-to-b from-neutral-900 to-neutral-950 p-5 shadow-xl shadow-black/20 transition-transform hover:-translate-y-0.5"
+              >
+                {entry.faviconDataUrl ? (
+                  <img src={entry.faviconDataUrl} alt="" className="h-10 w-10 shrink-0 rounded-lg" />
+                ) : (
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-600/20 text-base font-semibold text-blue-300">
+                    {entry.serviceName.charAt(0).toUpperCase() || "?"}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-neutral-100">{entry.serviceName}</p>
+                  <p className="truncate text-xs text-neutral-500">{entry.ownerName}</p>
+                </div>
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Pricing */}
       <section id="tarifs" className="mx-auto max-w-5xl px-6 py-24 text-center">

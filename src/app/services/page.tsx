@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+type DirectoryStatus = "none" | "pending" | "approved" | "rejected";
+
 type ServiceLink = {
   id: string;
   name: string;
@@ -9,6 +11,22 @@ type ServiceLink = {
   faviconDataUrl: string | null;
   showPublic: boolean;
   clickCount: number;
+  directoryOptIn: boolean;
+  directoryStatus: DirectoryStatus;
+};
+
+const DIRECTORY_STATUS_LABEL: Record<DirectoryStatus, string> = {
+  none: "",
+  pending: "En attente de validation",
+  approved: "Publié dans l'annuaire",
+  rejected: "Refusé par l'admin",
+};
+
+const DIRECTORY_STATUS_STYLE: Record<DirectoryStatus, string> = {
+  none: "",
+  pending: "text-amber-400",
+  approved: "text-emerald-400",
+  rejected: "text-red-400",
 };
 
 function hostLabel(url: string): string {
@@ -104,6 +122,23 @@ export default function ServicesPage() {
     });
   }
 
+  async function toggleDirectory(link: ServiceLink) {
+    const optIn = !link.directoryOptIn;
+    setError("");
+    try {
+      const res = await fetch(`/api/service-links/${link.id}/directory`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ optIn }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setLinks((prev) => prev.map((l) => (l.id === link.id ? data.link : l)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur.");
+    }
+  }
+
   async function deleteLink(link: ServiceLink) {
     if (!confirm(`Supprimer « ${link.name} » ?`)) return;
     await fetch(`/api/service-links/${link.id}`, { method: "DELETE" });
@@ -126,7 +161,8 @@ export default function ServicesPage() {
             <a href="/board" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
               /board
             </a>
-            , accessible sans connexion.
+            , accessible sans connexion. Coche « Annuaire » pour proposer un service à l&apos;annuaire public du
+            vendeur (soumis à validation par un administrateur, nécessite une licence active).
           </p>
         </div>
         <button onClick={openCreateForm} className="btn-primary">
@@ -199,6 +235,16 @@ export default function ServicesPage() {
               <label className="flex items-center gap-1.5">
                 <input type="checkbox" checked={link.showPublic} onChange={() => togglePublic(link)} />
                 Page publique
+              </label>
+            </div>
+
+            <div className="mt-1.5 flex items-center justify-between text-xs">
+              <span className={DIRECTORY_STATUS_STYLE[link.directoryStatus]}>
+                {DIRECTORY_STATUS_LABEL[link.directoryStatus]}
+              </span>
+              <label className="flex items-center gap-1.5 text-neutral-500">
+                <input type="checkbox" checked={link.directoryOptIn} onChange={() => toggleDirectory(link)} />
+                Annuaire
               </label>
             </div>
 

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import ReleasesPanel from "@/components/ReleasesPanel";
 import SupportTicketsPanel from "@/components/SupportTicketsPanel";
+import DirectorySubmissionsPanel from "@/components/DirectorySubmissionsPanel";
 
 type PlanKey = "lifetime" | "monthly" | "annual";
 const PLAN_KEYS: PlanKey[] = ["lifetime", "monthly", "annual"];
@@ -949,6 +950,8 @@ export default function SellerPage() {
           {saving ? "Enregistrement..." : "Enregistrer"}
         </button>
       </section>
+
+      <DirectorySubmissionsPanel />
 
       <SupportTicketsPanel />
 

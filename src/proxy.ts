@@ -26,6 +26,8 @@ const PUBLIC_API_EXACT = [
   "/api/seller/license/trial-check",
   "/api/seller/releases/latest",
   "/api/seller/releases/download",
+  "/api/seller/directory/submit",
+  "/api/seller/directory/withdraw",
 ];
 // Always reachable regardless of trial state — activating (or just checking status) can't
 // itself be blocked by the thing it's meant to unblock.

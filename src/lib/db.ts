@@ -409,7 +409,33 @@ function migrate(db: Database.Database) {
       favicon_data_url TEXT,
       show_public INTEGER NOT NULL DEFAULT 0,
       click_count INTEGER NOT NULL DEFAULT 0,
+      -- "Annuaire public" opt-in: submitted to the seller's central directory (see
+      -- lib/directorySubmission.ts, a no-op with no licenseServerUrl configured — i.e. on the
+      -- seller's own instance or a raw dev checkout) for admin approval before it can appear on
+      -- the public landing page. directory_status mirrors what the seller's directory_submissions
+      -- table last reported for directory_submission_id.
+      directory_opt_in INTEGER NOT NULL DEFAULT 0,
+      directory_status TEXT NOT NULL DEFAULT 'none' CHECK (directory_status IN ('none','pending','approved','rejected')),
+      directory_submission_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Seller-side only (empty on every customer install, which never gets the seller admin UI or
+    -- routes to write to it — see exportBuild.ts's exclusion list): pending/approved/rejected
+    -- submissions to the public directory shown on the landing page, one per (license_key,
+    -- instance_id, service_url) so re-submitting an edited link updates rather than duplicates.
+    CREATE TABLE IF NOT EXISTS directory_submissions (
+      id TEXT PRIMARY KEY,
+      license_key TEXT NOT NULL,
+      instance_id TEXT NOT NULL,
+      owner_name TEXT NOT NULL,
+      service_name TEXT NOT NULL,
+      service_url TEXT NOT NULL,
+      favicon_data_url TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      reviewed_at TEXT,
+      UNIQUE (license_key, instance_id, service_url)
     );
   `);
 
