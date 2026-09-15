@@ -73,6 +73,14 @@ export default function DockerPage() {
     load();
   }, [load]);
 
+  // A single reload right after start/stop/restart can still catch Docker mid-transition (a
+  // container with a slow entrypoint, a restart policy kicking in) — a short poll gives the status
+  // badge time to settle on its final value instead of flashing a stale one.
+  function pollStatus(attempt = 0) {
+    load();
+    if (attempt < 4) setTimeout(() => pollStatus(attempt + 1), 1500);
+  }
+
   async function runAction(c: Container, action: "start" | "stop" | "restart" | "remove") {
     if (action === "remove" && !confirm(`Supprimer le conteneur ${c.name} sur ${c.hostName} ?`)) return;
     setPending(`${c.id}-${action}`);
@@ -84,7 +92,7 @@ export default function DockerPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      load();
+      pollStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur");
     } finally {
@@ -363,100 +371,94 @@ export default function DockerPage() {
       ))}
 
       {visibleContainers.length > 0 && (
-        <div className="overflow-auto rounded border border-neutral-800">
-          <table className="w-full text-sm">
-            <thead className="bg-neutral-900 text-left text-neutral-400">
-              <tr>
-                <th className="px-3 py-2 font-medium">Nom</th>
-                <th className="px-3 py-2 font-medium">Machine</th>
-                <th className="px-3 py-2 font-medium">Image</th>
-                <th className="px-3 py-2 font-medium">Statut</th>
-                <th className="px-3 py-2 font-medium">Ports</th>
-                <th className="px-3 py-2 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleContainers.map((c) => (
-                <tr key={`${c.hostId}-${c.id}`} className="border-t border-neutral-800">
-                  <td className="px-3 py-2 font-medium">{c.name}</td>
-                  <td className="px-3 py-2 text-neutral-400">{c.hostName}</td>
-                  <td className="px-3 py-2 font-mono text-xs text-neutral-400">
-                    {c.image}
-                    {updatesAvailable.has(c.id) && (
-                      <span className="ml-2 rounded bg-amber-900/40 px-1.5 py-0.5 text-[10px] font-sans text-amber-300">
-                        Mise à jour dispo
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className={c.state === "running" ? "text-green-400" : "text-neutral-500"}>
-                      {c.status}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-xs text-neutral-400">{c.ports || "—"}</td>
-                  <td className="px-3 py-2 space-x-1.5">
-                    {c.state === "running" ? (
-                      <>
-                        <button
-                          onClick={() => runAction(c, "stop")}
-                          disabled={pending === `${c.id}-stop`}
-                          className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
-                        >
-                          Stop
-                        </button>
-                        <button
-                          onClick={() => runAction(c, "restart")}
-                          disabled={pending === `${c.id}-restart`}
-                          className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
-                        >
-                          Restart
-                        </button>
-                        <button
-                          onClick={() => setTerminalFor(c)}
-                          className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
-                        >
-                          Terminal
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        onClick={() => runAction(c, "start")}
-                        disabled={pending === `${c.id}-start`}
-                        className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
-                      >
-                        Start
-                      </button>
-                    )}
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {visibleContainers.map((c) => (
+            <div key={`${c.hostId}-${c.id}`} className="rounded border border-neutral-800 bg-neutral-900 p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-neutral-100">{c.name}</p>
+                  <p className="text-xs text-neutral-500">{c.hostName}</p>
+                </div>
+                <span
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                    c.state === "running" ? "bg-emerald-900/40 text-emerald-300" : "bg-neutral-800 text-neutral-400"
+                  }`}
+                >
+                  {c.status}
+                </span>
+              </div>
+
+              <p className="mt-2 truncate font-mono text-xs text-neutral-400">
+                {c.image}
+                {updatesAvailable.has(c.id) && (
+                  <span className="ml-2 rounded bg-amber-900/40 px-1.5 py-0.5 text-[10px] font-sans text-amber-300">
+                    Mise à jour dispo
+                  </span>
+                )}
+              </p>
+              <p className="mt-1 text-xs text-neutral-500">{c.ports || "Aucun port publié"}</p>
+
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {c.state === "running" ? (
+                  <>
                     <button
-                      onClick={() => recreate(c)}
-                      disabled={pending === `${c.id}-recreate`}
+                      onClick={() => runAction(c, "stop")}
+                      disabled={pending === `${c.id}-stop`}
                       className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
                     >
-                      Update image
+                      Stop
                     </button>
                     <button
-                      onClick={() => viewLogs(c)}
+                      onClick={() => runAction(c, "restart")}
+                      disabled={pending === `${c.id}-restart`}
                       className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
                     >
-                      Logs
+                      Restart
                     </button>
                     <button
-                      onClick={() => openMigrate(c)}
+                      onClick={() => setTerminalFor(c)}
                       className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
                     >
-                      Migrer
+                      Terminal
                     </button>
-                    <button
-                      onClick={() => runAction(c, "remove")}
-                      className="rounded border border-neutral-700 px-2 py-0.5 text-xs text-red-400 hover:bg-neutral-800"
-                    >
-                      Supprimer
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => runAction(c, "start")}
+                    disabled={pending === `${c.id}-start`}
+                    className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+                  >
+                    Start
+                  </button>
+                )}
+                <button
+                  onClick={() => recreate(c)}
+                  disabled={pending === `${c.id}-recreate`}
+                  className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+                >
+                  Update image
+                </button>
+                <button
+                  onClick={() => viewLogs(c)}
+                  className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+                >
+                  Logs
+                </button>
+                <button
+                  onClick={() => openMigrate(c)}
+                  className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+                >
+                  Migrer
+                </button>
+                <button
+                  onClick={() => runAction(c, "remove")}
+                  className="rounded border border-neutral-700 px-2 py-0.5 text-xs text-red-400 hover:bg-neutral-800"
+                >
+                  Supprimer
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

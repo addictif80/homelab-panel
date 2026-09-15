@@ -324,6 +324,15 @@ export default function ProxmoxPage() {
     }
   }
 
+  // Proxmox start/stop/reboot return as soon as the async task is *queued*, not once the VM/CT has
+  // actually reached its new state (a clean shutdown in particular can take several seconds) — a
+  // single reload right after the request would often still show the old status. Polling a few
+  // times over ~15s gives the status column a "live" feel without needing to track the task's UPID.
+  function pollStatus(attempt = 0) {
+    loadAll();
+    if (attempt < 7) setTimeout(() => pollStatus(attempt + 1), 2000);
+  }
+
   async function runAction(r: AggregatedResource, action: "start" | "stop" | "shutdown" | "reboot" | "delete") {
     setPending(`${r.vmid}-${action}`);
     try {
@@ -334,7 +343,7 @@ export default function ProxmoxPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setTimeout(loadAll, 1500);
+      pollStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur");
     } finally {
@@ -530,85 +539,79 @@ export default function ProxmoxPage() {
       )}
 
       {resources.length > 0 && (
-        <div className="overflow-auto rounded border border-neutral-800">
-          <table className="w-full text-sm">
-            <thead className="bg-neutral-900 text-left text-neutral-400">
-              <tr>
-                <th className="px-3 py-2 font-medium">Nom</th>
-                <th className="px-3 py-2 font-medium">Type</th>
-                <th className="px-3 py-2 font-medium">Nœud</th>
-                <th className="px-3 py-2 font-medium">Statut</th>
-                <th className="px-3 py-2 font-medium">RAM</th>
-                <th className="px-3 py-2 font-medium">Uptime</th>
-                <th className="px-3 py-2 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {resources.map((r) => (
-                <tr key={`${r.node}-${r.vmid}`} className="border-t border-neutral-800">
-                  <td className="px-3 py-2 font-medium">{r.name || `#${r.vmid}`}</td>
-                  <td className="px-3 py-2 text-neutral-400">{r.type === "qemu" ? "VM" : "LXC"}</td>
-                  <td className="px-3 py-2 text-neutral-400">{r.node}</td>
-                  <td className="px-3 py-2">
-                    <span className={r.status === "running" ? "text-green-400" : "text-neutral-500"}>
-                      {r.status}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-neutral-400">
-                    {(r.maxmem / 1024 / 1024 / 1024).toFixed(1)} Go
-                  </td>
-                  <td className="px-3 py-2 text-neutral-400">{formatUptime(r.uptime)}</td>
-                  <td className="px-3 py-2 space-x-2">
-                    {r.status !== "running" ? (
-                      <button
-                        onClick={() => runAction(r, "start")}
-                        disabled={pending === `${r.vmid}-start`}
-                        className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
-                      >
-                        Démarrer
-                      </button>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => runAction(r, "shutdown")}
-                          disabled={pending === `${r.vmid}-shutdown`}
-                          className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
-                        >
-                          Arrêter
-                        </button>
-                        <button
-                          onClick={() => runAction(r, "reboot")}
-                          disabled={pending === `${r.vmid}-reboot`}
-                          className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
-                        >
-                          Redémarrer
-                        </button>
-                      </>
-                    )}
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {resources.map((r) => (
+            <div key={`${r.node}-${r.vmid}`} className="rounded border border-neutral-800 bg-neutral-900 p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-neutral-100">{r.name || `#${r.vmid}`}</p>
+                  <p className="text-xs text-neutral-500">
+                    {r.type === "qemu" ? "VM" : "LXC"} #{r.vmid} — {r.node}
+                  </p>
+                </div>
+                <span
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                    r.status === "running" ? "bg-emerald-900/40 text-emerald-300" : "bg-neutral-800 text-neutral-400"
+                  }`}
+                >
+                  {r.status}
+                </span>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-400">
+                <span>{(r.maxmem / 1024 / 1024 / 1024).toFixed(1)} Go RAM</span>
+                <span>Uptime : {formatUptime(r.uptime)}</span>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {r.status !== "running" ? (
+                  <button
+                    onClick={() => runAction(r, "start")}
+                    disabled={pending === `${r.vmid}-start`}
+                    className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+                  >
+                    Démarrer
+                  </button>
+                ) : (
+                  <>
                     <button
-                      onClick={() => openSnapshots(r)}
+                      onClick={() => runAction(r, "shutdown")}
+                      disabled={pending === `${r.vmid}-shutdown`}
                       className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
                     >
-                      Snapshots
+                      Arrêter
                     </button>
                     <button
-                      onClick={() => openMigrate(r)}
+                      onClick={() => runAction(r, "reboot")}
+                      disabled={pending === `${r.vmid}-reboot`}
                       className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
                     >
-                      Migrer
+                      Redémarrer
                     </button>
-                    <button
-                      onClick={() => deleteVm(r)}
-                      disabled={pending === `${r.vmid}-delete`}
-                      className="rounded border border-red-900 px-2 py-0.5 text-xs text-red-300 hover:bg-red-950/40"
-                    >
-                      Supprimer
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </>
+                )}
+                <button
+                  onClick={() => openSnapshots(r)}
+                  className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+                >
+                  Snapshots
+                </button>
+                <button
+                  onClick={() => openMigrate(r)}
+                  className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+                >
+                  Migrer
+                </button>
+                <button
+                  onClick={() => deleteVm(r)}
+                  disabled={pending === `${r.vmid}-delete`}
+                  className="rounded border border-red-900 px-2 py-0.5 text-xs text-red-300 hover:bg-red-950/40"
+                >
+                  Supprimer
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

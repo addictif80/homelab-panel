@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ThemeToggle from "@/components/ThemeToggle";
 
 type PlanKey = "lifetime" | "monthly" | "annual";
@@ -62,6 +62,93 @@ const FEATURES = [
       <>
         <path d="M6 9a6 6 0 0112 0c0 4 1.5 5.5 2 6.5H4c.5-1 2-2.5 2-6.5z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
         <path d="M10 19a2 2 0 004 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </>
+    ),
+  },
+  {
+    title: "Terminal SSH intégré, dans le navigateur",
+    text: "Un vrai shell (machine, VM, LXC ou conteneur Docker) directement dans le panel, sans client SSH séparé — historique de commandes, redimensionnement automatique, élévation sudo gérée pour toi.",
+    icon: (
+      <>
+        <rect x="3.5" y="4.5" width="17" height="15" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M7 9.5l3 2.5-3 2.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M12.5 14.5h4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </>
+    ),
+  },
+  {
+    title: "Migration de VM et de conteneurs en un clic",
+    text: "Déplace une VM/LXC Proxmox ou un conteneur Docker (image, volumes, données) d'une machine à une autre — migration native si même cluster, export/import automatique sinon.",
+    icon: (
+      <>
+        <rect x="2.5" y="9" width="7" height="7" rx="1.2" stroke="currentColor" strokeWidth="1.6" />
+        <rect x="14.5" y="9" width="7" height="7" rx="1.2" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M9.5 12.5h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <path d="M12 10.5l2 2-2 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </>
+    ),
+  },
+  {
+    title: "Docker Compose et modèles d'applications",
+    text: "Déploie n'importe quel docker-compose.yml (stacks façon Portainer) ou pars d'un modèle prêt à l'emploi ; une pastille signale automatiquement les images qui ont une mise à jour disponible.",
+    icon: (
+      <>
+        <rect x="4" y="4.5" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="1.6" />
+        <rect x="13" y="4.5" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="1.6" />
+        <rect x="8.5" y="13.5" width="7" height="6" rx="1" stroke="currentColor" strokeWidth="1.6" />
+      </>
+    ),
+  },
+  {
+    title: "Santé matérielle en direct",
+    text: "Températures, état SMART des disques (avec détection automatique des contrôleurs RAID) et niveau de charge de l'onduleur, lus en direct par SSH — aucune sonde IPMI à configurer.",
+    icon: (
+      <>
+        <path d="M12 3v11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <circle cx="12" cy="17.5" r="3.2" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M12 3a1.6 1.6 0 013.2 0v9.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </>
+    ),
+  },
+  {
+    title: "Audit de ports passif",
+    text: "Détecte les ports sensibles exposés (bases de données, RDP, Docker distant...) sans jamais tenter la moindre authentification — aucun risque de déclencher ton propre fail2ban.",
+    icon: (
+      <>
+        <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.6" />
+        <circle cx="12" cy="12" r="3.2" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M12 4v2.4M12 17.6V20M4 12h2.4M17.6 12H20" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </>
+    ),
+  },
+  {
+    title: "Coffre de récupération hors-ligne",
+    text: "Exporte un instantané chiffré (AES-256) de toute la configuration du panel — inventaire, identifiants, plans de sauvegarde — à garder en lieu sûr, hors ligne, pour reconstruire après un sinistre.",
+    icon: (
+      <>
+        <rect x="5.5" y="10.5" width="13" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M8.5 10.5V7.5a3.5 3.5 0 017 0v3" stroke="currentColor" strokeWidth="1.6" />
+        <circle cx="12" cy="14.8" r="1.4" stroke="currentColor" strokeWidth="1.6" />
+      </>
+    ),
+  },
+  {
+    title: "Mode Lockdown en un clic",
+    text: "En cas de doute sur une intrusion, verrouille l'accès au panel depuis toutes les autres sessions actives d'un seul geste, sans jamais te déconnecter toi-même par erreur.",
+    icon: (
+      <>
+        <path d="M12 3l7 3.2v5.4c0 4.7-3 8-7 9.4-4-1.4-7-4.7-7-9.4V6.2L12 3z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+        <path d="M9.5 12l1.8 1.8L15 10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </>
+    ),
+  },
+  {
+    title: "Réseau, DNS et routeurs centralisés",
+    text: "Tailscale (ACL, routes), reverse proxy Nginx Proxy Manager, DNS multi-registrar (Cloudflare, OVH, Gandi, Namecheap) et gestion de routeurs (OpenWrt, pfSense, Freebox) au même endroit.",
+    icon: (
+      <>
+        <circle cx="12" cy="12" r="8.2" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M3.8 12h16.4M12 3.8c2.3 2.2 3.6 5.2 3.6 8.2s-1.3 6-3.6 8.2c-2.3-2.2-3.6-5.2-3.6-8.2S9.7 6 12 3.8z" stroke="currentColor" strokeWidth="1.6" />
       </>
     ),
   },
@@ -385,17 +472,7 @@ export default function StorePage() {
           <span className="font-mono text-xs uppercase tracking-wider text-blue-400">Fonctionnalités</span>
           <h2 className="mt-3 text-3xl font-semibold">Ce qui fait la différence</h2>
         </div>
-        <div className="grid gap-px overflow-hidden rounded-xl border border-neutral-800 bg-neutral-800 sm:grid-cols-2">
-          {FEATURES.map((f) => (
-            <div key={f.title} className="bg-neutral-950 p-8">
-              <div className="mb-5 flex h-10 w-10 items-center justify-center rounded-lg border border-neutral-800 text-blue-400">
-                <svg width="19" height="19" viewBox="0 0 24 24" fill="none">{f.icon}</svg>
-              </div>
-              <h3 className="text-base font-semibold">{f.title}</h3>
-              <p className="mt-2.5 text-sm leading-relaxed text-neutral-400">{f.text}</p>
-            </div>
-          ))}
-        </div>
+        <FeatureSlider features={FEATURES} />
 
         {/* Comparison table */}
         <div className="mt-20 overflow-x-auto rounded-xl border border-neutral-800">
@@ -618,6 +695,89 @@ export default function StorePage() {
           </div>
         </div>
       </footer>
+    </div>
+  );
+}
+
+function FeatureSlider({ features }: { features: typeof FEATURES }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [index, setIndex] = useState(0);
+  const [paused, setPaused] = useState(false);
+
+  function scrollToIndex(i: number) {
+    const track = trackRef.current;
+    const wrapped = (i + features.length) % features.length;
+    const card = track?.children[wrapped] as HTMLElement | undefined;
+    if (track && card) track.scrollTo({ left: card.offsetLeft - track.offsetLeft, behavior: "smooth" });
+    setIndex(wrapped);
+  }
+
+  useEffect(() => {
+    if (paused) return;
+    const id = setInterval(() => {
+      setIndex((i) => {
+        const next = (i + 1) % features.length;
+        scrollToIndex(next);
+        return next;
+      });
+    }, 6000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paused, features.length]);
+
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+    >
+      <div
+        ref={trackRef}
+        className="flex snap-x snap-mandatory gap-5 overflow-x-auto scroll-smooth pb-2"
+        style={{ scrollbarWidth: "none" }}
+      >
+        {features.map((f) => (
+          <div
+            key={f.title}
+            className="w-[82%] shrink-0 snap-center rounded-xl border border-neutral-800 bg-neutral-950 p-8 sm:w-[46%] lg:w-[31.5%]"
+          >
+            <div className="mb-5 flex h-10 w-10 items-center justify-center rounded-lg border border-neutral-800 text-blue-400">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+                {f.icon}
+              </svg>
+            </div>
+            <h3 className="text-base font-semibold">{f.title}</h3>
+            <p className="mt-2.5 text-sm leading-relaxed text-neutral-400">{f.text}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-5 flex items-center justify-center gap-4">
+        <button
+          onClick={() => scrollToIndex(index - 1)}
+          aria-label="Fonctionnalité précédente"
+          className="flex h-8 w-8 items-center justify-center rounded-full border border-neutral-800 text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100"
+        >
+          ‹
+        </button>
+        <div className="flex gap-1.5">
+          {features.map((f, i) => (
+            <button
+              key={f.title}
+              onClick={() => scrollToIndex(i)}
+              aria-label={`Aller à la diapositive ${i + 1}`}
+              className={`h-1.5 w-1.5 rounded-full transition-colors ${i === index ? "bg-blue-400" : "bg-neutral-700 hover:bg-neutral-600"}`}
+            />
+          ))}
+        </div>
+        <button
+          onClick={() => scrollToIndex(index + 1)}
+          aria-label="Fonctionnalité suivante"
+          className="flex h-8 w-8 items-center justify-center rounded-full border border-neutral-800 text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100"
+        >
+          ›
+        </button>
+      </div>
     </div>
   );
 }

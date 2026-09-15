@@ -98,11 +98,15 @@ export type ProxmoxResource = {
   mem: number;
   maxmem: number;
   uptime: number;
+  template?: number;
 };
 
+/** `/cluster/resources?type=vm` also returns VM/CT templates (`template: 1`) — these are neither
+ * a running nor a stopped-but-real VM/LXC, just a clonable base image, so they're filtered out
+ * here rather than shown in the fleet view as if they were actual machines. */
 export async function listResources(hostId: number): Promise<ProxmoxResource[]> {
-  const data = await proxmoxRequest(hostId, "/cluster/resources?type=vm");
-  return data as ProxmoxResource[];
+  const data = (await proxmoxRequest(hostId, "/cluster/resources?type=vm")) as ProxmoxResource[];
+  return data.filter((r) => !r.template);
 }
 
 /** Any host in the DB with a Proxmox API token configured — used to reach the cluster API when
