@@ -75,62 +75,89 @@ function handleSshSession(ws: WebSocket, hostId: number, username: string, conta
   const conn = new SshClient();
   const logTarget = containerId ? `${hostId}/container:${containerId}` : String(hostId);
 
-  const wireChannel = (stream: import("ssh2").ClientChannel) => {
-    stream.on("data", (data: Buffer) => send({ type: "data", data: data.toString("utf8") }));
-    stream.stderr.on("data", (data: Buffer) => send({ type: "data", data: data.toString("utf8") }));
-    stream.on("close", () => {
+  // The client sends its initial size (and any keystrokes) as soon as the WebSocket itself opens
+  // — which can easily race ahead of the SSH handshake + shell allocation, since that involves a
+  // real TCP connection, key exchange and auth to the target host. Attaching the message listener
+  // only once the shell/exec stream exists (as this used to) silently dropped anything sent
+  // during that window: the remote PTY stayed at ssh2's default size (80x24) until the *next*
+  // resize event (a window resize, if any), so a readline redraw (e.g. recalling history with the
+  // up arrow) computed its cursor movement for a width that didn't match what xterm.js was
+  // actually rendering — the exact "input line redraws over an earlier command" symptom. Buffering
+  // here instead means the very first `conn.shell()`/`conn.exec()` call below can request the PTY
+  // at the *correct* size from the start, and nothing typed before the shell is ready gets lost.
+  let stream: import("ssh2").ClientChannel | null = null;
+  let pendingResize: { cols: number; rows: number } | null = null;
+  const pendingInput: string[] = [];
+
+  ws.on("message", (raw) => {
+    let msg: ClientMessage;
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch {
+      return;
+    }
+    if (msg.type === "input") {
+      if (stream) stream.write(msg.data);
+      else pendingInput.push(msg.data);
+    } else if (msg.type === "resize") {
+      pendingResize = { cols: msg.cols, rows: msg.rows };
+      if (stream) stream.setWindow(msg.rows, msg.cols, 0, 0);
+    }
+  });
+
+  ws.on("close", () => {
+    stream?.close();
+    conn.end();
+    logAudit("ssh.disconnected", logTarget, username);
+  });
+
+  const wireChannel = (newStream: import("ssh2").ClientChannel) => {
+    stream = newStream;
+    if (pendingResize) newStream.setWindow(pendingResize.rows, pendingResize.cols, 0, 0);
+    for (const data of pendingInput.splice(0)) newStream.write(data);
+
+    newStream.on("data", (data: Buffer) => send({ type: "data", data: data.toString("utf8") }));
+    newStream.stderr.on("data", (data: Buffer) => send({ type: "data", data: data.toString("utf8") }));
+    newStream.on("close", () => {
       send({ type: "closed" });
       conn.end();
-    });
-
-    ws.on("message", (raw) => {
-      let msg: ClientMessage;
-      try {
-        msg = JSON.parse(raw.toString());
-      } catch {
-        return;
-      }
-      if (msg.type === "input") stream.write(msg.data);
-      else if (msg.type === "resize") stream.setWindow(msg.rows, msg.cols, 0, 0);
-    });
-
-    ws.on("close", () => {
-      stream.close();
-      conn.end();
-      logAudit("ssh.disconnected", logTarget, username);
     });
   };
 
   conn.on("ready", () => {
     logAudit("ssh.connected", logTarget, username);
+    const ptyOptions = {
+      term: "xterm-256color",
+      ...(pendingResize ? { cols: pendingResize.cols, rows: pendingResize.rows } : {}),
+    };
 
     if (dockerExec) {
-      conn.exec(dockerExec.command, { pty: { term: "xterm-256color" } }, (err, stream) => {
+      conn.exec(dockerExec.command, { pty: ptyOptions }, (err, newStream) => {
         if (err) {
           send({ type: "error", message: err.message });
           conn.end();
           return;
         }
-        if (dockerExec!.stdinPassword) stream.write(`${dockerExec!.stdinPassword}\n`);
-        wireChannel(stream);
+        if (dockerExec!.stdinPassword) newStream.write(`${dockerExec!.stdinPassword}\n`);
+        wireChannel(newStream);
       });
       return;
     }
 
-    conn.shell({ term: "xterm-256color" }, (err, stream) => {
+    conn.shell(ptyOptions, (err, newStream) => {
       if (err) {
         send({ type: "error", message: err.message });
         conn.end();
         return;
       }
-      wireChannel(stream);
+      wireChannel(newStream);
 
       // Host needs sudo for anything privileged: drop the user straight into a root shell
       // instead of making them type `sudo -i` and a password we already hold in the vault.
       const sudoPassword = getAutoElevatePassword(hostId);
       if (sudoPassword) {
-        stream.write("sudo -i\n");
-        stream.write(`${sudoPassword}\n`);
+        newStream.write("sudo -i\n");
+        newStream.write(`${sudoPassword}\n`);
       }
     });
   });

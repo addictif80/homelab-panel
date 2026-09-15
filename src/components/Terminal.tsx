@@ -79,8 +79,17 @@ export default function Terminal({
     };
     window.addEventListener("resize", handleResize);
 
+    // A plain window `resize` listener misses layout changes that don't come from the browser
+    // window itself — a flex/grid container settling into its final size, a sidebar collapsing —
+    // any of which leaves fitAddon's last measurement (and the size sent to the remote PTY) stale
+    // without ever firing a window resize event. A ResizeObserver on the terminal's own container
+    // catches those too.
+    const resizeObserver = new ResizeObserver(() => handleResize());
+    resizeObserver.observe(containerRef.current);
+
     return () => {
       window.removeEventListener("resize", handleResize);
+      resizeObserver.disconnect();
       dataDisposable.dispose();
       ws.close();
       term.dispose();
