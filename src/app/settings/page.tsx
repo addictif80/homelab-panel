@@ -11,6 +11,7 @@ import PortAuditPanel from "@/components/PortAuditPanel";
 import RecoveryVaultPanel from "@/components/RecoveryVaultPanel";
 import LockdownPanel from "@/components/LockdownPanel";
 import DirectorySettingsPanel from "@/components/DirectorySettingsPanel";
+import LicensePanel from "@/components/LicensePanel";
 
 export default function SettingsPage() {
   return (
@@ -25,6 +26,7 @@ export default function SettingsPage() {
       </div>
 
       <div className="space-y-3">
+        <LicensePanel />
         <LockdownPanel />
         <DetectionThresholdsPanel />
         <PortAuditPanel />

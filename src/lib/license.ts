@@ -165,6 +165,9 @@ function getVerifiedCertificatePayload(row: LicenseRow): CertificatePayload | nu
 
 export type LicenseStatus = {
   activated: boolean;
+  /** The seller's own deployment — never trial-limited, has no activation key of its own. The UI
+   * uses this to show something other than a broken-looking "infinite trial". */
+  isSellerInstance?: boolean;
   /** Present only once a valid certificate has been read — tells the UI whether an `expired`
    * result means "trial ran out" (no licenseType) or "subscription lapsed" (needs a different
    * message: re-typing the same key won't help, it's already consumed). */
@@ -172,11 +175,18 @@ export type LicenseStatus = {
   trialDays: number;
   daysRemaining: number;
   expired: boolean;
+  /** Below: only ever set once activated — the one place a customer can see what they activated,
+   * since the trial banner that showed activation state unmounts entirely once activated (it's a
+   * nag banner, not a status display). */
+  activationKey?: string;
+  activatedAt?: string;
+  /** Subscription only: the paid-through date as of the last successful activation/refresh. */
+  validUntil?: string | null;
 };
 
 export function getLicenseStatus(): LicenseStatus {
   if (isSellerInstance()) {
-    return { activated: true, trialDays: 0, daysRemaining: Infinity, expired: false };
+    return { activated: true, isSellerInstance: true, trialDays: 0, daysRemaining: Infinity, expired: false };
   }
 
   const row = getLicenseRow();
@@ -186,13 +196,22 @@ export function getLicenseStatus(): LicenseStatus {
   if (row.status === "activated") {
     const payload = getVerifiedCertificatePayload(row);
     if (payload) {
+      const base = { activationKey: row.activation_key ?? undefined, activatedAt: payload.activatedAt };
       if (payload.licenseType === "subscription" && payload.validUntil) {
         const graceMs = (payload.graceDays ?? 0) * 24 * 60 * 60 * 1000;
         const cutoffMs = new Date(payload.validUntil).getTime() + graceMs;
         const isExpired = effectiveNowMs > cutoffMs;
-        return { activated: !isExpired, licenseType: "subscription", trialDays, daysRemaining: Infinity, expired: isExpired };
+        return {
+          activated: !isExpired,
+          licenseType: "subscription",
+          trialDays,
+          daysRemaining: Infinity,
+          expired: isExpired,
+          validUntil: payload.validUntil,
+          ...base,
+        };
       }
-      return { activated: true, licenseType: "lifetime", trialDays, daysRemaining: Infinity, expired: false };
+      return { activated: true, licenseType: "lifetime", trialDays, daysRemaining: Infinity, expired: false, ...base };
     }
   }
 
