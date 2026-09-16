@@ -16,14 +16,36 @@ type ProxyHost = {
 
 type FailoverConfig = {
   proxyHostId: number;
+  mode: "server" | "page";
   backupScheme: "http" | "https";
   backupHost: string;
   backupPort: number;
+  maintenanceHtml: string | null;
   enabled: boolean;
   lastStatus: "unknown" | "primary" | "failover" | "error";
   lastCheckedAt: string | null;
   lastError: string | null;
 };
+
+const DEFAULT_MAINTENANCE_HTML = `<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Service temporairement indisponible</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0a0a0a; color: #e5e5e5; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; }
+  div { max-width: 32rem; padding: 2rem; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+  p { color: #a3a3a3; }
+</style>
+</head>
+<body>
+<div>
+  <h1>Service momentanément inaccessible</h1>
+  <p>Nous travaillons à le rétablir au plus vite. Merci de réessayer dans quelques minutes.</p>
+</div>
+</body>
+</html>`;
 
 type Certificate = {
   id: number;
@@ -92,7 +114,13 @@ export default function ProxyPage() {
   const [detailSaving, setDetailSaving] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [failover, setFailover] = useState<FailoverConfig | null>(null);
-  const [failoverForm, setFailoverForm] = useState({ scheme: "http" as "http" | "https", host: "", port: 80 });
+  const [failoverForm, setFailoverForm] = useState({
+    mode: "server" as "server" | "page",
+    scheme: "http" as "http" | "https",
+    host: "",
+    port: 80,
+    html: DEFAULT_MAINTENANCE_HTML,
+  });
   const [failoverBusy, setFailoverBusy] = useState(false);
 
   function loadConfig() {
@@ -231,12 +259,14 @@ export default function ProxyPage() {
       setFailover(failoverData.failover);
       if (failoverData.failover) {
         setFailoverForm({
+          mode: failoverData.failover.mode,
           scheme: failoverData.failover.backupScheme,
           host: failoverData.failover.backupHost,
           port: failoverData.failover.backupPort,
+          html: failoverData.failover.maintenanceHtml || DEFAULT_MAINTENANCE_HTML,
         });
       } else {
-        setFailoverForm({ scheme: "http", host: "", port: 80 });
+        setFailoverForm({ mode: "server", scheme: "http", host: "", port: 80, html: DEFAULT_MAINTENANCE_HTML });
       }
     } catch {
       // keep the list's own (slightly less fresh) copy as a fallback
@@ -603,7 +633,7 @@ export default function ProxyPage() {
 
             <div className="mt-6 space-y-3 border-t border-neutral-800 pt-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-neutral-100">Failover vers un serveur de secours</h3>
+                <h3 className="text-sm font-semibold text-neutral-100">Failover</h3>
                 {failover && (
                   <span
                     className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
@@ -617,9 +647,9 @@ export default function ProxyPage() {
                     }`}
                   >
                     {failover.lastStatus === "primary"
-                      ? "Primaire actif"
+                      ? "Inactif (primaire OK)"
                       : failover.lastStatus === "failover"
-                        ? "Basculé sur le secours"
+                        ? `Actif vers ${failover.mode === "page" ? "la page de maintenance" : `${failover.backupScheme}://${failover.backupHost}:${failover.backupPort}`}`
                         : failover.lastStatus === "error"
                           ? "Primaire et secours injoignables"
                           : "Statut inconnu"}
@@ -628,45 +658,95 @@ export default function ProxyPage() {
               </div>
               <p className="text-xs text-neutral-500">
                 Ajoute un bloc nginx dans la config avancée : si la cible principale répond en erreur (502/503/504),
-                nginx bascule automatiquement et immédiatement vers le serveur de secours, sans intervention du panel.
-                Une vérification périodique (ci-dessus) affiche juste l&apos;état actuel.
+                nginx bascule automatiquement et immédiatement, sans intervention du panel. Une vérification
+                périodique (badge ci-dessus) affiche juste l&apos;état actuel.
                 {failover?.lastCheckedAt && ` Dernière vérification : ${new Date(`${failover.lastCheckedAt}Z`).toLocaleString("fr-FR")}.`}
               </p>
-              <div className="grid grid-cols-3 gap-3">
-                <label className="block">
-                  <span className="mb-1 block text-xs text-neutral-400">Protocole</span>
-                  <select
-                    value={failoverForm.scheme}
-                    onChange={(e) => setFailoverForm({ ...failoverForm, scheme: e.target.value as "http" | "https" })}
-                    className={INPUT_CLASS}
-                  >
-                    <option value="http">http</option>
-                    <option value="https">https</option>
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs text-neutral-400">Hôte de secours</span>
-                  <input
-                    value={failoverForm.host}
-                    onChange={(e) => setFailoverForm({ ...failoverForm, host: e.target.value })}
-                    placeholder="IP ou nom"
-                    className={INPUT_CLASS}
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs text-neutral-400">Port de secours</span>
-                  <input
-                    type="number"
-                    value={failoverForm.port}
-                    onChange={(e) => setFailoverForm({ ...failoverForm, port: Number(e.target.value) })}
-                    className={INPUT_CLASS}
-                  />
-                </label>
+
+              <div className="flex gap-1.5 text-xs">
+                <button
+                  onClick={() => setFailoverForm({ ...failoverForm, mode: "server" })}
+                  className={`rounded border px-2 py-1 ${failoverForm.mode === "server" ? "border-blue-700 bg-blue-900/40 text-blue-200" : "border-neutral-700 text-neutral-400 hover:bg-neutral-800"}`}
+                >
+                  Serveur de secours
+                </button>
+                <button
+                  onClick={() => setFailoverForm({ ...failoverForm, mode: "page" })}
+                  className={`rounded border px-2 py-1 ${failoverForm.mode === "page" ? "border-blue-700 bg-blue-900/40 text-blue-200" : "border-neutral-700 text-neutral-400 hover:bg-neutral-800"}`}
+                >
+                  Page de maintenance personnalisée
+                </button>
               </div>
+
+              {failoverForm.mode === "server" ? (
+                <div className="grid grid-cols-3 gap-3">
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-neutral-400">Protocole</span>
+                    <select
+                      value={failoverForm.scheme}
+                      onChange={(e) => setFailoverForm({ ...failoverForm, scheme: e.target.value as "http" | "https" })}
+                      className={INPUT_CLASS}
+                    >
+                      <option value="http">http</option>
+                      <option value="https">https</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-neutral-400">Hôte de secours</span>
+                    <input
+                      value={failoverForm.host}
+                      onChange={(e) => setFailoverForm({ ...failoverForm, host: e.target.value })}
+                      placeholder="IP ou nom"
+                      className={INPUT_CLASS}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-neutral-400">Port de secours</span>
+                    <input
+                      type="number"
+                      value={failoverForm.port}
+                      onChange={(e) => setFailoverForm({ ...failoverForm, port: Number(e.target.value) })}
+                      className={INPUT_CLASS}
+                    />
+                  </label>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-neutral-400">
+                      Page HTML affichée aux visiteurs quand le service principal est indisponible (ex : une page
+                      &quot;mailcow.html&quot; personnalisée pour cette instance)
+                    </span>
+                    <label className="cursor-pointer rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800">
+                      Importer un fichier .html
+                      <input
+                        type="file"
+                        accept=".html,text/html"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = "";
+                          if (!file) return;
+                          const text = await file.text();
+                          setFailoverForm((f) => ({ ...f, html: text }));
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <textarea
+                    value={failoverForm.html}
+                    onChange={(e) => setFailoverForm({ ...failoverForm, html: e.target.value })}
+                    rows={10}
+                    spellCheck={false}
+                    className={`${INPUT_CLASS} font-mono text-xs`}
+                  />
+                </div>
+              )}
+
               <div className="flex gap-2">
                 <button
                   onClick={saveFailover}
-                  disabled={failoverBusy || !failoverForm.host.trim()}
+                  disabled={failoverBusy || (failoverForm.mode === "server" ? !failoverForm.host.trim() : !failoverForm.html.trim())}
                   className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60 disabled:opacity-50"
                 >
                   {failoverBusy ? "..." : failover ? "Mettre à jour" : "Activer le failover"}

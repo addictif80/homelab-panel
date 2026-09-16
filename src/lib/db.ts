@@ -621,6 +621,15 @@ function migrate(db: Database.Database) {
     db.exec(`ALTER TABLE sales ADD COLUMN notes TEXT`);
   }
 
+  const proxyFailoverColumns = db.prepare(`PRAGMA table_info(proxy_failovers)`).all() as { name: string }[];
+  if (!proxyFailoverColumns.some((c) => c.name === "mode")) {
+    // 'server' (proxy to a real backup target, the original behavior) vs 'page' (serve an inline
+    // static maintenance page instead — see lib/npmFailover.ts) — backup_host/backup_port stay
+    // NOT NULL in the schema, so 'page' mode just leaves them as empty-string/0 placeholders.
+    db.exec(`ALTER TABLE proxy_failovers ADD COLUMN mode TEXT NOT NULL DEFAULT 'server'`);
+    db.exec(`ALTER TABLE proxy_failovers ADD COLUMN maintenance_html TEXT`);
+  }
+
   ensureVaultKdfSalt(db);
 }
 
