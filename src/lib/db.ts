@@ -629,6 +629,12 @@ function migrate(db: Database.Database) {
     db.exec(`ALTER TABLE proxy_failovers ADD COLUMN mode TEXT NOT NULL DEFAULT 'server'`);
     db.exec(`ALTER TABLE proxy_failovers ADD COLUMN maintenance_html TEXT`);
   }
+  if (!proxyFailoverColumns.some((c) => c.name === "backup_path")) {
+    // 'server' mode only — lets the backup target be a specific URL (e.g. /file.html, an
+    // instance-specific "down for maintenance" page hosted on the backup itself) instead of always
+    // the site root.
+    db.exec(`ALTER TABLE proxy_failovers ADD COLUMN backup_path TEXT NOT NULL DEFAULT '/'`);
+  }
 
   ensureVaultKdfSalt(db);
 }

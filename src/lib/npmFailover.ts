@@ -29,8 +29,13 @@ const MARKER_END = "# END homelab-panel-failover";
 const LOCATION_NAME = "@homelab_failover_backup";
 
 export type FailoverBackup =
-  | { mode: "server"; scheme: "http" | "https"; host: string; port: number }
+  | { mode: "server"; scheme: "http" | "https"; host: string; port: number; path?: string }
   | { mode: "page"; html: string };
+
+function normalizePath(path: string | undefined): string {
+  const trimmed = (path ?? "/").trim() || "/";
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
 
 /** Escapes HTML for safe embedding inside a single-quoted nginx string literal: backslashes and
  * single quotes need escaping so they don't break out of the quote, and a literal `$` needs
@@ -62,7 +67,7 @@ function buildSnippet(backup: FailoverBackup): string {
     `error_page 502 503 504 = ${LOCATION_NAME};`,
     `location ${LOCATION_NAME} {`,
     "  internal;",
-    `  proxy_pass ${backup.scheme}://${backup.host}:${backup.port};`,
+    `  proxy_pass ${backup.scheme}://${backup.host}:${backup.port}${normalizePath(backup.path)};`,
     "  proxy_set_header Host $host;",
     "  proxy_set_header X-Real-IP $remote_addr;",
     "  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
@@ -94,6 +99,7 @@ export type FailoverConfig = {
   backupScheme: "http" | "https";
   backupHost: string;
   backupPort: number;
+  backupPath: string;
   maintenanceHtml: string | null;
   enabled: boolean;
   lastStatus: "unknown" | "primary" | "failover" | "error";
@@ -107,6 +113,7 @@ type FailoverRow = {
   backup_scheme: "http" | "https";
   backup_host: string;
   backup_port: number;
+  backup_path: string;
   maintenance_html: string | null;
   enabled: number;
   last_status: FailoverConfig["lastStatus"];
@@ -121,6 +128,7 @@ function rowToConfig(row: FailoverRow): FailoverConfig {
     backupScheme: row.backup_scheme,
     backupHost: row.backup_host,
     backupPort: row.backup_port,
+    backupPath: row.backup_path,
     maintenanceHtml: row.maintenance_html,
     enabled: row.enabled === 1,
     lastStatus: row.last_status,
@@ -160,13 +168,14 @@ export async function applyFailover(proxyHostId: number, backup: FailoverBackup)
 
   getDb()
     .prepare(
-      `INSERT INTO proxy_failovers (proxy_host_id, mode, backup_scheme, backup_host, backup_port, maintenance_html, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, 1)
+      `INSERT INTO proxy_failovers (proxy_host_id, mode, backup_scheme, backup_host, backup_port, backup_path, maintenance_html, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1)
        ON CONFLICT(proxy_host_id) DO UPDATE SET
          mode = excluded.mode,
          backup_scheme = excluded.backup_scheme,
          backup_host = excluded.backup_host,
          backup_port = excluded.backup_port,
+         backup_path = excluded.backup_path,
          maintenance_html = excluded.maintenance_html,
          enabled = 1`
     )
@@ -176,6 +185,7 @@ export async function applyFailover(proxyHostId: number, backup: FailoverBackup)
       backup.mode === "server" ? backup.scheme : "http",
       backup.mode === "server" ? backup.host : "",
       backup.mode === "server" ? backup.port : 0,
+      backup.mode === "server" ? normalizePath(backup.path) : "/",
       backup.mode === "page" ? backup.html : null
     );
 }
@@ -188,7 +198,7 @@ export async function removeFailover(proxyHostId: number): Promise<void> {
 
 const HEALTH_CHECK_TIMEOUT_MS = 5000;
 
-async function probe(scheme: string, host: string, port: number): Promise<boolean> {
+async function probe(scheme: string, host: string, port: number, path = "/"): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
@@ -196,7 +206,7 @@ async function probe(scheme: string, host: string, port: number): Promise<boolea
       // Any HTTP response at all (even a 4xx/5xx from the app itself) means the server is up and
       // answering — only a connection failure/timeout counts as "down" for failover purposes,
       // since that's the same condition nginx's own error_page fallback reacts to.
-      await fetch(`${scheme}://${host}:${port}/`, { signal: controller.signal, redirect: "manual" });
+      await fetch(`${scheme}://${host}:${port}${path}`, { signal: controller.signal, redirect: "manual" });
       return true;
     } finally {
       clearTimeout(timer);
@@ -221,7 +231,7 @@ export async function checkAllFailovers(): Promise<void> {
           ? "primary"
           : config.mode === "page"
             ? "failover"
-            : (await probe(config.backupScheme, config.backupHost, config.backupPort))
+            : (await probe(config.backupScheme, config.backupHost, config.backupPort, config.backupPath))
               ? "failover"
               : "error";
         getDb()

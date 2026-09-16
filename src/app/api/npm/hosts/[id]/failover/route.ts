@@ -14,6 +14,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     scheme?: "http" | "https";
     host?: string;
     port?: number;
+    path?: string;
     html?: string;
   };
 
@@ -25,12 +26,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!body.scheme || !body.host?.trim() || !body.port) {
       return NextResponse.json({ error: "Schéma, hôte et port du serveur de secours requis." }, { status: 400 });
     }
-    backup = { mode: "server", scheme: body.scheme, host: body.host.trim(), port: body.port };
+    backup = { mode: "server", scheme: body.scheme, host: body.host.trim(), port: body.port, path: body.path };
   }
 
   try {
     await applyFailover(Number(id), backup);
-    logAudit("npm.failover_configured", id, backup.mode === "page" ? "page de maintenance" : `${backup.scheme}://${backup.host}:${backup.port}`);
+    logAudit(
+      "npm.failover_configured",
+      id,
+      backup.mode === "page" ? "page de maintenance" : `${backup.scheme}://${backup.host}:${backup.port}${backup.path ?? ""}`
+    );
     return NextResponse.json({ failover: getFailoverConfig(Number(id)) });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Erreur." }, { status: 502 });

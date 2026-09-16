@@ -20,6 +20,7 @@ type FailoverConfig = {
   backupScheme: "http" | "https";
   backupHost: string;
   backupPort: number;
+  backupPath: string;
   maintenanceHtml: string | null;
   enabled: boolean;
   lastStatus: "unknown" | "primary" | "failover" | "error";
@@ -119,6 +120,7 @@ export default function ProxyPage() {
     scheme: "http" as "http" | "https",
     host: "",
     port: 80,
+    path: "/",
     html: DEFAULT_MAINTENANCE_HTML,
   });
   const [failoverBusy, setFailoverBusy] = useState(false);
@@ -263,10 +265,11 @@ export default function ProxyPage() {
           scheme: failoverData.failover.backupScheme,
           host: failoverData.failover.backupHost,
           port: failoverData.failover.backupPort,
+          path: failoverData.failover.backupPath || "/",
           html: failoverData.failover.maintenanceHtml || DEFAULT_MAINTENANCE_HTML,
         });
       } else {
-        setFailoverForm({ mode: "server", scheme: "http", host: "", port: 80, html: DEFAULT_MAINTENANCE_HTML });
+        setFailoverForm({ mode: "server", scheme: "http", host: "", port: 80, path: "/", html: DEFAULT_MAINTENANCE_HTML });
       }
     } catch {
       // keep the list's own (slightly less fresh) copy as a fallback
@@ -649,7 +652,7 @@ export default function ProxyPage() {
                     {failover.lastStatus === "primary"
                       ? "Inactif (primaire OK)"
                       : failover.lastStatus === "failover"
-                        ? `Actif vers ${failover.mode === "page" ? "la page de maintenance" : `${failover.backupScheme}://${failover.backupHost}:${failover.backupPort}`}`
+                        ? `Actif vers ${failover.mode === "page" ? "la page de maintenance" : `${failover.backupScheme}://${failover.backupHost}:${failover.backupPort}${failover.backupPath}`}`
                         : failover.lastStatus === "error"
                           ? "Primaire et secours injoignables"
                           : "Statut inconnu"}
@@ -679,7 +682,7 @@ export default function ProxyPage() {
               </div>
 
               {failoverForm.mode === "server" ? (
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-4 gap-3">
                   <label className="block">
                     <span className="mb-1 block text-xs text-neutral-400">Protocole</span>
                     <select
@@ -706,6 +709,15 @@ export default function ProxyPage() {
                       type="number"
                       value={failoverForm.port}
                       onChange={(e) => setFailoverForm({ ...failoverForm, port: Number(e.target.value) })}
+                      className={INPUT_CLASS}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-neutral-400">Chemin (optionnel)</span>
+                    <input
+                      value={failoverForm.path}
+                      onChange={(e) => setFailoverForm({ ...failoverForm, path: e.target.value })}
+                      placeholder="/file.html"
                       className={INPUT_CLASS}
                     />
                   </label>
