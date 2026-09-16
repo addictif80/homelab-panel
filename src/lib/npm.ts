@@ -169,6 +169,36 @@ export async function setProxyHostEnabled(id: number, enabled: boolean): Promise
   await npmFetch(`/api/nginx/proxy-hosts/${id}/${enabled ? "enable" : "disable"}`, { method: "POST" });
 }
 
+export type Certificate = {
+  id: number;
+  niceName: string;
+  domainNames: string[];
+  provider: "letsencrypt" | "other";
+  expiresOn: string | null;
+};
+
+type RawCertificate = {
+  id: number;
+  nice_name: string;
+  domain_names: string[];
+  provider: "letsencrypt" | "other";
+  expires_on: string | null;
+};
+
+/** Every certificate NPM knows about — used to populate the certificate picker when
+ * creating/editing a proxy host, same list NPM's own UI offers (Let's Encrypt ones it requested
+ * itself, plus any custom/uploaded certificate). */
+export async function listCertificates(): Promise<Certificate[]> {
+  const data = (await npmFetch("/api/nginx/certificates")) as RawCertificate[];
+  return data.map((c) => ({
+    id: c.id,
+    niceName: c.nice_name,
+    domainNames: c.domain_names,
+    provider: c.provider,
+    expiresOn: c.expires_on,
+  }));
+}
+
 /** Triggers NPM's own Let's Encrypt renewal for a certificate it manages — a no-op if the
  * certificate isn't due yet, since NPM/certbot only actually renews within ~30 days of expiry. */
 export async function renewCertificate(certificateId: number): Promise<void> {

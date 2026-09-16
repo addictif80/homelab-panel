@@ -25,9 +25,51 @@ type FailoverConfig = {
   lastError: string | null;
 };
 
+type Certificate = {
+  id: number;
+  niceName: string;
+  domainNames: string[];
+  provider: "letsencrypt" | "other";
+  expiresOn: string | null;
+};
+
 const INPUT_CLASS = "w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100";
 
-const EMPTY_FORM = { domainNames: "", forwardScheme: "http" as "http" | "https", forwardHost: "", forwardPort: 80, sslForced: false };
+const EMPTY_FORM = {
+  domainNames: "",
+  forwardScheme: "http" as "http" | "https",
+  forwardHost: "",
+  forwardPort: 80,
+  sslForced: false,
+  certificateId: null as number | null,
+};
+
+function CertificateSelect({
+  value,
+  onChange,
+  certificates,
+}: {
+  value: number | null;
+  onChange: (id: number | null) => void;
+  certificates: Certificate[];
+}) {
+  return (
+    <select
+      value={value ?? ""}
+      onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
+      className={INPUT_CLASS}
+    >
+      <option value="">Aucun (pas de HTTPS, ou nouveau certificat via NPM)</option>
+      {certificates.map((c) => (
+        <option key={c.id} value={c.id}>
+          {c.niceName || c.domainNames.join(", ")}
+          {c.provider === "letsencrypt" ? " (Let's Encrypt)" : " (personnalisé)"}
+          {c.expiresOn ? ` — expire le ${new Date(c.expiresOn).toLocaleDateString("fr-FR")}` : ""}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 export default function ProxyPage() {
   const [configured, setConfigured] = useState<boolean | null>(null);
@@ -38,6 +80,7 @@ export default function ProxyPage() {
   const [hasPassword, setHasPassword] = useState(false);
 
   const [hosts, setHosts] = useState<ProxyHost[] | null>(null);
+  const [certificates, setCertificates] = useState<Certificate[]>([]);
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -76,12 +119,22 @@ export default function ProxyPage() {
       .catch((err) => setError(err instanceof Error ? err.message : "Erreur."));
   }
 
+  function loadCertificates() {
+    fetch("/api/npm/certificates")
+      .then((r) => r.json())
+      .then((d) => setCertificates(d.certificates ?? []))
+      .catch(() => {});
+  }
+
   useEffect(() => {
     loadConfig();
   }, []);
 
   useEffect(() => {
-    if (configured) loadHosts();
+    if (configured) {
+      loadHosts();
+      loadCertificates();
+    }
   }, [configured]);
 
   async function saveConfig() {
@@ -113,6 +166,7 @@ export default function ProxyPage() {
           forwardHost: form.forwardHost,
           forwardPort: Number(form.forwardPort),
           sslForced: form.sslForced,
+          certificateId: form.certificateId,
         }),
       });
       const data = await res.json();
@@ -151,6 +205,7 @@ export default function ProxyPage() {
       forwardHost: host.forwardHost,
       forwardPort: host.forwardPort,
       sslForced: host.sslForced,
+      certificateId: host.certificateId,
     });
     setDetailAdvanced(host.advancedConfig);
     setFailover(null);
@@ -168,6 +223,7 @@ export default function ProxyPage() {
           forwardHost: freshData.host.forwardHost,
           forwardPort: freshData.host.forwardPort,
           sslForced: freshData.host.sslForced,
+          certificateId: freshData.host.certificateId,
         });
         setDetailAdvanced(freshData.host.advancedConfig);
       }
@@ -201,7 +257,7 @@ export default function ProxyPage() {
           forwardHost: detailForm.forwardHost,
           forwardPort: Number(detailForm.forwardPort),
           sslForced: detailForm.sslForced,
-          certificateId: detailHost.certificateId,
+          certificateId: detailForm.certificateId,
           advancedConfig: detailAdvanced,
         }),
       });
@@ -363,6 +419,14 @@ export default function ProxyPage() {
                 <input type="checkbox" checked={form.sslForced} onChange={(e) => setForm({ ...form, sslForced: e.target.checked })} />
                 Forcer HTTPS
               </label>
+              <label className="col-span-2 block">
+                <span className="mb-1 block text-xs text-neutral-400">Certificat SSL</span>
+                <CertificateSelect
+                  value={form.certificateId}
+                  onChange={(id) => setForm({ ...form, certificateId: id })}
+                  certificates={certificates}
+                />
+              </label>
               <div className="col-span-2 flex justify-end">
                 <button
                   onClick={createHost}
@@ -504,6 +568,15 @@ export default function ProxyPage() {
                   onChange={(e) => setDetailForm({ ...detailForm, sslForced: e.target.checked })}
                 />
                 Forcer HTTPS
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-xs text-neutral-400">Certificat SSL</span>
+                <CertificateSelect
+                  value={detailForm.certificateId}
+                  onChange={(id) => setDetailForm({ ...detailForm, certificateId: id })}
+                  certificates={certificates}
+                />
               </label>
 
               <label className="block">
