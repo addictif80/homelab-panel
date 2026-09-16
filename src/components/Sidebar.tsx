@@ -21,6 +21,7 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string }[] }[
       { href: "/hardware", label: "Santé matérielle" },
       { href: "/proxmox", label: "Serveurs VM" },
       { href: "/docker", label: "Docker" },
+      { href: "/databases", label: "Bases de données" },
       { href: "/ssh", label: "Terminal SSH" },
       { href: "/updates", label: "Mises à jour" },
       { href: "/files", label: "Explorateur de fichiers" },

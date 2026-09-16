@@ -488,6 +488,24 @@ function migrate(db: Database.Database) {
       email TEXT PRIMARY KEY,
       blocked_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- A database server the embedded manager (lib/dbManager/*) can reach — every operation runs
+    -- as a CLI command (mysql/psql, optionally through docker exec when container_id is set)
+    -- over the same SSH connection already used for every other host feature, rather than opening
+    -- a direct TCP connection to the database port. password_encrypted is vault-encrypted at rest,
+    -- same convention as backup_plans' database source config.
+    CREATE TABLE IF NOT EXISTS db_connections (
+      id TEXT PRIMARY KEY,
+      host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+      label TEXT NOT NULL,
+      engine TEXT NOT NULL CHECK (engine IN ('mysql','postgres')),
+      container_id TEXT,
+      db_host TEXT NOT NULL DEFAULT '127.0.0.1',
+      db_port INTEGER NOT NULL,
+      username TEXT NOT NULL,
+      password_encrypted TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Trial clock starts the instant the database is first created — not on some later "first
