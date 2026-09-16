@@ -7,6 +7,12 @@ import { logAudit } from "@/lib/db";
 import { authenticateUpgrade, isSameOriginUpgrade } from "./wsAuth";
 
 const SSH_WS_PATH = "/ws/ssh";
+// A silent terminal (the user reading output without typing) sends no WS frames at all, and any
+// reverse proxy sitting in front of this app (nginx, OpenLiteSpeed...) is liable to time out and
+// drop an idle WebSocket connection well before the SSH keepalive below would ever notice — a
+// ping every 20s keeps real traffic flowing through the whole path, well under the ~60s idle
+// timeout most proxies default to, so the connection never looks idle to anything in between.
+const HEARTBEAT_INTERVAL_MS = 20_000;
 
 type ClientMessage =
   | { type: "input"; data: string }
@@ -85,7 +91,25 @@ function handleSshSession(ws: WebSocket, hostId: number, username: string, execT
     else if (msg.type === "resize") handle.resize(msg.cols, msg.rows);
   });
 
+  // Standard ws heartbeat pattern: a missed pong means the connection is actually dead (the
+  // client-side socket disappeared without a clean close, e.g. a laptop going to sleep) — one
+  // missed beat terminates rather than piling up zombie SSH sessions, since a spurious drop just
+  // means the terminal falls back/reconnects like any other closed connection.
+  let alive = true;
+  ws.on("pong", () => {
+    alive = true;
+  });
+  const heartbeat = setInterval(() => {
+    if (!alive) {
+      ws.terminate();
+      return;
+    }
+    alive = false;
+    ws.ping();
+  }, HEARTBEAT_INTERVAL_MS);
+
   ws.on("close", () => {
+    clearInterval(heartbeat);
     handle.close();
     logAudit("ssh.disconnected", logTarget, username);
   });

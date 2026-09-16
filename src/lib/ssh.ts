@@ -65,6 +65,14 @@ export function buildSshConfig(hostId: number): ConnectConfig {
     port: host.ssh_port || 22,
     username: host.ssh_user || "root",
     readyTimeout: 10_000,
+    // ssh2 sends no keepalive traffic at all by default — an idle terminal (the user reading
+    // output without typing) generates no packets, so a NAT gateway, firewall conntrack table, or
+    // the remote sshd's own ClientAliveInterval can silently drop the TCP connection out from
+    // under a session that's still very much in use. A keepalive every 15s (giving up after 4
+    // unanswered, ~60s) keeps the connection alive through anything with a longer idle timeout
+    // than that, while still detecting a genuinely dead connection reasonably quickly.
+    keepaliveInterval: 15_000,
+    keepaliveCountMax: 4,
   };
 
   if (cred.kind === "ssh_key") {
