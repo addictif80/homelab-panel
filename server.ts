@@ -23,6 +23,7 @@ import { startPulseRecorder } from "./src/lib/pulseRecorder";
 import { startHostPublicIpScheduler } from "./src/lib/hostPublicIpScheduler";
 import { autoActivateFromBundledKey } from "./src/lib/license";
 import { startLicenseRenewalScheduler } from "./src/lib/licenseRenewalScheduler";
+import { startMailScheduler } from "./src/lib/mail/mailScheduler";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOST || "0.0.0.0";
@@ -44,6 +45,7 @@ app.prepare().then(() => {
   startHostPublicIpScheduler();
   autoActivateFromBundledKey().catch(() => {});
   startLicenseRenewalScheduler();
+  startMailScheduler();
 
   server.listen(port, hostname, () => {
     console.log(`Homelab Panel prêt sur http://${hostname}:${port}`);

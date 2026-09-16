@@ -12,6 +12,7 @@ import RecoveryVaultPanel from "@/components/RecoveryVaultPanel";
 import LockdownPanel from "@/components/LockdownPanel";
 import DirectorySettingsPanel from "@/components/DirectorySettingsPanel";
 import LicensePanel from "@/components/LicensePanel";
+import MailLogSourcesPanel from "@/components/MailLogSourcesPanel";
 
 export default function SettingsPage() {
   return (
@@ -38,6 +39,7 @@ export default function SettingsPage() {
         <TrustedDevicesPanel />
         <OllamaSettingsPanel />
         <DirectorySettingsPanel />
+        <MailLogSourcesPanel />
       </div>
     </div>
   );

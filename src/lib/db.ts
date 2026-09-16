@@ -444,6 +444,50 @@ function migrate(db: Database.Database) {
       reviewed_at TEXT,
       UNIQUE (license_key, instance_id, service_url)
     );
+
+    -- Where to read incoming-mail activity from, for the spam log (see lib/mail/mailIngest.ts).
+    -- Either a log file on an SSH-reachable host (a native Postfix/Exim install) or a Docker
+    -- container's own log output (a dockerized mail stack like Mailcow) — deliberately not
+    -- coupled to any one mail server product, since the parser only looks for generic
+    -- Postfix-style syslog lines and a generic rspamd-style summary line, both extremely common
+    -- denominators across self-hosted mail stacks (nearly all of them run Postfix as the MTA).
+    -- cursor is opaque to callers: a byte offset for a file source, or an ISO timestamp (the
+    -- "--since" cutoff for the next docker logs call) for a docker source.
+    CREATE TABLE IF NOT EXISTS mail_log_sources (
+      id TEXT PRIMARY KEY,
+      host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+      source_type TEXT NOT NULL CHECK (source_type IN ('file','docker')),
+      source_path TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      cursor TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- One row per received message the parser could identify. dedupe_key (a hash of the source
+    -- id + the raw log line(s) it was built from) makes re-ingesting the same lines after a
+    -- restart or a cursor rewind a no-op instead of duplicating rows.
+    CREATE TABLE IF NOT EXISTS mail_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_id TEXT NOT NULL REFERENCES mail_log_sources(id) ON DELETE CASCADE,
+      dedupe_key TEXT NOT NULL UNIQUE,
+      ip_address TEXT,
+      sender_email TEXT,
+      subject TEXT,
+      received_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_mail_events_received ON mail_events(received_at DESC);
+
+    -- Sender-address blocklist, parallel to blocked_ips (lib/firewall.ts): a single infra-wide
+    -- registry rather than per-host state, enforced via a Postfix sender_access map on every
+    -- SSH-reachable host that has Postfix (see lib/mail/senderBlock.ts) — the same "block
+    -- everywhere, best-effort per host" shape as blockIpEverywhere.
+    CREATE TABLE IF NOT EXISTS blocked_senders (
+      email TEXT PRIMARY KEY,
+      blocked_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Trial clock starts the instant the database is first created — not on some later "first
