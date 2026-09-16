@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteProxyHost, updateProxyHost, type ProxyHostInput } from "@/lib/npm";
+import { deleteProxyHost, getProxyHost, updateProxyHost, type ProxyHostInput } from "@/lib/npm";
 import { logAudit } from "@/lib/db";
+
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  try {
+    const host = await getProxyHost(Number(id));
+    return NextResponse.json({ host });
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Erreur." }, { status: 502 });
+  }
+}
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

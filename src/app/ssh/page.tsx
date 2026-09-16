@@ -17,6 +17,18 @@ type Host = {
 };
 type Credential = { id: number; kind: string; label: string | null; created_at: string };
 
+// A unified, selectable SSH target — a real inventory host, or an ephemeral Docker
+// container/Proxmox LXC discovered live (no inventory entry needed for those, same as the
+// per-card Terminal buttons on the Docker/Proxmox pages).
+type SshTarget = {
+  key: string;
+  label: string;
+  sublabel: string;
+  hostId: number;
+  containerId?: string;
+  execKind?: "docker" | "pct";
+};
+
 export default function SshPage() {
   return (
     <Suspense fallback={null}>
@@ -28,13 +40,15 @@ export default function SshPage() {
 function SshPageInner() {
   const searchParams = useSearchParams();
   const [hosts, setHosts] = useState<Host[]>([]);
-  // Every host a terminal has been opened for stays mounted (just hidden, never unmounted) once
+  const [dockerTargets, setDockerTargets] = useState<SshTarget[]>([]);
+  const [lxcTargets, setLxcTargets] = useState<SshTarget[]>([]);
+  // Every target a terminal has been opened for stays mounted (just hidden, never unmounted) once
   // opened, so switching the active tab — or, on mobile, closing the modal — never tears down its
   // WebSocket. Only the explicit "✕ close" on a tab actually disconnects it.
-  const [openIds, setOpenIds] = useState<number[]>([]);
-  const [activeId, setActiveId] = useState<number | null>(null);
+  const [openKeys, setOpenKeys] = useState<string[]>([]);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [statusByHost, setStatusByHost] = useState<Record<number, string>>({});
+  const [statusByKey, setStatusByKey] = useState<Record<string, string>>({});
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [showCredForm, setShowCredForm] = useState(false);
   const [credKind, setCredKind] = useState<"ssh_key" | "ssh_password" | "sudo_password">("ssh_password");
@@ -42,19 +56,29 @@ function SshPageInner() {
   const [credSecret, setCredSecret] = useState("");
   const [credError, setCredError] = useState("");
 
-  const selectedHost = hosts.find((h) => h.id === activeId) ?? null;
+  const hostTargets: SshTarget[] = hosts.map((h) => ({
+    key: `host:${h.id}`,
+    label: h.name,
+    sublabel: h.tailscale_ip || h.lan_ip || h.public_ip || "pas d'IP",
+    hostId: h.id,
+  }));
+  const allTargets = [...hostTargets, ...dockerTargets, ...lxcTargets];
+  const activeTarget = allTargets.find((t) => t.key === activeKey) ?? null;
+  // The sudo/credentials management panel only makes sense for a real inventory host — an ad-hoc
+  // Docker container or LXC has no SSH credentials of its own, it rides on its host's.
+  const selectedHost = activeTarget && !activeTarget.containerId ? hosts.find((h) => h.id === activeTarget.hostId) ?? null : null;
 
-  function openHost(hostId: number) {
-    setOpenIds((ids) => (ids.includes(hostId) ? ids : [...ids, hostId]));
-    setActiveId(hostId);
+  function openTarget(key: string) {
+    setOpenKeys((keys) => (keys.includes(key) ? keys : [...keys, key]));
+    setActiveKey(key);
     setModalOpen(true);
   }
 
-  function closeHost(hostId: number) {
-    setOpenIds((ids) => {
-      const next = ids.filter((id) => id !== hostId);
-      setActiveId((current) => {
-        if (current !== hostId) return current;
+  function closeTarget(key: string) {
+    setOpenKeys((keys) => {
+      const next = keys.filter((k) => k !== key);
+      setActiveKey((current) => {
+        if (current !== key) return current;
         return next.length > 0 ? next[next.length - 1] : null;
       });
       if (next.length === 0) setModalOpen(false);
@@ -68,9 +92,64 @@ function SshPageInner() {
       .then((d) => {
         setHosts(d.hosts);
         const preselect = Number(searchParams.get("hostId"));
-        if (preselect && d.hosts.some((h: Host) => h.id === preselect)) openHost(preselect);
+        if (preselect && d.hosts.some((h: Host) => h.id === preselect)) openTarget(`host:${preselect}`);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/docker/containers")
+      .then((r) => r.json())
+      .then((d) => {
+        type AggregatedContainer = { id: string; name: string; state: string; hostId: number; hostName: string };
+        const running = (d.containers as AggregatedContainer[]).filter((c) => c.state === "running");
+        setDockerTargets(
+          running.map((c) => ({
+            key: `docker:${c.hostId}:${c.id}`,
+            label: c.name,
+            sublabel: `Docker — ${c.hostName}`,
+            hostId: c.hostId,
+            containerId: c.id,
+            execKind: "docker" as const,
+          }))
+        );
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const hostsRes = await fetch("/api/hosts");
+        const hostsData = await hostsRes.json();
+        const physical: { id: number; kind: string }[] = hostsData.hosts.filter((h: Host) => h.kind === "physical");
+        const targets: SshTarget[] = [];
+        for (const h of physical) {
+          const configRes = await fetch(`/api/proxmox/${h.id}/config`);
+          const config = await configRes.json();
+          if (!config.configured) continue;
+          const resRes = await fetch(`/api/proxmox/${h.id}/resources`);
+          if (!resRes.ok) continue;
+          const resData = await resRes.json();
+          type Resource = { vmid: number; node: string; type: "qemu" | "lxc"; name: string; status: string };
+          for (const r of resData.resources as Resource[]) {
+            if (r.type === "lxc" && r.status === "running") {
+              targets.push({
+                key: `pct:${h.id}:${r.vmid}`,
+                label: r.name || `#${r.vmid}`,
+                sublabel: `LXC — ${r.node}`,
+                hostId: h.id,
+                containerId: String(r.vmid),
+                execKind: "pct",
+              });
+            }
+          }
+        }
+        setLxcTargets(targets);
+      } catch {
+        // best-effort — the host-based terminal list above always works regardless
+      }
+    })();
   }, []);
 
   async function toggleNeedsSudo() {
@@ -91,30 +170,30 @@ function SshPageInner() {
   }, []);
 
   useEffect(() => {
-    if (activeId) loadCredentials(activeId);
-  }, [activeId, loadCredentials]);
+    if (selectedHost) loadCredentials(selectedHost.id);
+  }, [selectedHost, loadCredentials]);
 
   // A fresh arrow function on every render would change identity and re-trigger Terminal's
   // connection effect (see its `onStatusChange` dependency) — memoizing one stable callback per
-  // host, reused across renders, keeps switching tabs from looking like a reconnect.
-  const statusHandlers = useRef<Map<number, (status: string, message?: string) => void>>(new Map());
-  function getStatusHandler(hostId: number) {
-    let handler = statusHandlers.current.get(hostId);
+  // target, reused across renders, keeps switching tabs from looking like a reconnect.
+  const statusHandlers = useRef<Map<string, (status: string, message?: string) => void>>(new Map());
+  function getStatusHandler(key: string) {
+    let handler = statusHandlers.current.get(key);
     if (!handler) {
       handler = (status, message) => {
-        setStatusByHost((prev) => ({ ...prev, [hostId]: message ? `${status}: ${message}` : status }));
+        setStatusByKey((prev) => ({ ...prev, [key]: message ? `${status}: ${message}` : status }));
       };
-      statusHandlers.current.set(hostId, handler);
+      statusHandlers.current.set(key, handler);
     }
     return handler;
   }
 
   async function addCredential(e: React.FormEvent) {
     e.preventDefault();
-    if (!activeId) return;
+    if (!selectedHost) return;
     setCredError("");
     try {
-      const res = await fetch(`/api/hosts/${activeId}/credentials`, {
+      const res = await fetch(`/api/hosts/${selectedHost.id}/credentials`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind: credKind, label: credLabel, secret: credSecret }),
@@ -124,16 +203,16 @@ function SshPageInner() {
       setCredSecret("");
       setCredLabel("");
       setShowCredForm(false);
-      loadCredentials(activeId);
+      loadCredentials(selectedHost.id);
     } catch (err) {
       setCredError(err instanceof Error ? err.message : "Erreur");
     }
   }
 
   async function deleteCredential(credId: number) {
-    if (!activeId) return;
-    await fetch(`/api/hosts/${activeId}/credentials/${credId}`, { method: "DELETE" });
-    loadCredentials(activeId);
+    if (!selectedHost) return;
+    await fetch(`/api/hosts/${selectedHost.id}/credentials/${credId}`, { method: "DELETE" });
+    loadCredentials(selectedHost.id);
   }
 
   return (
@@ -141,29 +220,11 @@ function SshPageInner() {
       <div className="w-full shrink-0 space-y-4 overflow-auto md:w-64">
         <div>
           <h1 className="text-lg font-semibold">Terminal SSH</h1>
-          <p className="text-xs text-neutral-500">Sélectionne une machine</p>
+          <p className="text-xs text-neutral-500">Sélectionne une machine, un conteneur Docker ou un LXC</p>
         </div>
-        <div className="space-y-1">
-          {hosts.map((h) => (
-            <button
-              key={h.id}
-              onClick={() => openHost(h.id)}
-              className={`block w-full rounded px-3 py-2 text-left text-sm ${
-                activeId === h.id
-                  ? "bg-blue-600/20 text-blue-300"
-                  : openIds.includes(h.id)
-                    ? "bg-neutral-900 text-neutral-200"
-                    : "text-neutral-400 hover:bg-neutral-900"
-              }`}
-            >
-              {h.name}
-              {openIds.includes(h.id) && <span className="ml-1.5 text-emerald-400">●</span>}
-              <div className="text-xs text-neutral-500">
-                {h.tailscale_ip || h.lan_ip || h.public_ip || "pas d'IP"}
-              </div>
-            </button>
-          ))}
-        </div>
+        <TargetGroup title="Machines" targets={hostTargets} activeKey={activeKey} openKeys={openKeys} onOpen={openTarget} />
+        <TargetGroup title="Conteneurs Docker" targets={dockerTargets} activeKey={activeKey} openKeys={openKeys} onOpen={openTarget} />
+        <TargetGroup title="LXC Proxmox" targets={lxcTargets} activeKey={activeKey} openKeys={openKeys} onOpen={openTarget} />
 
         {selectedHost && (
           <div className="space-y-2 border-t border-neutral-800 pt-4">
@@ -251,22 +312,22 @@ function SshPageInner() {
           if (e.target === e.currentTarget) setModalOpen(false);
         }}
       >
-        {activeId ? (
+        {activeKey ? (
           <div className="flex h-full flex-col rounded border border-neutral-800 bg-black p-2">
             <div className="mb-2 flex items-center gap-1 overflow-x-auto">
-              {openIds.map((id) => {
-                const h = hosts.find((hh) => hh.id === id);
+              {openKeys.map((key) => {
+                const t = allTargets.find((tt) => tt.key === key);
                 return (
                   <div
-                    key={id}
+                    key={key}
                     className={`flex shrink-0 items-center gap-1.5 rounded px-2 py-1 text-xs ${
-                      id === activeId ? "bg-blue-600/20 text-blue-300" : "bg-neutral-900 text-neutral-400"
+                      key === activeKey ? "bg-blue-600/20 text-blue-300" : "bg-neutral-900 text-neutral-400"
                     }`}
                   >
-                    <button onClick={() => openHost(id)}>{h?.name ?? `#${id}`}</button>
+                    <button onClick={() => openTarget(key)}>{t?.label ?? key}</button>
                     <button
-                      onClick={() => closeHost(id)}
-                      aria-label={`Fermer la connexion à ${h?.name ?? id}`}
+                      onClick={() => closeTarget(key)}
+                      aria-label={`Fermer la connexion à ${t?.label ?? key}`}
                       className="text-neutral-500 hover:text-red-400"
                     >
                       ✕
@@ -282,29 +343,76 @@ function SshPageInner() {
               </button>
             </div>
             <div className="relative flex-1">
-              {openIds.map((id) => (
-                <div key={id} className={id === activeId ? "absolute inset-0" : "hidden"}>
-                  <Terminal hostId={id} onStatusChange={getStatusHandler(id)} />
-                </div>
-              ))}
+              {openKeys.map((key) => {
+                const t = allTargets.find((tt) => tt.key === key);
+                if (!t) return null;
+                return (
+                  <div key={key} className={key === activeKey ? "absolute inset-0" : "hidden"}>
+                    <Terminal
+                      hostId={t.hostId}
+                      containerId={t.containerId}
+                      execKind={t.execKind}
+                      onStatusChange={getStatusHandler(key)}
+                    />
+                  </div>
+                );
+              })}
             </div>
           </div>
         ) : (
           <div className="hidden h-full items-center justify-center text-sm text-neutral-500 md:flex">
-            Sélectionne une machine pour ouvrir un terminal.
+            Sélectionne une machine, un conteneur ou un LXC pour ouvrir un terminal.
           </div>
         )}
       </div>
 
-      {activeId !== null && statusByHost[activeId] && (
+      {activeKey !== null && statusByKey[activeKey] && (
         <div
           className={`${
             modalOpen ? "" : "hidden md:block"
           } fixed bottom-4 right-4 z-[60] rounded bg-neutral-900 px-3 py-1.5 text-xs text-neutral-300 shadow`}
         >
-          {statusByHost[activeId]}
+          {statusByKey[activeKey]}
         </div>
       )}
+    </div>
+  );
+}
+
+function TargetGroup({
+  title,
+  targets,
+  activeKey,
+  openKeys,
+  onOpen,
+}: {
+  title: string;
+  targets: SshTarget[];
+  activeKey: string | null;
+  openKeys: string[];
+  onOpen: (key: string) => void;
+}) {
+  if (targets.length === 0) return null;
+  return (
+    <div className="space-y-1">
+      <p className="px-1 text-[11px] font-medium uppercase tracking-wide text-neutral-600">{title}</p>
+      {targets.map((t) => (
+        <button
+          key={t.key}
+          onClick={() => onOpen(t.key)}
+          className={`block w-full rounded px-3 py-2 text-left text-sm ${
+            activeKey === t.key
+              ? "bg-blue-600/20 text-blue-300"
+              : openKeys.includes(t.key)
+                ? "bg-neutral-900 text-neutral-200"
+                : "text-neutral-400 hover:bg-neutral-900"
+          }`}
+        >
+          {t.label}
+          {openKeys.includes(t.key) && <span className="ml-1.5 text-emerald-400">●</span>}
+          <div className="text-xs text-neutral-500">{t.sublabel}</div>
+        </button>
+      ))}
     </div>
   );
 }

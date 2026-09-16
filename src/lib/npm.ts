@@ -70,6 +70,7 @@ export type ProxyHost = {
   sslForced: boolean;
   enabled: boolean;
   certificateId: number | null;
+  advancedConfig: string;
 };
 
 type RawProxyHost = {
@@ -81,6 +82,12 @@ type RawProxyHost = {
   ssl_forced: number;
   enabled: number;
   certificate_id: number | null;
+  advanced_config?: string;
+  block_exploits?: boolean;
+  allow_websocket_upgrade?: boolean;
+  caching_enabled?: boolean;
+  access_list_id?: string | number;
+  meta?: Record<string, unknown>;
 };
 
 function fromRaw(raw: RawProxyHost): ProxyHost {
@@ -93,6 +100,7 @@ function fromRaw(raw: RawProxyHost): ProxyHost {
     sslForced: !!raw.ssl_forced,
     enabled: !!raw.enabled,
     certificateId: raw.certificate_id,
+    advancedConfig: raw.advanced_config ?? "",
   };
 }
 
@@ -101,12 +109,23 @@ export async function listProxyHosts(): Promise<ProxyHost[]> {
   return data.map(fromRaw);
 }
 
+export async function getProxyHost(id: number): Promise<ProxyHost> {
+  const raw = (await npmFetch(`/api/nginx/proxy-hosts/${id}`)) as RawProxyHost;
+  return fromRaw(raw);
+}
+
 export type ProxyHostInput = {
   domainNames: string[];
   forwardScheme: "http" | "https";
   forwardHost: string;
   forwardPort: number;
   sslForced?: boolean;
+  /** Preserved verbatim — NPM's own "Advanced" tab content. Omitting this on an update used to
+   * silently wipe out anything set there (by this panel or directly in NPM's own UI); every
+   * caller that updates an existing host must read it first (getProxyHost) and pass it back,
+   * merging in any change of its own, rather than defaulting to "". */
+  advancedConfig?: string;
+  certificateId?: number | null;
 };
 
 function toRawBody(input: ProxyHostInput) {
@@ -120,9 +139,9 @@ function toRawBody(input: ProxyHostInput) {
     allow_websocket_upgrade: true,
     caching_enabled: false,
     access_list_id: "0",
-    certificate_id: 0,
+    certificate_id: input.certificateId ?? 0,
     meta: {},
-    advanced_config: "",
+    advanced_config: input.advancedConfig ?? "",
   };
 }
 

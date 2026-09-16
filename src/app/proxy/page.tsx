@@ -11,6 +11,18 @@ type ProxyHost = {
   sslForced: boolean;
   enabled: boolean;
   certificateId: number | null;
+  advancedConfig: string;
+};
+
+type FailoverConfig = {
+  proxyHostId: number;
+  backupScheme: "http" | "https";
+  backupHost: string;
+  backupPort: number;
+  enabled: boolean;
+  lastStatus: "unknown" | "primary" | "failover" | "error";
+  lastCheckedAt: string | null;
+  lastError: string | null;
 };
 
 const INPUT_CLASS = "w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100";
@@ -31,6 +43,14 @@ export default function ProxyPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [renewing, setRenewing] = useState<number | null>(null);
+  const [detailHost, setDetailHost] = useState<ProxyHost | null>(null);
+  const [detailForm, setDetailForm] = useState(EMPTY_FORM);
+  const [detailAdvanced, setDetailAdvanced] = useState("");
+  const [detailSaving, setDetailSaving] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  const [failover, setFailover] = useState<FailoverConfig | null>(null);
+  const [failoverForm, setFailoverForm] = useState({ scheme: "http" as "http" | "https", host: "", port: 80 });
+  const [failoverBusy, setFailoverBusy] = useState(false);
 
   function loadConfig() {
     fetch("/api/settings/npm")
@@ -120,6 +140,119 @@ export default function ProxyPage() {
     if (!confirm(`Supprimer la redirection pour ${host.domainNames.join(", ")} ?`)) return;
     await fetch(`/api/npm/hosts/${host.id}`, { method: "DELETE" });
     loadHosts();
+  }
+
+  async function openDetail(host: ProxyHost) {
+    setDetailError("");
+    setDetailHost(host);
+    setDetailForm({
+      domainNames: host.domainNames.join(", "),
+      forwardScheme: host.forwardScheme,
+      forwardHost: host.forwardHost,
+      forwardPort: host.forwardPort,
+      sslForced: host.sslForced,
+    });
+    setDetailAdvanced(host.advancedConfig);
+    setFailover(null);
+    try {
+      const [freshRes, failoverRes] = await Promise.all([
+        fetch(`/api/npm/hosts/${host.id}`),
+        fetch(`/api/npm/hosts/${host.id}/failover`),
+      ]);
+      const freshData = await freshRes.json();
+      if (freshRes.ok) {
+        setDetailHost(freshData.host);
+        setDetailForm({
+          domainNames: freshData.host.domainNames.join(", "),
+          forwardScheme: freshData.host.forwardScheme,
+          forwardHost: freshData.host.forwardHost,
+          forwardPort: freshData.host.forwardPort,
+          sslForced: freshData.host.sslForced,
+        });
+        setDetailAdvanced(freshData.host.advancedConfig);
+      }
+      const failoverData = await failoverRes.json();
+      setFailover(failoverData.failover);
+      if (failoverData.failover) {
+        setFailoverForm({
+          scheme: failoverData.failover.backupScheme,
+          host: failoverData.failover.backupHost,
+          port: failoverData.failover.backupPort,
+        });
+      } else {
+        setFailoverForm({ scheme: "http", host: "", port: 80 });
+      }
+    } catch {
+      // keep the list's own (slightly less fresh) copy as a fallback
+    }
+  }
+
+  async function saveDetail() {
+    if (!detailHost) return;
+    setDetailSaving(true);
+    setDetailError("");
+    try {
+      const res = await fetch(`/api/npm/hosts/${detailHost.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          domainNames: detailForm.domainNames.split(",").map((d) => d.trim()).filter(Boolean),
+          forwardScheme: detailForm.forwardScheme,
+          forwardHost: detailForm.forwardHost,
+          forwardPort: Number(detailForm.forwardPort),
+          sslForced: detailForm.sslForced,
+          certificateId: detailHost.certificateId,
+          advancedConfig: detailAdvanced,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setDetailHost(null);
+      loadHosts();
+    } catch (err) {
+      setDetailError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setDetailSaving(false);
+    }
+  }
+
+  async function saveFailover() {
+    if (!detailHost) return;
+    setFailoverBusy(true);
+    setDetailError("");
+    try {
+      const res = await fetch(`/api/npm/hosts/${detailHost.id}/failover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(failoverForm),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setFailover(data.failover);
+      openDetail(detailHost); // refresh advancedConfig preview to reflect the injected snippet
+    } catch (err) {
+      setDetailError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setFailoverBusy(false);
+    }
+  }
+
+  async function removeFailoverConfig() {
+    if (!detailHost) return;
+    if (!confirm("Supprimer le failover pour cette redirection ?")) return;
+    setFailoverBusy(true);
+    setDetailError("");
+    try {
+      const res = await fetch(`/api/npm/hosts/${detailHost.id}/failover`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setFailover(null);
+      openDetail(detailHost);
+    } catch (err) {
+      setDetailError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setFailoverBusy(false);
+    }
   }
 
   async function renewCert(host: ProxyHost) {
@@ -268,6 +401,12 @@ export default function ProxyPage() {
                     </td>
                     <td className="space-x-2 px-3 py-2">
                       <button
+                        onClick={() => openDetail(h)}
+                        className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+                      >
+                        Consulter
+                      </button>
+                      <button
                         onClick={() => toggleEnabled(h)}
                         className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
                       >
@@ -302,6 +441,176 @@ export default function ProxyPage() {
             </table>
           </div>
         </>
+      )}
+
+      {detailHost && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setDetailHost(null)}>
+          <div
+            className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded border border-neutral-800 bg-neutral-900 p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-neutral-100">{detailHost.domainNames.join(", ")}</h2>
+              <button onClick={() => setDetailHost(null)} className="text-neutral-400 hover:text-neutral-200">
+                ✕
+              </button>
+            </div>
+
+            {detailError && <p className="mb-3 text-sm text-red-400">{detailError}</p>}
+
+            <div className="space-y-3">
+              <label className="block">
+                <span className="mb-1 block text-xs text-neutral-400">Domaine(s), séparés par des virgules</span>
+                <input
+                  value={detailForm.domainNames}
+                  onChange={(e) => setDetailForm({ ...detailForm, domainNames: e.target.value })}
+                  className={INPUT_CLASS}
+                />
+              </label>
+              <div className="grid grid-cols-3 gap-3">
+                <label className="block">
+                  <span className="mb-1 block text-xs text-neutral-400">Protocole</span>
+                  <select
+                    value={detailForm.forwardScheme}
+                    onChange={(e) => setDetailForm({ ...detailForm, forwardScheme: e.target.value as "http" | "https" })}
+                    className={INPUT_CLASS}
+                  >
+                    <option value="http">http</option>
+                    <option value="https">https</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs text-neutral-400">Hôte cible</span>
+                  <input
+                    value={detailForm.forwardHost}
+                    onChange={(e) => setDetailForm({ ...detailForm, forwardHost: e.target.value })}
+                    className={INPUT_CLASS}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs text-neutral-400">Port cible</span>
+                  <input
+                    type="number"
+                    value={detailForm.forwardPort}
+                    onChange={(e) => setDetailForm({ ...detailForm, forwardPort: Number(e.target.value) })}
+                    className={INPUT_CLASS}
+                  />
+                </label>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-neutral-300">
+                <input
+                  type="checkbox"
+                  checked={detailForm.sslForced}
+                  onChange={(e) => setDetailForm({ ...detailForm, sslForced: e.target.checked })}
+                />
+                Forcer HTTPS
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-xs text-neutral-400">
+                  Configuration avancée (onglet &quot;Advanced&quot; de NPM) — inclut le bloc de failover ci-dessous si activé
+                </span>
+                <textarea
+                  value={detailAdvanced}
+                  onChange={(e) => setDetailAdvanced(e.target.value)}
+                  rows={8}
+                  spellCheck={false}
+                  className={`${INPUT_CLASS} font-mono text-xs`}
+                />
+              </label>
+
+              <button
+                onClick={saveDetail}
+                disabled={detailSaving}
+                className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60 disabled:opacity-50"
+              >
+                {detailSaving ? "Enregistrement..." : "Enregistrer"}
+              </button>
+            </div>
+
+            <div className="mt-6 space-y-3 border-t border-neutral-800 pt-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-neutral-100">Failover vers un serveur de secours</h3>
+                {failover && (
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                      failover.lastStatus === "primary"
+                        ? "bg-emerald-900/40 text-emerald-300"
+                        : failover.lastStatus === "failover"
+                          ? "bg-amber-900/40 text-amber-300"
+                          : failover.lastStatus === "error"
+                            ? "bg-red-900/40 text-red-300"
+                            : "bg-neutral-800 text-neutral-400"
+                    }`}
+                  >
+                    {failover.lastStatus === "primary"
+                      ? "Primaire actif"
+                      : failover.lastStatus === "failover"
+                        ? "Basculé sur le secours"
+                        : failover.lastStatus === "error"
+                          ? "Primaire et secours injoignables"
+                          : "Statut inconnu"}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-neutral-500">
+                Ajoute un bloc nginx dans la config avancée : si la cible principale répond en erreur (502/503/504),
+                nginx bascule automatiquement et immédiatement vers le serveur de secours, sans intervention du panel.
+                Une vérification périodique (ci-dessus) affiche juste l&apos;état actuel.
+                {failover?.lastCheckedAt && ` Dernière vérification : ${new Date(`${failover.lastCheckedAt}Z`).toLocaleString("fr-FR")}.`}
+              </p>
+              <div className="grid grid-cols-3 gap-3">
+                <label className="block">
+                  <span className="mb-1 block text-xs text-neutral-400">Protocole</span>
+                  <select
+                    value={failoverForm.scheme}
+                    onChange={(e) => setFailoverForm({ ...failoverForm, scheme: e.target.value as "http" | "https" })}
+                    className={INPUT_CLASS}
+                  >
+                    <option value="http">http</option>
+                    <option value="https">https</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs text-neutral-400">Hôte de secours</span>
+                  <input
+                    value={failoverForm.host}
+                    onChange={(e) => setFailoverForm({ ...failoverForm, host: e.target.value })}
+                    placeholder="IP ou nom"
+                    className={INPUT_CLASS}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs text-neutral-400">Port de secours</span>
+                  <input
+                    type="number"
+                    value={failoverForm.port}
+                    onChange={(e) => setFailoverForm({ ...failoverForm, port: Number(e.target.value) })}
+                    className={INPUT_CLASS}
+                  />
+                </label>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={saveFailover}
+                  disabled={failoverBusy || !failoverForm.host.trim()}
+                  className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60 disabled:opacity-50"
+                >
+                  {failoverBusy ? "..." : failover ? "Mettre à jour" : "Activer le failover"}
+                </button>
+                {failover && (
+                  <button
+                    onClick={removeFailoverConfig}
+                    disabled={failoverBusy}
+                    className="rounded border border-red-900 px-3 py-1.5 text-sm text-red-300 hover:bg-red-950/40 disabled:opacity-50"
+                  >
+                    Désactiver
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

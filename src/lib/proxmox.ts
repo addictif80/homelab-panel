@@ -109,6 +109,33 @@ export async function listResources(hostId: number): Promise<ProxmoxResource[]> 
   return data.filter((r) => !r.template);
 }
 
+type GuestAgentInterfaces = {
+  result: { name: string; "ip-addresses"?: { "ip-address": string; "ip-address-type": "ipv4" | "ipv6" }[] }[];
+};
+
+/**
+ * A VM (unlike an LXC) is fully isolated from its host, so there's no host-side equivalent of
+ * `pct exec` to reach a shell inside it — the only way this panel can ever offer one-click SSH for
+ * a VM is if the QEMU guest agent is installed and reports an IP that happens to already belong to
+ * a host this panel has credentials for (see the Proxmox page's Terminal button). Returns an empty
+ * list rather than throwing when the agent isn't installed/running — that's the common case, not
+ * an error worth surfacing.
+ */
+export async function getVmAgentIps(hostId: number, node: string, vmid: number): Promise<string[]> {
+  try {
+    const data = (await proxmoxRequest(
+      hostId,
+      `/nodes/${encodeURIComponent(node)}/qemu/${vmid}/agent/network-get-interfaces`
+    )) as GuestAgentInterfaces;
+    return data.result
+      .flatMap((iface) => iface["ip-addresses"] ?? [])
+      .filter((ip) => ip["ip-address-type"] === "ipv4" && ip["ip-address"] !== "127.0.0.1")
+      .map((ip) => ip["ip-address"]);
+  } catch {
+    return [];
+  }
+}
+
 /** Any host in the DB with a Proxmox API token configured — used to reach the cluster API when
  * a specific node (e.g. one without its own token) needs to be queried, since Proxmox nodes in
  * the same cluster transparently proxy requests for each other's node-scoped paths. */

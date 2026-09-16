@@ -24,6 +24,7 @@ import { startHostPublicIpScheduler } from "./src/lib/hostPublicIpScheduler";
 import { autoActivateFromBundledKey } from "./src/lib/license";
 import { startLicenseRenewalScheduler } from "./src/lib/licenseRenewalScheduler";
 import { startMailScheduler } from "./src/lib/mail/mailScheduler";
+import { startNpmFailoverScheduler } from "./src/lib/npmFailoverScheduler";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOST || "0.0.0.0";
@@ -46,6 +47,7 @@ app.prepare().then(() => {
   autoActivateFromBundledKey().catch(() => {});
   startLicenseRenewalScheduler();
   startMailScheduler();
+  startNpmFailoverScheduler();
 
   server.listen(port, hostname, () => {
     console.log(`Homelab Panel prêt sur http://${hostname}:${port}`);

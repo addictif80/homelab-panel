@@ -506,6 +506,24 @@ function migrate(db: Database.Database) {
       password_encrypted TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- Failover pairing for an NPM proxy host (see lib/npmFailover.ts). proxy_host_id is NPM's own
+    -- numeric id, not a local one — NPM itself remains the only source of truth for the actual
+    -- routing config (a marker-delimited nginx snippet in that host's own "Advanced" field); this
+    -- table only remembers the backup target and the last health-check result for the UI, and
+    -- would naturally go stale/orphaned if the proxy host were deleted directly in NPM (harmless:
+    -- the next check just starts failing to fetch that host and the row can be removed by hand).
+    CREATE TABLE IF NOT EXISTS proxy_failovers (
+      proxy_host_id INTEGER PRIMARY KEY,
+      backup_scheme TEXT NOT NULL,
+      backup_host TEXT NOT NULL,
+      backup_port INTEGER NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_status TEXT NOT NULL DEFAULT 'unknown' CHECK (last_status IN ('unknown','primary','failover','error')),
+      last_checked_at TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Trial clock starts the instant the database is first created — not on some later "first

@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { openSshChannel, type SshChannelHandle } from "./sshChannel";
+import { openSshChannel, type ExecTarget, type SshChannelHandle } from "./sshChannel";
 import { logAudit } from "./db";
 
 /**
@@ -56,10 +56,10 @@ function ensureSweep() {
   }, SWEEP_INTERVAL_MS);
 }
 
-export function createPollSession(hostId: number, containerId: string | null, username: string): string {
+export function createPollSession(hostId: number, execTarget: ExecTarget | null, username: string): string {
   ensureSweep();
   const id = randomUUID();
-  const logTarget = containerId ? `${hostId}/container:${containerId}` : String(hostId);
+  const logTarget = execTarget ? `${hostId}/${execTarget.kind}:${execTarget.id}` : String(hostId);
 
   const session: Session = {
     username,
@@ -71,7 +71,7 @@ export function createPollSession(hostId: number, containerId: string | null, us
     waiters: [],
   };
 
-  session.handle = openSshChannel(hostId, containerId, { cols: 80, rows: 24 }, {
+  session.handle = openSshChannel(hostId, execTarget, { cols: 80, rows: 24 }, {
     onData: (chunk) => appendData(session, chunk),
     onError: (message) => {
       appendData(session, `\r\n\x1b[31m${message}\x1b[0m\r\n`);

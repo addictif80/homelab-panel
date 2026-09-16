@@ -2,7 +2,7 @@ import type { IncomingMessage } from "http";
 import type { Duplex } from "stream";
 import { WebSocketServer, WebSocket } from "ws";
 import { parse } from "url";
-import { openSshChannel } from "@/lib/sshChannel";
+import { openSshChannel, type ExecTarget } from "@/lib/sshChannel";
 import { logAudit } from "@/lib/db";
 import { authenticateUpgrade, isSameOriginUpgrade } from "./wsAuth";
 
@@ -40,9 +40,11 @@ export function attachSshWebSocketServer(server: import("http").Server) {
         return;
       }
       const containerId = typeof query.containerId === "string" ? query.containerId : null;
+      const execKind = query.execKind === "pct" ? "pct" : "docker";
+      const execTarget: ExecTarget | null = containerId ? { kind: execKind, id: containerId } : null;
 
       wss.handleUpgrade(req, socket, head, (ws) => {
-        handleSshSession(ws, hostId, username, containerId);
+        handleSshSession(ws, hostId, username, execTarget);
       });
     })().catch(() => {
       socket.destroy();
@@ -52,12 +54,12 @@ export function attachSshWebSocketServer(server: import("http").Server) {
   return wss;
 }
 
-function handleSshSession(ws: WebSocket, hostId: number, username: string, containerId: string | null) {
+function handleSshSession(ws: WebSocket, hostId: number, username: string, execTarget: ExecTarget | null) {
   const send = (payload: object) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
   };
 
-  const logTarget = containerId ? `${hostId}/container:${containerId}` : String(hostId);
+  const logTarget = execTarget ? `${hostId}/${execTarget.kind}:${execTarget.id}` : String(hostId);
 
   // openSshChannel() is called synchronously, right away — the SSH TCP handshake it kicks off
   // takes measurably longer than a single WS message round-trip, so the client's very first
@@ -66,7 +68,7 @@ function handleSshSession(ws: WebSocket, hostId: number, username: string, conta
   // the size back out to build the PTY options — see sshChannel.ts's own comment for why that
   // buffering (not a synchronous handoff here) is what avoids the terminal-redraw-at-wrong-width
   // glitch this used to have.
-  const handle = openSshChannel(hostId, containerId, null, {
+  const handle = openSshChannel(hostId, execTarget, null, {
     onData: (chunk) => send({ type: "data", data: chunk }),
     onError: (message) => send({ type: "error", message }),
     onClose: () => send({ type: "closed" }),

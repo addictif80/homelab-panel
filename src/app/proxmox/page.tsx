@@ -2,9 +2,20 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import MigrationJobLog from "@/components/MigrationJobLog";
 
-type Host = { id: number; name: string; kind: string; proxmox_node: string | null };
+const Terminal = dynamic(() => import("@/components/Terminal"), { ssr: false });
+
+type Host = {
+  id: number;
+  name: string;
+  kind: string;
+  proxmox_node: string | null;
+  lan_ip: string | null;
+  tailscale_ip: string | null;
+  public_ip: string | null;
+};
 type Resource = {
   vmid: number;
   node: string;
@@ -29,6 +40,14 @@ function formatUptime(seconds: number): string {
 
 export default function ProxmoxPage() {
   const [hosts, setHosts] = useState<Host[]>([]);
+  // Every host in the inventory (not just Proxmox nodes) — used to match a VM's guest-agent-
+  // reported IP against an already-configured host, since that's the only way this panel can
+  // offer one-click SSH into a VM (see lib/proxmox.ts's getVmAgentIps for why).
+  const [allHosts, setAllHosts] = useState<Host[]>([]);
+  const [vmSshHostId, setVmSshHostId] = useState<Record<string, number | null>>({});
+  const [terminalFor, setTerminalFor] = useState<
+    (AggregatedResource & { sshHostId?: number }) | null
+  >(null);
   const [configuredHostIds, setConfiguredHostIds] = useState<number[]>([]);
   const [resources, setResources] = useState<AggregatedResource[]>([]);
   const [error, setError] = useState("");
@@ -79,6 +98,7 @@ export default function ProxmoxPage() {
       const hostsData = await hostsRes.json();
       const physical: Host[] = hostsData.hosts.filter((h: Host) => h.kind === "physical");
       setHosts(physical);
+      setAllHosts(hostsData.hosts);
       if (physical.length > 0 && configHostId === null) setConfigHostId(physical[0].id);
       if (physical.length > 0 && createHostId === null) setCreateHostId(physical[0].id);
 
@@ -124,6 +144,37 @@ export default function ProxmoxPage() {
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  // Best-effort, one lookup per running VM — most won't have the guest agent installed, so this
+  // silently yields no match far more often than not (see getVmAgentIps). Skipped entirely for
+  // stopped VMs (no agent to ask) and for LXCs (which always get a Terminal button via pct exec,
+  // no lookup needed).
+  useEffect(() => {
+    const vms = resources.filter((r) => r.type === "qemu" && r.status === "running");
+    if (vms.length === 0 || allHosts.length === 0) return;
+    let cancelled = false;
+
+    (async () => {
+      for (const vm of vms) {
+        const key = `${vm.node}-${vm.vmid}`;
+        if (vmSshHostId[key] !== undefined) continue;
+        try {
+          const res = await fetch(`/api/proxmox/${vm.hostId}/vm/agent-ip?node=${encodeURIComponent(vm.node)}&vmid=${vm.vmid}`);
+          const data = await res.json();
+          const ips: string[] = data.ips ?? [];
+          const match = allHosts.find((h) => ips.includes(h.lan_ip || "") || ips.includes(h.tailscale_ip || "") || ips.includes(h.public_ip || ""));
+          if (!cancelled) setVmSshHostId((prev) => ({ ...prev, [key]: match?.id ?? null }));
+        } catch {
+          if (!cancelled) setVmSshHostId((prev) => ({ ...prev, [key]: null }));
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resources, allHosts]);
 
   async function saveConfig(e: React.FormEvent) {
     e.preventDefault();
@@ -590,6 +641,28 @@ export default function ProxmoxPage() {
                     </button>
                   </>
                 )}
+                {r.status === "running" && r.type === "lxc" && (
+                  <button
+                    onClick={() => setTerminalFor(r)}
+                    className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+                  >
+                    Terminal
+                  </button>
+                )}
+                {r.status === "running" &&
+                  r.type === "qemu" &&
+                  (() => {
+                    const sshHostId = vmSshHostId[`${r.node}-${r.vmid}`];
+                    return sshHostId ? (
+                      <button
+                        onClick={() => setTerminalFor({ ...r, sshHostId })}
+                        className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+                        title="IP détectée via l'agent invité QEMU, correspondant à un hôte déjà configuré"
+                      >
+                        Terminal
+                      </button>
+                    ) : null;
+                  })()}
                 <button
                   onClick={() => openSnapshots(r)}
                   className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
@@ -612,6 +685,32 @@ export default function ProxmoxPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {terminalFor && (
+        <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/60 p-8">
+          <div className="flex h-full w-full max-w-3xl flex-col rounded border border-neutral-700 bg-neutral-950 p-2">
+            <div className="mb-2 flex items-center justify-between px-2">
+              <span className="text-sm font-medium">
+                Terminal — {terminalFor.name || `#${terminalFor.vmid}`}
+                {terminalFor.type === "lxc" ? " (LXC)" : " (VM)"}
+              </span>
+              <button
+                onClick={() => setTerminalFor(null)}
+                className="rounded border border-neutral-700 px-3 py-1 text-sm hover:bg-neutral-800"
+              >
+                Fermer
+              </button>
+            </div>
+            <div className="flex-1 rounded border border-neutral-800 bg-black p-2">
+              {terminalFor.type === "lxc" ? (
+                <Terminal hostId={terminalFor.hostId} containerId={String(terminalFor.vmid)} execKind="pct" />
+              ) : (
+                <Terminal hostId={terminalFor.sshHostId!} />
+              )}
+            </div>
+          </div>
         </div>
       )}
 

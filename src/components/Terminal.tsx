@@ -15,10 +15,13 @@ const POLL_ERROR_BACKOFF_MS = 2000;
 export default function Terminal({
   hostId,
   containerId,
+  execKind = "docker",
   onStatusChange,
 }: {
   hostId: number;
   containerId?: string;
+  /** "pct" for a Proxmox LXC (via `pct exec` on the node); ignored unless containerId is set. */
+  execKind?: "docker" | "pct";
   onStatusChange?: (status: "connecting" | "connected" | "closed" | "error", message?: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -42,7 +45,10 @@ export default function Terminal({
     function startWs() {
       const protocol = window.location.protocol === "https:" ? "wss" : "ws";
       const params = new URLSearchParams({ hostId: String(hostId) });
-      if (containerId) params.set("containerId", containerId);
+      if (containerId) {
+        params.set("containerId", containerId);
+        params.set("execKind", execKind);
+      }
       const ws = new WebSocket(`${protocol}://${window.location.host}/ws/ssh?${params.toString()}`);
 
       let connectedOnce = false;
@@ -141,7 +147,7 @@ export default function Terminal({
         const res = await fetch("/api/terminal-poll", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ hostId, containerId }),
+          body: JSON.stringify({ hostId, containerId, execKind }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Connexion impossible.");
@@ -222,7 +228,7 @@ export default function Terminal({
       disposeTransport?.();
       term.dispose();
     };
-  }, [hostId, containerId, onStatusChange]);
+  }, [hostId, containerId, execKind, onStatusChange]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }
