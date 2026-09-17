@@ -5,67 +5,304 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import ThemeToggle from "./ThemeToggle";
 
-const NAV_SECTIONS: { label: string; items: { href: string; label: string }[] }[] = [
+type IconName =
+  | "grid"
+  | "pulse"
+  | "server-rack"
+  | "heartbeat"
+  | "vm"
+  | "docker"
+  | "database"
+  | "terminal"
+  | "files"
+  | "clock"
+  | "directory"
+  | "cyberpanel"
+  | "router"
+  | "tailscale"
+  | "proxy"
+  | "dns"
+  | "uptime"
+  | "discovery"
+  | "shield"
+  | "mail"
+  | "backup"
+  | "topology"
+  | "assistant"
+  | "audit"
+  | "users"
+  | "settings"
+  | "storefront";
+
+const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon: IconName }[] }[] = [
   {
     label: "",
     items: [
-      { href: "/", label: "Vue d'ensemble" },
-      { href: "/brain", label: "Vue vivante" },
+      { href: "/", label: "Vue d'ensemble", icon: "grid" },
+      { href: "/brain", label: "Vue vivante", icon: "pulse" },
     ],
   },
   {
     label: "Infrastructure",
     items: [
-      { href: "/servers", label: "Serveurs physiques" },
-      { href: "/hardware", label: "Santé matérielle" },
-      { href: "/proxmox", label: "Serveurs VM" },
-      { href: "/docker", label: "Docker" },
-      { href: "/databases", label: "Bases de données" },
-      { href: "/ssh", label: "Terminal SSH" },
-      { href: "/updates", label: "Mises à jour" },
-      { href: "/files", label: "Explorateur de fichiers" },
+      { href: "/servers", label: "Serveurs physiques", icon: "server-rack" },
+      { href: "/hardware", label: "Santé matérielle", icon: "heartbeat" },
+      { href: "/proxmox", label: "Serveurs VM", icon: "vm" },
+      { href: "/docker", label: "Docker", icon: "docker" },
+      { href: "/databases", label: "Bases de données", icon: "database" },
+      { href: "/ssh", label: "Terminal SSH", icon: "terminal" },
+      { href: "/updates", label: "Mises à jour", icon: "clock" },
+      { href: "/files", label: "Explorateur de fichiers", icon: "files" },
     ],
   },
   {
     label: "Services",
     items: [
-      { href: "/services", label: "Services & annuaire" },
-      { href: "/cyberpanel", label: "CyberPanel" },
+      { href: "/services", label: "Services & annuaire", icon: "directory" },
+      { href: "/cyberpanel", label: "CyberPanel", icon: "cyberpanel" },
     ],
   },
   {
     label: "Réseau",
     items: [
-      { href: "/routers", label: "Box & routeurs" },
-      { href: "/tailscale", label: "Tailscale" },
-      { href: "/proxy", label: "Reverse proxy" },
-      { href: "/dns", label: "DNS" },
-      { href: "/uptime", label: "Uptime Kuma" },
-      { href: "/discovery", label: "Découverte réseau" },
+      { href: "/routers", label: "Box & routeurs", icon: "router" },
+      { href: "/tailscale", label: "Tailscale", icon: "tailscale" },
+      { href: "/proxy", label: "Reverse proxy", icon: "proxy" },
+      { href: "/dns", label: "DNS", icon: "dns" },
+      { href: "/uptime", label: "Uptime Kuma", icon: "uptime" },
+      { href: "/discovery", label: "Découverte réseau", icon: "discovery" },
     ],
   },
   {
     label: "Sécurité",
     items: [
-      { href: "/security", label: "Sécurité" },
-      { href: "/mail-security", label: "Anti-spam mail" },
-      { href: "/backups", label: "Sauvegardes" },
+      { href: "/security", label: "Sécurité", icon: "shield" },
+      { href: "/mail-security", label: "Anti-spam mail", icon: "mail" },
+      { href: "/backups", label: "Sauvegardes", icon: "backup" },
     ],
   },
   {
     label: "Système",
     items: [
-      { href: "/inventory", label: "Inventaire & topologie" },
-      { href: "/assistant", label: "Assistant IA" },
-      { href: "/audit", label: "Journal d'audit" },
-      { href: "/users", label: "Comptes" },
-      { href: "/settings", label: "Réglages" },
+      { href: "/inventory", label: "Inventaire & topologie", icon: "topology" },
+      { href: "/assistant", label: "Assistant IA", icon: "assistant" },
+      { href: "/audit", label: "Journal d'audit", icon: "audit" },
+      { href: "/users", label: "Comptes", icon: "users" },
+      { href: "/settings", label: "Réglages", icon: "settings" },
     ],
   },
   ...(process.env.NEXT_PUBLIC_SELLER_MODE === "true"
-    ? [{ label: "Vendeur", items: [{ href: "/seller", label: "Espace vendeur" }] }]
+    ? [{ label: "Vendeur", items: [{ href: "/seller", label: "Espace vendeur", icon: "storefront" as IconName }] }]
     : []),
 ];
+
+function NavIcon({ name }: { name: IconName }) {
+  const common = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none" } as const;
+  switch (name) {
+    case "grid":
+      return (
+        <svg {...common}>
+          <rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+          <rect x="13" y="3.5" width="7.5" height="7.5" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+          <rect x="3.5" y="13" width="7.5" height="7.5" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+          <rect x="13" y="13" width="7.5" height="7.5" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+        </svg>
+      );
+    case "pulse":
+      return (
+        <svg {...common}>
+          <path d="M4 12h4l2-7 4 14 2-7h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case "server-rack":
+      return (
+        <svg {...common}>
+          <rect x="4" y="3.5" width="16" height="6" rx="1.3" stroke="currentColor" strokeWidth="1.6" />
+          <rect x="4" y="14.5" width="16" height="6" rx="1.3" stroke="currentColor" strokeWidth="1.6" />
+        </svg>
+      );
+    case "heartbeat":
+      return (
+        <svg {...common}>
+          <path d="M12 3v11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          <circle cx="12" cy="17" r="3" stroke="currentColor" strokeWidth="1.6" />
+        </svg>
+      );
+    case "vm":
+      return (
+        <svg {...common}>
+          <rect x="2.5" y="8.5" width="7" height="7" rx="1.2" stroke="currentColor" strokeWidth="1.6" />
+          <rect x="14.5" y="8.5" width="7" height="7" rx="1.2" stroke="currentColor" strokeWidth="1.6" />
+        </svg>
+      );
+    case "docker":
+      return (
+        <svg {...common}>
+          <rect x="4" y="4" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="1.6" />
+          <rect x="13" y="4" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="1.6" />
+          <rect x="8.5" y="13" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="1.6" />
+        </svg>
+      );
+    case "database":
+      return (
+        <svg {...common}>
+          <ellipse cx="12" cy="6" rx="7" ry="2.3" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M5 6v11c0 1.3 3.1 2.3 7 2.3s7-1 7-2.3V6" stroke="currentColor" strokeWidth="1.6" />
+        </svg>
+      );
+    case "terminal":
+      return (
+        <svg {...common}>
+          <rect x="3.5" y="4.5" width="17" height="15" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M7 9.5l3 2.5-3 2.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case "files":
+      return (
+        <svg {...common}>
+          <path d="M4 14.5l4-8 4 5 3-4 5 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="1.6" />
+        </svg>
+      );
+    case "clock":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M12 7.5V12l3 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case "directory":
+      return (
+        <svg {...common}>
+          <rect x="3.5" y="4.5" width="7.5" height="7.5" rx="1.3" stroke="currentColor" strokeWidth="1.6" />
+          <rect x="13" y="4.5" width="7.5" height="7.5" rx="1.3" stroke="currentColor" strokeWidth="1.6" />
+          <rect x="3.5" y="14" width="16" height="5.5" rx="1.3" stroke="currentColor" strokeWidth="1.6" />
+        </svg>
+      );
+    case "cyberpanel":
+      return (
+        <svg {...common}>
+          <path d="M4 6l8-3 8 3v6c0 5-3.4 8.4-8 9.5-4.6-1.1-8-4.5-8-9.5V6z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+        </svg>
+      );
+    case "router":
+      return (
+        <svg {...common}>
+          <rect x="3.5" y="5" width="17" height="14" rx="1.6" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M8 19v2M16 19v2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+      );
+    case "tailscale":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="2.3" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M8 8a5.5 5.5 0 000 8M16 8a5.5 5.5 0 010 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+      );
+    case "proxy":
+      return (
+        <svg {...common}>
+          <circle cx="7" cy="12" r="3" stroke="currentColor" strokeWidth="1.6" />
+          <circle cx="17" cy="12" r="3" stroke="currentColor" strokeWidth="1.6" />
+        </svg>
+      );
+    case "dns":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8.2" stroke="currentColor" strokeWidth="1.6" />
+          <path
+            d="M3.8 12h16.4M12 3.8c2.3 2.2 3.6 5.2 3.6 8.2s-1.3 6-3.6 8.2c-2.3-2.2-3.6-5.2-3.6-8.2S9.7 6 12 3.8z"
+            stroke="currentColor"
+            strokeWidth="1.6"
+          />
+        </svg>
+      );
+    case "uptime":
+      return (
+        <svg {...common}>
+          <path d="M4 15l4-6 3 3 4-7 5 10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case "discovery":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="2" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M5.5 5.5a9.5 9.5 0 000 13M18.5 5.5a9.5 9.5 0 010 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+      );
+    case "shield":
+      return (
+        <svg {...common}>
+          <path d="M12 3l7 3.2v5.4c0 4.7-3 8-7 9.4-4-1.4-7-4.7-7-9.4V6.2L12 3z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+        </svg>
+      );
+    case "mail":
+      return (
+        <svg {...common}>
+          <rect x="3.5" y="5.5" width="17" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M4 7l8 6 8-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case "backup":
+      return (
+        <svg {...common}>
+          <rect x="3.5" y="5" width="17" height="4.2" rx="1" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M4.5 9.2V17a2 2 0 002 2h11a2 2 0 002-2V9.2" stroke="currentColor" strokeWidth="1.6" />
+        </svg>
+      );
+    case "topology":
+      return (
+        <svg {...common}>
+          <circle cx="6" cy="6" r="2.3" stroke="currentColor" strokeWidth="1.6" />
+          <circle cx="18" cy="6" r="2.3" stroke="currentColor" strokeWidth="1.6" />
+          <circle cx="12" cy="18" r="2.3" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M8 7l7-.3M9 8l2.3 8.5M15 8l-2.3 8.5" stroke="currentColor" strokeWidth="1.4" />
+        </svg>
+      );
+    case "assistant":
+      return (
+        <svg {...common}>
+          <rect x="5" y="4.5" width="14" height="12" rx="2" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M9 20l3-3.5 3 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case "audit":
+      return (
+        <svg {...common}>
+          <path d="M6 4h9l5 5v11a1 1 0 01-1 1H6a1 1 0 01-1-1V5a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+          <path d="M8.5 12.5h7M8.5 15.5h7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+      );
+    case "users":
+      return (
+        <svg {...common}>
+          <circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          <circle cx="17.5" cy="8.5" r="2.3" stroke="currentColor" strokeWidth="1.6" />
+        </svg>
+      );
+    case "settings":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.6" />
+          <path
+            d="M12 3v2.3M12 18.7V21M4.2 7.5l2 1.2M17.8 15.3l2 1.2M4.2 16.5l2-1.2M17.8 8.7l2-1.2"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+          />
+        </svg>
+      );
+    case "storefront":
+      return (
+        <svg {...common}>
+          <path d="M4 9l1-5h14l1 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M4 9a3 3 0 006 0 3 3 0 006 0 3 3 0 006 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          <path d="M5 9.5V20h14V9.5" stroke="currentColor" strokeWidth="1.6" />
+        </svg>
+      );
+  }
+}
 
 function Logo() {
   return (
@@ -97,12 +334,15 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
                 key={item.href}
                 href={item.href}
                 onClick={onNavigate}
-                className={`block rounded-md px-3 py-2 text-sm transition-colors md:py-1.5 ${
+                className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors md:py-1.5 ${
                   pathname === item.href
                     ? "bg-blue-600/15 font-medium text-blue-300"
                     : "text-neutral-400 hover:bg-neutral-800/70 hover:text-neutral-200"
                 }`}
               >
+                <span className={pathname === item.href ? "opacity-100" : "opacity-85"}>
+                  <NavIcon name={item.icon} />
+                </span>
                 {item.label}
               </Link>
             ))}
