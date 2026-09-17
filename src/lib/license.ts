@@ -53,11 +53,16 @@ export async function autoActivateFromBundledKey(): Promise<void> {
 }
 
 /**
- * The seller's own deployment is never trial-limited — this flag only exists there.
- * Deliberately NOT a NEXT_PUBLIC_ variable: those get inlined into the client bundle, and since
- * this gates a server-side license decision (not UI), it must stay a plain server-only env var —
- * `SELLER_MODE`, never `NEXT_PUBLIC_SELLER_MODE` — so it can't be set to bypass licensing just by
- * being present in a customer's own build environment under the name a client-facing flag would use.
+ * The seller's own deployment is never trial-limited — this flag only exists there. An env-var
+ * check alone can NEVER be the real protection here, whatever its name: a customer runs this code
+ * on their own server and fully controls their own process environment, `NEXT_PUBLIC_`-prefixed or
+ * not — an earlier version of this comment claimed the plain `SELLER_MODE` name (as opposed to a
+ * `NEXT_PUBLIC_` one) was sufficient, which was wrong, since nothing stops a customer from setting
+ * that exact variable on their own box. The actual protection is that `lib/seller/exportBuild.ts`
+ * rewrites this function to unconditionally `return false` in every customer export (see the
+ * IGNORE_FILES / explicit re-append there) — so a customer's copy of this file never contains an
+ * env-var check to flip in the first place. This env-var version only ever runs from the seller's
+ * own repo checkout, which a customer never receives.
  */
 export function isSellerInstance(): boolean {
   return process.env.SELLER_MODE === "true";

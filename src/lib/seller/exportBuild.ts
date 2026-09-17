@@ -25,7 +25,28 @@ const SKIP_DIRS = [
 // src/lib/seed.ts holds the seller's own real hardware names, LAN IPs and network topology (dev/
 // demo convenience, gated behind SELLER_MODE in db.ts) — excluding the file itself, not just its
 // effect, means a buyer reading their own source can't see the seller's home network layout.
-const IGNORE_FILES = [".env", ".env.local", ".env*.local", "license.json", "src/lib/seed.ts"];
+// src/lib/license.ts is excluded from the plain glob because isSellerInstance() inside it is
+// patched below — an env-var check in code that ships to a customer's own server can never be a
+// real protection (they control their own environment), so the shipped copy has it hardcoded to
+// `false` instead of reading SELLER_MODE at all.
+const IGNORE_FILES = [".env", ".env.local", ".env*.local", "license.json", "src/lib/seed.ts", "src/lib/license.ts"];
+
+const SELLER_INSTANCE_CHECK = `export function isSellerInstance(): boolean {\n  return process.env.SELLER_MODE === "true";\n}`;
+const SELLER_INSTANCE_DISABLED = `export function isSellerInstance(): boolean {\n  // Hardcoded false in every customer export (see lib/seller/exportBuild.ts) — never a runtime\n  // env-var check here, since a customer controls their own server's environment entirely.\n  return false;\n}`;
+
+/** Neutralizes isSellerInstance() for a customer export — see the IGNORE_FILES comment above.
+ * Throws rather than silently shipping a bypassable copy if the source no longer matches exactly
+ * (e.g. the function was edited and this patch fell out of sync). */
+function patchLicenseFileForExport(projectRoot: string): string {
+  const source = readFileSync(path.join(projectRoot, "src/lib/license.ts"), "utf8");
+  const occurrences = source.split(SELLER_INSTANCE_CHECK).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `Impossible de sécuriser l'export : isSellerInstance() introuvable ou dupliquée dans license.ts (${occurrences} correspondance(s)).`
+    );
+  }
+  return source.replace(SELLER_INSTANCE_CHECK, SELLER_INSTANCE_DISABLED);
+}
 
 export type ExportLicenseConfig = {
   trialDays: number;
@@ -62,6 +83,7 @@ export async function buildClientArchive(license: ExportLicenseConfig): Promise<
     });
 
     archive.append(JSON.stringify(license, null, 2), { name: "license.json" });
+    archive.append(patchLicenseFileForExport(projectRoot), { name: "src/lib/license.ts" });
 
     archive.finalize();
   });
