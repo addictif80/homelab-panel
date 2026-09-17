@@ -71,9 +71,14 @@ export default function LoginPage() {
 
   return (
     <main className="flex flex-1 items-center justify-center bg-neutral-950 p-6">
-      <div className="w-full max-w-sm rounded-xl border border-neutral-800 bg-neutral-900 p-8 shadow-xl">
-        <div className="mb-6 text-center">
-          <div className="mb-2 text-2xl">🏠</div>
+      <div className="w-full max-w-sm rounded-lg border border-neutral-800 bg-neutral-900 p-8">
+        <div className="mb-6 flex flex-col items-center text-center">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" className="mb-3">
+            <rect x="3" y="3" width="18" height="18" rx="5" stroke="currentColor" strokeWidth="1.6" className="text-blue-600" />
+            <path d="M7.5 9H16.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="text-blue-600" />
+            <path d="M7.5 12.5H16.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="text-blue-600" />
+            <path d="M7.5 16H12.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="text-blue-600" />
+          </svg>
           <h1 className="text-lg font-semibold text-neutral-100">Homelab Panel</h1>
           <p className="mt-1 text-sm text-neutral-500">Connexion sécurisée</p>
         </div>

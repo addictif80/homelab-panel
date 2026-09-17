@@ -79,7 +79,7 @@ export default function BoardPage() {
             {links.map((link) => (
               <div
                 key={link.id}
-                className="flex flex-col justify-between overflow-hidden rounded-2xl border border-neutral-800 bg-gradient-to-b from-neutral-900 to-neutral-950 shadow-xl shadow-black/20 transition-transform hover:-translate-y-0.5"
+                className="flex flex-col justify-between overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 transition-colors hover:border-neutral-700"
               >
                 {link.screenshotDataUrl && (
                   <img src={link.screenshotDataUrl} alt="" className="h-40 w-full border-b border-neutral-800 object-cover object-top" />
