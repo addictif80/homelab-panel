@@ -1,13 +1,14 @@
 @import "tailwindcss";
 
-/* Dark is the CSS base; [data-theme="light"] (set by ThemeInit before paint — light is the
-   default the app ships with, toggled by ThemeToggle) flips color-scheme so native form controls
-   (inputs, selects, scrollbars) render with the right defaults for each theme. */
+/* Light is the CSS base (the app's default, matching the approved "minimal épuré" mockup);
+   [data-theme="dark"] (toggled by ThemeToggle, applied before paint by ThemeInit when explicitly
+   chosen) overrides it. color-scheme flips too so native form controls (inputs, selects,
+   scrollbars) render with the right defaults for each theme. */
 :root {
-  color-scheme: dark;
-}
-[data-theme="light"] {
   color-scheme: light;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 input,
@@ -41,46 +42,68 @@ body {
   }
 }
 
-/* Rebrands every existing blue-* utility (buttons, active nav state, badges, links) across the
-   whole app to one indigo accent (Linear/Vercel-style "minimal épuré" direction), instead of
-   touching each of the ~25 pages that already use Tailwind's default blue individually. */
+/* Colors copied verbatim from the approved mockup (Linear/Vercel-style "minimal épuré"), mapped
+   onto the neutral, blue, red, amber and emerald Tailwind scales so every existing utility class
+   across the whole app (bg-neutral-900, text-neutral-400, border-neutral-800, bg-blue-600, ...)
+   renders the mockup's exact palette without having to touch each of the ~30 pages that use them.
+     neutral-950 = --bg, neutral-900 = --surface, neutral-800 = --border,
+     neutral-100 = --text, neutral-400 = --text-muted, neutral-600 = --text-faint.
+   blue-600/blue-300 both carry --accent — the mockup uses the accent color directly for text
+   (nav-item.active, links) rather than a separately darkened/lightened shade. */
 @theme {
-  --color-blue-200: #c7d2fe;
-  --color-blue-300: #a5b4fc;
-  --color-blue-400: #818cf8;
-  --color-blue-500: #6366f1;
-  --color-blue-600: #4f46e5;
-  --color-blue-700: #4338ca;
-  --color-blue-800: #3730a3;
-  --color-blue-900: #312e81;
-  --color-blue-950: #1e1b4b;
+  --color-blue-200: #d9d6fb;
+  --color-blue-300: #5046e5;
+  --color-blue-400: #8b82ef;
+  --color-blue-500: #6a60e9;
+  --color-blue-600: #5046e5;
+  --color-blue-700: #4038c2;
+  --color-blue-800: #332d97;
+  --color-blue-900: #29246e;
+  --color-blue-950: #18163f;
+
+  --color-red-300: #d1373f;
+  --color-amber-300: #b7791f;
+  --color-emerald-300: #16884a;
+
+  --color-neutral-50: #0d0d0f;
+  --color-neutral-100: #17171a;
+  --color-neutral-200: #232326;
+  --color-neutral-300: #3a3a41;
+  --color-neutral-400: #6b6b74;
+  --color-neutral-500: #85858c;
+  --color-neutral-600: #a3a3ab;
+  --color-neutral-700: #c9c9ce;
+  --color-neutral-800: #e6e6ea;
+  --color-neutral-900: #ffffff;
+  --color-neutral-950: #f7f7f8;
+
+  /* Text color on a solid accent button flips per theme (see [data-theme="dark"] below) since the
+     mockup's dark accent is a pale lavender that needs dark text, not white, for contrast. */
+  --btn-accent-text: #ffffff;
 }
 
-/* Light theme: mirrors the neutral scale (950<->50, 900<->100, ...) so every existing
-   bg-neutral-900 / text-neutral-400 / border-neutral-800 utility across the whole app renders
-   correctly in both themes without having to touch each of the ~30 pages that already use them.
-   The three surface shades (800/900/950 — borders, cards, page background) carry a hint of warmth
-   instead of flat gray, which is the only deliberate departure from a pure mirror. */
-[data-theme="light"] {
-  /* Same story for every status badge/alert box across the app: light red/amber/emerald text on
-     a translucent tinted background (security findings, error boxes, update badges...) — legible
-     on dark surfaces, too low-contrast on light ones. Darkened here instead of at each call site. */
-  --color-blue-300: #4338ca;
-  --color-red-300: #b91c1c;
-  --color-amber-300: #b45309;
-  --color-emerald-300: #047857;
+/* Dark theme: same mapping, mockup's dark values. */
+[data-theme="dark"] {
+  --color-blue-300: #7c74ff;
+  --color-blue-600: #7c74ff;
 
-  --color-neutral-50: oklch(14.5% 0 none);
-  --color-neutral-100: oklch(20.5% 0 none);
-  --color-neutral-200: oklch(26.9% 0 none);
-  --color-neutral-300: oklch(37.1% 0 none);
-  --color-neutral-400: oklch(43.9% 0 none);
-  --color-neutral-500: oklch(55.6% 0 none);
-  --color-neutral-600: oklch(70.8% 0 none);
-  --color-neutral-700: oklch(87% 0 none);
-  --color-neutral-800: oklch(92.2% 0.004 75);
-  --color-neutral-900: oklch(97% 0.004 75);
-  --color-neutral-950: oklch(98.5% 0.004 75);
+  --color-red-300: #ff6b6f;
+  --color-amber-300: #f0b429;
+  --color-emerald-300: #3ddc84;
+
+  --color-neutral-50: #f8f8f9;
+  --color-neutral-100: #f2f2f4;
+  --color-neutral-200: #d8d8db;
+  --color-neutral-300: #b3b3b8;
+  --color-neutral-400: #96969f;
+  --color-neutral-500: #79797f;
+  --color-neutral-600: #5c5c64;
+  --color-neutral-700: #38383d;
+  --color-neutral-800: #242429;
+  --color-neutral-900: #131316;
+  --color-neutral-950: #0b0b0d;
+
+  --btn-accent-text: #0b0b0d;
 }
 
 @layer components {
@@ -88,7 +111,8 @@ body {
     @apply rounded-lg border border-neutral-800 bg-neutral-900;
   }
   .btn-primary {
-    @apply rounded-md border border-transparent bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply rounded-md border border-transparent bg-blue-600 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50;
+    color: var(--btn-accent-text);
   }
   .btn-secondary {
     @apply rounded-md border border-neutral-800 px-3 py-1.5 text-sm font-medium text-neutral-200 transition-colors hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-50;

@@ -142,75 +142,75 @@ export default function Home() {
   const avgCpu = reachable.length > 0 ? totals.cpuSum / reachable.length : null;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Vue d&apos;ensemble</h1>
-        <p className="text-sm text-neutral-400">Panneau de contrôle centralisé du homelab.</p>
+        <h1 className="page-title text-xl">Vue d&apos;ensemble</h1>
+        <p className="page-subtitle">Panneau de contrôle centralisé du homelab.</p>
       </div>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-neutral-300">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-neutral-600">
           Ressources cumulées — serveurs physiques + VPS
         </h2>
         {statsLoading ? (
           <p className="text-sm text-neutral-500">Chargement des statistiques...</p>
         ) : (
-          <>
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-              <StatCard
-                label="CPU (moyenne)"
-                value={avgCpu === null ? "—" : `${avgCpu.toFixed(0)}%`}
-                sub={`${totals.cores} cœurs cumulés`}
-              />
-              <StatCard
-                label="RAM utilisée"
-                value={formatGb(totals.memUsed)}
-                sub={`sur ${formatGb(totals.memTotal)}`}
-              />
-              <StatCard
-                label="Stockage utilisé"
-                value={formatGb(totals.diskUsed)}
-                sub={`sur ${formatGb(totals.diskTotal)}`}
-              />
-              <StatCard
-                label="Machines"
-                value={`${reachable.length}/${stats.length}`}
-                sub="joignables"
-              />
-            </div>
-            {stats.some((s) => s.error) && (
-              <div className="space-y-1">
-                {stats
-                  .filter((s) => s.error)
-                  .map((s) => (
-                    <p key={s.hostId} className="text-xs text-amber-400">
-                      {s.hostName}: {s.error}
-                    </p>
-                  ))}
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <StatCard
+              label="CPU (moyenne)"
+              value={avgCpu === null ? "—" : `${avgCpu.toFixed(0)}%`}
+              sub={`${totals.cores} cœurs cumulés`}
+            />
+            <StatCard
+              label="RAM utilisée"
+              value={formatGb(totals.memUsed)}
+              sub={`sur ${formatGb(totals.memTotal)}`}
+            />
+            <StatCard
+              label="Stockage utilisé"
+              value={formatGb(totals.diskUsed)}
+              sub={`sur ${formatGb(totals.diskTotal)}`}
+            />
+            <StatCard
+              label="Machines"
+              value={`${reachable.length}/${stats.length}`}
+              sub="joignables"
+            />
+          </div>
+        )}
+      </section>
+
+      <div className="grid items-start gap-6 lg:grid-cols-[1.6fr_1fr]">
+        <div className="space-y-6">
+          {reachable.length > 0 && (
+            <section>
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-sm font-semibold">Machines</h2>
+                <a href="/inventory" className="text-xs text-neutral-500 hover:text-blue-600">
+                  Voir l&apos;inventaire →
+                </a>
               </div>
-            )}
-            {reachable.length > 0 && (
-              <div className="overflow-auto rounded border border-neutral-800">
+              <div className="card overflow-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-neutral-900 text-left text-neutral-400">
+                  <thead className="bg-neutral-950 text-left text-[11px] uppercase tracking-wider text-neutral-600">
                     <tr>
-                      <th className="px-3 py-2 font-medium">Machine</th>
-                      <th className="px-3 py-2 font-medium">CPU</th>
-                      <th className="px-3 py-2 font-medium">RAM</th>
-                      <th className="px-3 py-2 font-medium">Disque</th>
+                      <th className="px-3 py-2.5 font-semibold">Machine</th>
+                      <th className="px-3 py-2.5 font-semibold">CPU</th>
+                      <th className="px-3 py-2.5 font-semibold">RAM</th>
+                      <th className="px-3 py-2.5 font-semibold">Disque</th>
                     </tr>
                   </thead>
                   <tbody>
                     {reachable.map((s) => (
                       <tr key={s.hostId} className="border-t border-neutral-800">
-                        <td className="px-3 py-2 font-medium">{s.hostName}</td>
-                        <td className="px-3 py-2 text-neutral-400">
+                        <td className="px-3 py-2.5 font-medium">{s.hostName}</td>
+                        <td className="px-3 py-2.5 text-neutral-400">
                           {s.cpuUsedPercent === null ? "—" : `${s.cpuUsedPercent.toFixed(0)}%`}
                         </td>
-                        <td className="px-3 py-2 text-neutral-400">
+                        <td className="px-3 py-2.5 text-neutral-400">
                           {formatGb((s.memUsedMb ?? 0) / 1024)} / {formatGb((s.memTotalMb ?? 0) / 1024)}
                         </td>
-                        <td className="px-3 py-2 text-neutral-400">
+                        <td className="px-3 py-2.5 text-neutral-400">
                           {formatGb(s.diskUsedGb)} / {formatGb(s.diskTotalGb)}
                         </td>
                       </tr>
@@ -218,23 +218,52 @@ export default function Home() {
                   </tbody>
                 </table>
               </div>
-            )}
-          </>
-        )}
-      </section>
+            </section>
+          )}
 
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-neutral-300">Logs web & mail</h2>
-          <button
-            onClick={() => setShowLogForm((s) => !s)}
-            className="text-xs text-blue-400 hover:underline"
-          >
-            + Ajouter une source de logs
-          </button>
+          <section>
+            <h2 className="mb-2 text-sm font-semibold">Accès rapide</h2>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              {MODULES.map((m) => (
+                <a key={m.href} href={m.href} className="card p-4 hover:border-neutral-700">
+                  <div className="text-sm font-medium">{m.name}</div>
+                </a>
+              ))}
+            </div>
+          </section>
         </div>
 
-        {showLogForm && (
+        <div className="space-y-6">
+          {stats.some((s) => s.error) && (
+            <section>
+              <h2 className="mb-2 text-sm font-semibold">Alertes</h2>
+              <div className="card divide-y divide-neutral-800">
+                {stats
+                  .filter((s) => s.error)
+                  .map((s) => (
+                    <div key={s.hostId} className="flex items-start gap-2.5 px-3.5 py-3 text-xs">
+                      <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
+                      <span className="text-neutral-300">
+                        <span className="font-medium">{s.hostName}</span> : {s.error}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </section>
+          )}
+
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold">Logs web & mail</h2>
+              <button
+                onClick={() => setShowLogForm((s) => !s)}
+                className="text-xs text-blue-600 hover:underline"
+              >
+                + Ajouter une source
+              </button>
+            </div>
+
+            {showLogForm && (
           <form onSubmit={submitLogSource} className="max-w-lg space-y-3 rounded border border-neutral-800 p-4">
             <p className="text-xs text-neutral-400">
               Pointe vers le conteneur qui produit ces logs (ex: Nginx Proxy Manager pour le web,
@@ -338,29 +367,15 @@ export default function Home() {
           );
         })}
 
-        {sources.length === 0 && !showLogForm && (
-          <p className="text-sm text-neutral-500">
-            Aucune source de logs configurée. Ajoute le conteneur Nginx Proxy Manager ou Mailcow
-            pour voir les accès, erreurs et l&apos;activité mail ici.
-          </p>
-        )}
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-neutral-300">Modules</h2>
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-          {MODULES.map((m) => (
-            <a
-              key={m.href}
-              href={m.href}
-              className="rounded border border-neutral-800 bg-neutral-900 p-4 hover:border-neutral-700"
-            >
-              <div className="text-sm font-medium">{m.name}</div>
-            </a>
-          ))}
+            {sources.length === 0 && !showLogForm && (
+              <p className="text-sm text-neutral-500">
+                Aucune source de logs configurée. Ajoute le conteneur Nginx Proxy Manager ou
+                Mailcow pour voir les accès, erreurs et l&apos;activité mail ici.
+              </p>
+            )}
+          </section>
         </div>
-      </section>
-
+      </div>
     </div>
   );
 }

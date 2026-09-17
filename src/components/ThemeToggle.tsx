@@ -6,14 +6,14 @@ export default function ThemeToggle({ className = "" }: { className?: string }) 
   const [theme, setTheme] = useState<"dark" | "light" | null>(null);
 
   useEffect(() => {
-    setTheme(document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark");
+    setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light");
   }, []);
 
   function toggle() {
     const next = theme === "light" ? "dark" : "light";
     setTheme(next);
-    if (next === "light") {
-      document.documentElement.setAttribute("data-theme", "light");
+    if (next === "dark") {
+      document.documentElement.setAttribute("data-theme", "dark");
     } else {
       document.documentElement.removeAttribute("data-theme");
     }
