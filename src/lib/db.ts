@@ -596,6 +596,16 @@ function migrate(db: Database.Database) {
     // this host, cached as a data URL for the same reason the favicon is.
     db.exec(`ALTER TABLE service_links ADD COLUMN screenshot_data_url TEXT`);
   }
+  if (!serviceLinkColumns.some((c) => c.name === "directory_opt_in")) {
+    // Added to CREATE TABLE alongside the "annuaire public" feature but missed here at the time —
+    // any service_links table created before that (including this app's own dev DB) never got
+    // these columns, so opting into the directory crashed with "no such column: directory_opt_in".
+    db.exec(`ALTER TABLE service_links ADD COLUMN directory_opt_in INTEGER NOT NULL DEFAULT 0`);
+    db.exec(
+      `ALTER TABLE service_links ADD COLUMN directory_status TEXT NOT NULL DEFAULT 'none' CHECK (directory_status IN ('none','pending','approved','rejected'))`
+    );
+    db.exec(`ALTER TABLE service_links ADD COLUMN directory_submission_id TEXT`);
+  }
 
   const directorySubmissionColumns = db.prepare(`PRAGMA table_info(directory_submissions)`).all() as {
     name: string;

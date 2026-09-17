@@ -32,9 +32,28 @@ export type DirectorySubmitResult =
   | { ok: true; submissionId: string; status: "pending" }
   | { ok: false; error: string };
 
+// Fixed (license_key, instance_id) pair for the seller's own submissions — there's no real
+// license key to check against on the seller's own instance, and submissions land directly in
+// the local directory_submissions table instead of over HTTP (there's no "remote seller server"
+// to call, this instance *is* that server). Only ever reached when isSellerInstance() is true,
+// which is hardcoded to false in every customer export (see exportBuild.ts) — the dynamic
+// require() below (rather than a static import) is what keeps this file buildable for a customer,
+// whose copy never has src/lib/seller/ at all. The hand-written type (rather than
+// `typeof import("./seller/directory")`) matters too: a type-only reference to that path still
+// makes tsc try to resolve the module for its shape, which fails the same way a real import would
+// on a customer's copy even though the code itself never runs there.
+const SELLER_SUBMISSION_IDENTITY = { licenseKey: "__seller__", instanceId: "__seller__" };
+
+type SellerDirectoryModule = {
+  upsertDirectorySubmission: (input: DirectorySubmitInput & { licenseKey: string; instanceId: string }) => { id: string };
+  withdrawDirectorySubmission: (id: string, licenseKey: string, instanceId: string) => boolean;
+};
+
 export async function submitToDirectory(input: DirectorySubmitInput): Promise<DirectorySubmitResult> {
   if (isSellerInstance()) {
-    return { ok: false, error: "L'annuaire public n'est pas disponible depuis l'instance du vendeur." };
+    const { upsertDirectorySubmission } = require("./seller/directory") as SellerDirectoryModule;
+    const submission = upsertDirectorySubmission({ ...SELLER_SUBMISSION_IDENTITY, ...input });
+    return { ok: true, submissionId: submission.id, status: "pending" };
   }
   const serverUrl = getLicenseServerUrl();
   const key = getActivationKey();
@@ -61,6 +80,11 @@ export async function submitToDirectory(input: DirectorySubmitInput): Promise<Di
 /** Best-effort: even if the seller's server can't be reached, the caller still clears the local
  * opt-in state — the customer withdrawing shouldn't be blocked by a transient network issue. */
 export async function withdrawFromDirectory(submissionId: string): Promise<void> {
+  if (isSellerInstance()) {
+    const { withdrawDirectorySubmission } = require("./seller/directory") as SellerDirectoryModule;
+    withdrawDirectorySubmission(submissionId, SELLER_SUBMISSION_IDENTITY.licenseKey, SELLER_SUBMISSION_IDENTITY.instanceId);
+    return;
+  }
   const serverUrl = getLicenseServerUrl();
   const key = getActivationKey();
   if (!serverUrl || !key) return;
