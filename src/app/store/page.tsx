@@ -162,6 +162,140 @@ const FEATURES = [
       </>
     ),
   },
+  {
+    title: "Tableau de bord des services + page publique",
+    text: "Toutes tes applications hébergées sous forme de cartes (nom, favicon, capture d'écran), avec un compteur de clics et une case pour les afficher sur une page publique premium — plus besoin d'un README avec des liens.",
+    icon: (
+      <>
+        <rect x="3.5" y="4.5" width="7.5" height="7.5" rx="1.3" stroke="currentColor" strokeWidth="1.6" />
+        <rect x="13" y="4.5" width="7.5" height="7.5" rx="1.3" stroke="currentColor" strokeWidth="1.6" />
+        <rect x="3.5" y="14" width="7.5" height="5.5" rx="1.3" stroke="currentColor" strokeWidth="1.6" />
+        <rect x="13" y="14" width="7.5" height="5.5" rx="1.3" stroke="currentColor" strokeWidth="1.6" />
+      </>
+    ),
+  },
+  {
+    title: "Annuaire public communautaire",
+    text: "Propose un de tes services (validé par un admin) dans un annuaire partagé entre toutes les instances du panel, avec capture d'écran et description — de la visibilité gratuite pour ton homelab.",
+    icon: (
+      <>
+        <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
+        <circle cx="9" cy="10" r="1.4" stroke="currentColor" strokeWidth="1.6" />
+        <circle cx="15.5" cy="9" r="1.4" stroke="currentColor" strokeWidth="1.6" />
+        <circle cx="12" cy="16" r="1.4" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M9.9 11.2l1.4 3.4M14.2 10.2l-1.8 4.2" stroke="currentColor" strokeWidth="1.4" />
+      </>
+    ),
+  },
+  {
+    title: "Anti-spam mail avec blocage en un clic",
+    text: "Historique des mails reçus (IP, expéditeur, sujet) analysé depuis les logs de ton serveur mail (Postfix, rspamd) — un bouton bannit l'IP sur toutes tes machines et l'adresse d'expédition côté Postfix.",
+    icon: (
+      <>
+        <rect x="3.5" y="5.5" width="17" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M4 7l8 6 8-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M15.5 15.5l3 3M18.5 15.5l-3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </>
+    ),
+  },
+  {
+    title: "Gestionnaire de bases de données intégré",
+    text: "MySQL/MariaDB et PostgreSQL directement dans le panel via SSH (pas de port à exposer) : parcours et édite les tables, requêtes SQL libres, création de colonnes, sauvegarde/restauration en un clic.",
+    icon: (
+      <>
+        <ellipse cx="12" cy="6" rx="7.5" ry="2.6" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M4.5 6v6c0 1.4 3.4 2.6 7.5 2.6s7.5-1.2 7.5-2.6V6" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M4.5 12v6c0 1.4 3.4 2.6 7.5 2.6s7.5-1.2 7.5-2.6v-6" stroke="currentColor" strokeWidth="1.6" />
+      </>
+    ),
+  },
+  {
+    title: "Failover automatique du reverse proxy",
+    text: "Configure un serveur de secours (ou une page de maintenance personnalisée) par redirection NPM : nginx bascule tout seul et instantanément dès que le service principal répond en erreur.",
+    icon: (
+      <>
+        <circle cx="7" cy="12" r="3.2" stroke="currentColor" strokeWidth="1.6" />
+        <circle cx="17" cy="12" r="3.2" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M10.2 12h3.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeDasharray="2 2" />
+      </>
+    ),
+  },
+  {
+    title: "SSH vers n'importe quel conteneur ou LXC",
+    text: "Terminal direct dans un conteneur Docker ou une LXC Proxmox détecté automatiquement (pct exec / docker exec) — aucune machine à ajouter manuellement à l'inventaire pour y avoir accès.",
+    icon: (
+      <>
+        <rect x="3.5" y="3.5" width="17" height="17" rx="2" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M7.5 9l2.5 3-2.5 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M13 15h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </>
+    ),
+  },
+  {
+    title: "Assistant IA local (Ollama)",
+    text: "Branche ton propre serveur Ollama pour un assistant qui connaît le contexte de ton infra et t'aide à résoudre les alertes de sécurité — tout tourne chez toi, aucune donnée envoyée à un tiers.",
+    icon: (
+      <>
+        <rect x="5" y="4.5" width="14" height="12" rx="2" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M9 20l3-3.5 3 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="9.5" cy="10" r="1.1" fill="currentColor" />
+        <circle cx="14.5" cy="10" r="1.1" fill="currentColor" />
+      </>
+    ),
+  },
+  {
+    title: "Comptes multi-utilisateurs à accès limité",
+    text: "Ajoute des comptes avec des permissions restreintes (lecture seule, accès à certaines machines) pour ta famille, tes collègues ou un prestataire, sans partager le compte administrateur principal.",
+    icon: (
+      <>
+        <circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <circle cx="17.5" cy="8.5" r="2.3" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M15 19c.2-2.2 1.7-4 3.5-4.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </>
+    ),
+  },
+  {
+    title: "Découverte réseau automatique",
+    text: "Scanne ton réseau local et détecte les machines non encore ajoutées à l'inventaire — pratique pour repérer un appareil oublié ou un intrus sur le LAN.",
+    icon: (
+      <>
+        <circle cx="12" cy="12" r="2.2" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M8.5 8.5a5 5 0 000 7M15.5 8.5a5 5 0 010 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <path d="M5.5 5.5a9.5 9.5 0 000 13M18.5 5.5a9.5 9.5 0 010 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </>
+    ),
+  },
+  {
+    title: "Fenêtres de maintenance planifiées",
+    text: "Programme des mises à jour échelonnées sur plusieurs machines (avec délai entre chacune), en mode simulation ou en application réelle, pour éviter d'updater toute l'infra en même temps.",
+    icon: (
+      <>
+        <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M12 7.5V12l3 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </>
+    ),
+  },
+  {
+    title: "Application installable (PWA)",
+    text: "Installe le panel comme une vraie application sur ton téléphone ou ton ordinateur, avec son icône — plus besoin de naviguer jusqu'à l'URL à chaque fois.",
+    icon: (
+      <>
+        <rect x="7" y="2.5" width="10" height="19" rx="2" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M11 18.5h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </>
+    ),
+  },
+  {
+    title: "Licence auto-hébergée que tu contrôles",
+    text: "Statut de licence toujours visible dans le panel ; en cas de doute sur une fuite de ta clé, révoque-la et reçois-en une nouvelle en un clic, l'ancienne devient immédiatement inutilisable.",
+    icon: (
+      <>
+        <path d="M12 3l7 3.2v5.4c0 4.7-3 8-7 9.4-4-1.4-7-4.7-7-9.4V6.2L12 3z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+        <path d="M12 8v4.5l3 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </>
+    ),
+  },
 ];
 
 const COMPARISON_ROWS = [
