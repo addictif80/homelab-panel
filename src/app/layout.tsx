@@ -36,7 +36,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport = {
-  themeColor: "#3b56d9",
+  themeColor: "#4f46e5",
   // viewportFit "cover" lets the standalone app draw under the notch/home-indicator area — the
   // safe-area-inset-* env() values used in AppShell/Sidebar only report non-zero once this is set.
   viewportFit: "cover",
@@ -49,6 +49,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html
       lang="fr"
       className={`${spaceGrotesk.variable} ${plexSans.variable} ${plexMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
       <head>
         <ThemeInit />

@@ -11,7 +11,6 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string }[] }[
     items: [
       { href: "/", label: "Vue d'ensemble" },
       { href: "/brain", label: "Vue vivante" },
-      { href: "/services", label: "Services" },
     ],
   },
   {
@@ -25,6 +24,12 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string }[] }[
       { href: "/ssh", label: "Terminal SSH" },
       { href: "/updates", label: "Mises à jour" },
       { href: "/files", label: "Explorateur de fichiers" },
+    ],
+  },
+  {
+    label: "Services",
+    items: [
+      { href: "/services", label: "Services & annuaire" },
       { href: "/cyberpanel", label: "CyberPanel" },
     ],
   },
@@ -40,18 +45,18 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string }[] }[
     ],
   },
   {
-    label: "Protection",
+    label: "Sécurité",
     items: [
       { href: "/security", label: "Sécurité" },
       { href: "/mail-security", label: "Anti-spam mail" },
       { href: "/backups", label: "Sauvegardes" },
-      { href: "/assistant", label: "Assistant IA" },
     ],
   },
   {
     label: "Système",
     items: [
       { href: "/inventory", label: "Inventaire & topologie" },
+      { href: "/assistant", label: "Assistant IA" },
       { href: "/audit", label: "Journal d'audit" },
       { href: "/users", label: "Comptes" },
       { href: "/settings", label: "Réglages" },
