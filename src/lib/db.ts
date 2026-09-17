@@ -524,6 +524,14 @@ function migrate(db: Database.Database) {
       last_error TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- Private scratchpad on Vue d'ensemble — one per user (keyed by username, same identity the
+    -- session cookie carries), never shared between accounts on the same instance.
+    CREATE TABLE IF NOT EXISTS user_notes (
+      username TEXT PRIMARY KEY,
+      content TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Trial clock starts the instant the database is first created — not on some later "first

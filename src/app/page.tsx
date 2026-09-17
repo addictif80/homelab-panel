@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 
 const LiveLogPanel = dynamic(() => import("@/components/LiveLogPanel"), { ssr: false });
@@ -234,6 +234,8 @@ export default function Home() {
         </div>
 
         <div className="space-y-6">
+          <NotesCard />
+
           {stats.some((s) => s.error) && (
             <section>
               <h2 className="mb-2 text-sm font-semibold">Alertes</h2>
@@ -377,6 +379,55 @@ export default function Home() {
         </div>
       </div>
     </div>
+  );
+}
+
+function NotesCard() {
+  const [content, setContent] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    fetch("/api/notes")
+      .then((r) => r.json())
+      .then((d) => setContent(d.content ?? ""))
+      .finally(() => setLoaded(true));
+  }, []);
+
+  function handleChange(value: string) {
+    setContent(value);
+    setStatus("saving");
+    if (saveTimeout.current) clearTimeout(saveTimeout.current);
+    saveTimeout.current = setTimeout(async () => {
+      await fetch("/api/notes", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: value }),
+      });
+      setStatus("saved");
+    }, 600);
+  }
+
+  return (
+    <section>
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-sm font-semibold">Notes</h2>
+        <span className="text-xs text-neutral-500">
+          {status === "saving" ? "Enregistrement..." : status === "saved" ? "Enregistré" : ""}
+        </span>
+      </div>
+      <div className="card">
+        <textarea
+          value={content}
+          onChange={(e) => handleChange(e.target.value)}
+          disabled={!loaded}
+          placeholder="Notes personnelles — visibles uniquement par toi sur cette instance."
+          rows={6}
+          className="w-full resize-none bg-transparent p-3.5 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none"
+        />
+      </div>
+    </section>
   );
 }
 
