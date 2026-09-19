@@ -1,5 +1,12 @@
 import { runSshCommand, shellQuote } from "./ssh";
 
+// Each probe below runs sequentially (one disk's smartctl after another) under one outer 20s
+// budget (see the health API route) with no cancellation of its own — without a per-call timeout,
+// a single hung sudo/profile chain on one disk (or a UPS tool that never returns) could burn the
+// whole budget and leave every later probe unattempted. 6s keeps several probes affordable within
+// that 20s window while still giving a slow-but-working host room to answer.
+const PROBE_TIMEOUT_MS = 6000;
+
 /**
  * SSH-based hardware telemetry — works on the existing fleet (physical boxes without a BMC/IPMI
  * controller included) using whatever monitoring tools are already on the box, rather than
@@ -76,10 +83,10 @@ function parseSmart(output: string): { healthy: boolean | null; temperatureC: nu
 }
 
 async function getUpsStatus(hostId: number): Promise<UpsStatus | null> {
-  const list = await runSshCommand(hostId, "upsc -l 2>/dev/null").catch(() => null);
+  const list = await runSshCommand(hostId, "upsc -l 2>/dev/null", { timeoutMs: PROBE_TIMEOUT_MS }).catch(() => null);
   const upsName = list?.code === 0 ? list.stdout.trim().split("\n")[0] : "";
   if (upsName) {
-    const detail = await runSshCommand(hostId, `upsc ${shellQuote(upsName)} 2>/dev/null`).catch(() => null);
+    const detail = await runSshCommand(hostId, `upsc ${shellQuote(upsName)} 2>/dev/null`, { timeoutMs: PROBE_TIMEOUT_MS }).catch(() => null);
     if (detail?.stdout) {
       const status = detail.stdout.match(/^ups\.status:\s*(.+)$/m)?.[1]?.trim();
       const charge = detail.stdout.match(/^battery\.charge:\s*([\d.]+)/m)?.[1];
@@ -87,7 +94,7 @@ async function getUpsStatus(hostId: number): Promise<UpsStatus | null> {
     }
   }
 
-  const apc = await runSshCommand(hostId, "apcaccess status 2>/dev/null").catch(() => null);
+  const apc = await runSshCommand(hostId, "apcaccess status 2>/dev/null", { timeoutMs: PROBE_TIMEOUT_MS }).catch(() => null);
   if (apc?.code === 0 && apc.stdout.trim()) {
     const status = apc.stdout.match(/^STATUS\s*:\s*(.+)$/m)?.[1]?.trim();
     const charge = apc.stdout.match(/^BCHARGE\s*:\s*([\d.]+)/m)?.[1];
@@ -108,7 +115,9 @@ type SmartTarget = { device: string; label: string; typeArg: string | null };
  * direct-attached disks.
  */
 async function getSmartctlTargets(hostId: number): Promise<SmartTarget[]> {
-  const scanRes = await runSshCommand(hostId, "smartctl --scan 2>/dev/null", { sudo: true }).catch(() => null);
+  const scanRes = await runSshCommand(hostId, "smartctl --scan 2>/dev/null", { sudo: true, timeoutMs: PROBE_TIMEOUT_MS }).catch(
+    () => null
+  );
   if (scanRes?.code === 0 && scanRes.stdout.trim()) {
     const scanned = scanRes.stdout
       .split("\n")
@@ -118,7 +127,9 @@ async function getSmartctlTargets(hostId: number): Promise<SmartTarget[]> {
     if (scanned.length > 0) return scanned;
   }
 
-  const lsblkRes = await runSshCommand(hostId, "lsblk -d -n -o NAME,TYPE 2>/dev/null").catch(() => null);
+  const lsblkRes = await runSshCommand(hostId, "lsblk -d -n -o NAME,TYPE 2>/dev/null", { timeoutMs: PROBE_TIMEOUT_MS }).catch(
+    () => null
+  );
   return (lsblkRes?.stdout || "")
     .split("\n")
     .map((l) => l.trim())
@@ -131,7 +142,7 @@ async function getSmartctlTargets(hostId: number): Promise<SmartTarget[]> {
 export async function getHardwareHealth(hostId: number): Promise<HardwareHealth> {
   const toolsMissing: string[] = [];
 
-  const sensorsRes = await runSshCommand(hostId, "sensors -u 2>/dev/null").catch(() => null);
+  const sensorsRes = await runSshCommand(hostId, "sensors -u 2>/dev/null", { timeoutMs: PROBE_TIMEOUT_MS }).catch(() => null);
   const temperatures = sensorsRes?.code === 0 && sensorsRes.stdout.trim() ? parseSensors(sensorsRes.stdout) : [];
   if (temperatures.length === 0) toolsMissing.push("lm-sensors");
 
@@ -141,9 +152,10 @@ export async function getHardwareHealth(hostId: number): Promise<HardwareHealth>
   let smartAvailable = false;
   for (const target of targets) {
     const typeFlag = target.typeArg ? `-d ${shellQuote(target.typeArg)} ` : "";
-    const smart = await runSshCommand(hostId, `smartctl -H -A ${typeFlag}${shellQuote(target.device)} 2>&1`, { sudo: true }).catch(
-      () => null
-    );
+    const smart = await runSshCommand(hostId, `smartctl -H -A ${typeFlag}${shellQuote(target.device)} 2>&1`, {
+      sudo: true,
+      timeoutMs: PROBE_TIMEOUT_MS,
+    }).catch(() => null);
     if (!smart || smart.code === 127 || /command not found|not recognized/i.test(smart.stderr || "")) continue;
     smartAvailable = true;
     disks.push({ device: target.label, ...parseSmart(smart.stdout) });

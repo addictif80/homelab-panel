@@ -1,8 +1,17 @@
 import { runSshCommand, runSshCommandStreaming, getHostConnectionInfo, shellQuote } from "../ssh";
 import { ensurePrivateKeyDeployed, ensurePublicKeyAuthorized } from "./keys";
 
+// These are quick filesystem metadata ops (mkdir/find/rm), never expected to take long — unlike
+// the actual rsync transfer below, which legitimately can. Without a timeout, a stuck sudo/profile
+// chain on the target (an appliance-style NAS being the common case) hangs a backup run
+// indefinitely instead of surfacing a clean error.
+const METADATA_TIMEOUT_MS = 15_000;
+
 export async function ensureRemoteDir(hostId: number, dirPath: string): Promise<void> {
-  const { code, stderr } = await runSshCommand(hostId, `mkdir -p ${shellQuote(dirPath)}`, { sudo: true });
+  const { code, stderr } = await runSshCommand(hostId, `mkdir -p ${shellQuote(dirPath)}`, {
+    sudo: true,
+    timeoutMs: METADATA_TIMEOUT_MS,
+  });
   if (code !== 0) throw new Error(stderr || `Impossible de créer le dossier ${dirPath} sur la destination.`);
 }
 
@@ -11,14 +20,14 @@ export async function listRemoteDirs(hostId: number, dirPath: string): Promise<s
   const { stdout, code } = await runSshCommand(
     hostId,
     `find ${shellQuote(dirPath)} -mindepth 1 -maxdepth 1 -type d -printf '%f\\n' 2>/dev/null`,
-    { sudo: true }
+    { sudo: true, timeoutMs: METADATA_TIMEOUT_MS }
   );
   if (code !== 0) return [];
   return stdout.split("\n").filter(Boolean).sort();
 }
 
 export async function removeRemotePath(hostId: number, targetPath: string): Promise<void> {
-  await runSshCommand(hostId, `rm -rf ${shellQuote(targetPath)}`, { sudo: true });
+  await runSshCommand(hostId, `rm -rf ${shellQuote(targetPath)}`, { sudo: true, timeoutMs: METADATA_TIMEOUT_MS });
 }
 
 /**

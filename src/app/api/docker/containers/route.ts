@@ -7,7 +7,13 @@ type DockerHost = { id: number; name: string };
 
 export type AggregatedContainer = DockerContainer & { hostId: number; hostName: string };
 
-const HOST_TIMEOUT_MS = 8000;
+// A NAS-class host with `needs_sudo` (the default for every new host) pays for a login-shell
+// profile chain on top of the sudo prompt itself on every single call — 8s was tight enough to
+// misreport a merely-slow host as unreachable. 12s gives that room while still keeping one bad
+// host from stalling the fleet view for long; docker.ts's own EXEC_TIMEOUT_MS (11s) force-closes
+// the underlying SSH connection just before this fires, so a timeout here never leaves an orphaned
+// session behind.
+const HOST_TIMEOUT_MS = 12_000;
 
 export async function GET() {
   const hosts = getDb()

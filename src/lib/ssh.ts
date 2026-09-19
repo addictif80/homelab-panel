@@ -154,12 +154,41 @@ export function buildPrivilegedCommand(
 
 export type SshExecResult = { stdout: string; stderr: string; code: number };
 
+/** Ends a connection and, if it hasn't torn down within a beat, forces the socket closed —
+ * `.end()` alone can hang around waiting for a graceful SSH channel close that a stalled/hung
+ * remote (e.g. a sudo prompt stuck behind a slow profile chain) may never send. */
+function forceClose(conn: SshClient): void {
+  try {
+    conn.end();
+  } catch {
+    // already closing
+  }
+  setTimeout(() => {
+    try {
+      conn.destroy();
+    } catch {
+      // already destroyed
+    }
+  }, 500).unref();
+}
+
 /**
  * Runs a command over SSH and buffers its output. Pass `sudo: true` for commands that need
  * root (apt, docker) on a host configured with `needs_sudo` — the password is fed on stdin
  * automatically. Leave it false for read-only commands (stats, log tailing) that don't need it.
+ *
+ * `timeoutMs`, when set, actually tears down the connection when it fires — unlike wrapping the
+ * returned promise in `withTimeout()` externally, which only stops *waiting* on the promise and
+ * leaves the real SSH connection (and any sudo/exec channel stuck on the remote end) running.
+ * That matters most for a host whose sudo/profile chain is genuinely slow (e.g. an appliance-style
+ * NAS OS): every timed-out-but-still-open connection is one more concurrent session eating into
+ * that sshd's connection limit, making the *next* attempt more likely to fail too.
  */
-export function runSshCommand(hostId: number, rawCommand: string, opts: { sudo?: boolean } = {}): Promise<SshExecResult> {
+export function runSshCommand(
+  hostId: number,
+  rawCommand: string,
+  opts: { sudo?: boolean; timeoutMs?: number } = {}
+): Promise<SshExecResult> {
   const config = buildSshConfig(hostId);
   const { command, stdinPassword } = opts.sudo
     ? buildPrivilegedCommand(hostId, rawCommand)
@@ -167,11 +196,27 @@ export function runSshCommand(hostId: number, rawCommand: string, opts: { sudo?:
   const conn = new SshClient();
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = opts.timeoutMs
+      ? setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          forceClose(conn);
+          reject(new Error("Délai dépassé — la connexion SSH a été fermée."));
+        }, opts.timeoutMs)
+      : null;
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      fn();
+    };
+
     conn.on("ready", () => {
       conn.exec(command, (err, stream) => {
         if (err) {
           conn.end();
-          reject(err);
+          settle(() => reject(err));
           return;
         }
         if (stdinPassword) stream.write(`${stdinPassword}\n`);
@@ -181,11 +226,11 @@ export function runSshCommand(hostId: number, rawCommand: string, opts: { sudo?:
         stream.stderr.on("data", (d: Buffer) => (stderr += d.toString("utf8")));
         stream.on("close", (code: number) => {
           conn.end();
-          resolve({ stdout, stderr, code });
+          settle(() => resolve({ stdout, stderr, code }));
         });
       });
     });
-    conn.on("error", reject);
+    conn.on("error", (err) => settle(() => reject(err)));
     conn.connect(config);
   });
 }
@@ -199,7 +244,7 @@ export function runSshCommandStreaming(
   hostId: number,
   rawCommand: string,
   onChunk: (chunk: string) => void,
-  opts: { sudo?: boolean } = {}
+  opts: { sudo?: boolean; timeoutMs?: number } = {}
 ): Promise<number> {
   const config = buildSshConfig(hostId);
   const { command, stdinPassword } = opts.sudo
@@ -208,11 +253,27 @@ export function runSshCommandStreaming(
   const conn = new SshClient();
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = opts.timeoutMs
+      ? setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          forceClose(conn);
+          reject(new Error("Délai dépassé — la connexion SSH a été fermée."));
+        }, opts.timeoutMs)
+      : null;
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      fn();
+    };
+
     conn.on("ready", () => {
       conn.exec(command, (err, stream) => {
         if (err) {
           conn.end();
-          reject(err);
+          settle(() => reject(err));
           return;
         }
         if (stdinPassword) stream.write(`${stdinPassword}\n`);
@@ -220,11 +281,11 @@ export function runSshCommandStreaming(
         stream.stderr.on("data", (d: Buffer) => onChunk(d.toString("utf8")));
         stream.on("close", (code: number) => {
           conn.end();
-          resolve(code);
+          settle(() => resolve(code));
         });
       });
     });
-    conn.on("error", reject);
+    conn.on("error", (err) => settle(() => reject(err)));
     conn.connect(config);
   });
 }

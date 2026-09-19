@@ -1,7 +1,12 @@
 import { runSshCommand, shellQuote } from "./ssh";
 
+// Slightly under the 12s outer timeout callers (the fleet-wide containers route, monitoring)
+// wrap this in — so the SSH connection is force-closed by the time the caller gives up, instead
+// of lingering as an orphaned session on a host whose sudo/profile chain is already struggling.
+const EXEC_TIMEOUT_MS = 11_000;
+
 function execOnHost(hostId: number, rawCommand: string) {
-  return runSshCommand(hostId, rawCommand, { sudo: true });
+  return runSshCommand(hostId, rawCommand, { sudo: true, timeoutMs: EXEC_TIMEOUT_MS });
 }
 
 // Some hosts print something before the actual command output on every SSH exec — a login
