@@ -6,15 +6,88 @@ import dynamic from "next/dynamic";
 const LiveLogPanel = dynamic(() => import("@/components/LiveLogPanel"), { ssr: false });
 
 const MODULES = [
-  { name: "Serveurs physiques", href: "/servers" },
-  { name: "Serveurs VM", href: "/proxmox" },
-  { name: "Docker", href: "/docker" },
-  { name: "Terminal SSH", href: "/ssh" },
-  { name: "Mises à jour", href: "/updates" },
-  { name: "Explorateur de fichiers", href: "/files" },
-  { name: "Tailscale", href: "/tailscale" },
-  { name: "Inventaire & topologie", href: "/inventory" },
+  { name: "Serveurs physiques", href: "/servers", color: "accent" as const },
+  { name: "Serveurs VM", href: "/proxmox", color: "success" as const },
+  { name: "Docker", href: "/docker", color: "accent2" as const },
+  { name: "Terminal SSH", href: "/ssh", color: "warning" as const },
+  { name: "Mises à jour", href: "/updates", color: "accent" as const },
+  { name: "Explorateur de fichiers", href: "/files", color: "success" as const },
+  { name: "Tailscale", href: "/tailscale", color: "accent2" as const },
+  { name: "Inventaire & topologie", href: "/inventory", color: "warning" as const },
 ];
+
+const MODULE_ICON: Record<string, React.ReactNode> = {
+  "Serveurs physiques": (
+    <>
+      <rect x="4" y="3.5" width="16" height="6" rx="1.3" stroke="currentColor" strokeWidth="1.8" />
+      <rect x="4" y="14.5" width="16" height="6" rx="1.3" stroke="currentColor" strokeWidth="1.8" />
+    </>
+  ),
+  "Serveurs VM": (
+    <>
+      <rect x="2.5" y="8.5" width="7" height="7" rx="1.2" stroke="currentColor" strokeWidth="1.8" />
+      <rect x="14.5" y="8.5" width="7" height="7" rx="1.2" stroke="currentColor" strokeWidth="1.8" />
+    </>
+  ),
+  Docker: (
+    <>
+      <rect x="4" y="4" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="1.8" />
+      <rect x="13" y="4" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="1.8" />
+      <rect x="8.5" y="13" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="1.8" />
+    </>
+  ),
+  "Terminal SSH": (
+    <>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="1.5" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M7 9.5l3 2.5-3 2.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </>
+  ),
+  "Mises à jour": (
+    <>
+      <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M12 7.5V12l3 2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </>
+  ),
+  "Explorateur de fichiers": (
+    <>
+      <path d="M4 14.5l4-8 4 5 3-4 5 7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="1.8" />
+    </>
+  ),
+  Tailscale: (
+    <>
+      <circle cx="12" cy="12" r="2.3" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M8 8a5.5 5.5 0 000 8M16 8a5.5 5.5 0 010 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </>
+  ),
+  "Inventaire & topologie": (
+    <>
+      <circle cx="6" cy="6" r="2.3" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="18" cy="6" r="2.3" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="12" cy="18" r="2.3" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M8 7l7-.3M9 8l2.3 8.5M15 8l-2.3 8.5" stroke="currentColor" strokeWidth="1.4" />
+    </>
+  ),
+};
+
+const CHIP_COLORS: Record<string, { bg: string; fg: string }> = {
+  accent: { bg: "color-mix(in srgb, var(--color-blue-600) 12%, transparent)", fg: "var(--color-blue-600)" },
+  success: { bg: "color-mix(in srgb, var(--color-emerald-300) 12%, transparent)", fg: "var(--color-emerald-300)" },
+  warning: { bg: "color-mix(in srgb, var(--color-amber-300) 12%, transparent)", fg: "var(--color-amber-300)" },
+  accent2: { bg: "color-mix(in srgb, var(--accent-2) 12%, transparent)", fg: "var(--accent-2)" },
+};
+
+const AVATAR_GRADIENTS = [
+  "linear-gradient(135deg,#6d5bfa,#8b7bff)",
+  "linear-gradient(135deg,#0f9d58,#34d399)",
+  "linear-gradient(135deg,#b7791f,#f0b429)",
+  "linear-gradient(135deg,#c026d3,#e879f9)",
+];
+
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "?";
+}
 
 type HostStats = {
   hostId: number;
@@ -160,21 +233,54 @@ export default function Home() {
               label="CPU (moyenne)"
               value={avgCpu === null ? "—" : `${avgCpu.toFixed(0)}%`}
               sub={`${totals.cores} cœurs cumulés`}
+              color="accent"
+              icon={
+                <>
+                  <rect x="6" y="6" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.8" />
+                  <path
+                    d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                </>
+              }
             />
             <StatCard
               label="RAM utilisée"
               value={formatGb(totals.memUsed)}
               sub={`sur ${formatGb(totals.memTotal)}`}
+              color="success"
+              icon={
+                <>
+                  <rect x="3" y="7" width="18" height="10" rx="2" stroke="currentColor" strokeWidth="1.8" />
+                  <path d="M7 7v10M11 7v10M15 7v10" stroke="currentColor" strokeWidth="1.6" />
+                </>
+              }
             />
             <StatCard
               label="Stockage utilisé"
               value={formatGb(totals.diskUsed)}
               sub={`sur ${formatGb(totals.diskTotal)}`}
+              color="warning"
+              icon={
+                <>
+                  <path d="M12 3l9 16H3z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+                  <path d="M12 9v4M12 16.5h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </>
+              }
             />
             <StatCard
               label="Machines"
               value={`${reachable.length}/${stats.length}`}
               sub="joignables"
+              color="accent2"
+              icon={
+                <>
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
+                  <path d="M8 12.5l2.5 2.5L16 9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </>
+              }
             />
           </div>
         )}
@@ -201,9 +307,19 @@ export default function Home() {
                     </tr>
                   </thead>
                   <tbody>
-                    {reachable.map((s) => (
+                    {reachable.map((s, i) => (
                       <tr key={s.hostId} className="border-t border-neutral-800">
-                        <td className="px-3 py-2.5 font-medium">{s.hostName}</td>
+                        <td className="px-3 py-2.5 font-medium">
+                          <div className="flex items-center gap-2.5">
+                            <span
+                              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] text-[11px] font-bold text-white"
+                              style={{ backgroundImage: AVATAR_GRADIENTS[i % AVATAR_GRADIENTS.length] }}
+                            >
+                              {initialsOf(s.hostName)}
+                            </span>
+                            {s.hostName}
+                          </div>
+                        </td>
                         <td className="px-3 py-2.5 text-neutral-400">
                           {s.cpuUsedPercent === null ? "—" : `${s.cpuUsedPercent.toFixed(0)}%`}
                         </td>
@@ -225,8 +341,20 @@ export default function Home() {
             <h2 className="mb-2 text-sm font-semibold">Accès rapide</h2>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
               {MODULES.map((m) => (
-                <a key={m.href} href={m.href} className="card p-4 hover:border-neutral-700">
-                  <div className="text-sm font-medium">{m.name}</div>
+                <a
+                  key={m.href}
+                  href={m.href}
+                  className="card flex flex-col gap-2.5 p-3.5 transition-transform hover:-translate-y-0.5 hover:border-neutral-700"
+                >
+                  <span
+                    className="icon-chip h-8 w-8"
+                    style={{ background: CHIP_COLORS[m.color].bg, color: CHIP_COLORS[m.color].fg }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                      {MODULE_ICON[m.name]}
+                    </svg>
+                  </span>
+                  <span className="text-[13px] font-semibold">{m.name}</span>
                 </a>
               ))}
             </div>
@@ -431,12 +559,31 @@ function NotesCard() {
   );
 }
 
-function StatCard({ label, value, sub }: { label: string; value: string; sub: string }) {
+function StatCard({
+  label,
+  value,
+  sub,
+  color,
+  icon,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  color: keyof typeof CHIP_COLORS;
+  icon: React.ReactNode;
+}) {
   return (
-    <div className="rounded border border-neutral-800 bg-neutral-900 p-4">
-      <div className="text-xs text-neutral-500">{label}</div>
-      <div className="mt-1 text-xl font-semibold">{value}</div>
-      <div className="mt-1 text-xs text-neutral-500">{sub}</div>
+    <div className="card p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-xs font-semibold text-neutral-500">{label}</span>
+        <span className="icon-chip h-[30px] w-[30px]" style={{ background: CHIP_COLORS[color].bg, color: CHIP_COLORS[color].fg }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+            {icon}
+          </svg>
+        </span>
+      </div>
+      <div className="text-2xl font-bold tracking-tight tabular-nums">{value}</div>
+      <div className="mt-1.5 text-xs font-medium text-neutral-500">{sub}</div>
     </div>
   );
 }

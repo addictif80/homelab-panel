@@ -29,105 +29,125 @@ body {
 }
 
 @theme inline {
-  --font-sans: var(--font-instrument-sans);
+  --font-sans: var(--font-plus-jakarta-sans);
   --font-mono: var(--font-jetbrains-mono);
-  --font-display: var(--font-instrument-sans);
+  --font-display: var(--font-space-grotesk);
 }
 
 @layer base {
   h1, h2, h3 {
     font-family: var(--font-display);
-    letter-spacing: -0.015em;
-    font-weight: 600;
+    letter-spacing: -0.01em;
   }
 }
 
-/* Colors copied verbatim from the approved mockup (Linear/Vercel-style "minimal épuré"), mapped
-   onto the neutral, blue, red, amber and emerald Tailwind scales so every existing utility class
-   across the whole app (bg-neutral-900, text-neutral-400, border-neutral-800, bg-blue-600, ...)
-   renders the mockup's exact palette without having to touch each of the ~30 pages that use them.
+/* Colors copied verbatim from the approved "SaaS moderne & coloré" mockup, mapped onto the
+   neutral, blue, red, amber and emerald Tailwind scales so every existing utility class across the
+   whole app (bg-neutral-900, text-neutral-400, border-neutral-800, bg-blue-600, ...) renders the
+   mockup's exact palette without having to touch each of the ~30 pages that use them.
      neutral-950 = --bg, neutral-900 = --surface, neutral-800 = --border,
      neutral-100 = --text, neutral-400 = --text-muted, neutral-600 = --text-faint.
-   blue-600/blue-300 both carry --accent — the mockup uses the accent color directly for text
-   (nav-item.active, links) rather than a separately darkened/lightened shade. */
+   blue-600/blue-300 both carry the solid --accent (indigo) — the gradient (--grad, indigo→magenta)
+   is reserved for filled surfaces (primary button, active icon chip) where a flat color would look
+   flat rather than for text, which just uses the solid accent. */
 @theme {
-  --color-blue-200: #d9d6fb;
-  --color-blue-300: #5046e5;
-  --color-blue-400: #8b82ef;
-  --color-blue-500: #6a60e9;
-  --color-blue-600: #5046e5;
-  --color-blue-700: #4038c2;
-  --color-blue-800: #332d97;
-  --color-blue-900: #29246e;
-  --color-blue-950: #18163f;
+  --color-blue-200: #d9d3fd;
+  --color-blue-300: #6d5bfa;
+  --color-blue-400: #9186fc;
+  --color-blue-500: #7d6ffb;
+  --color-blue-600: #6d5bfa;
+  --color-blue-700: #5847d9;
+  --color-blue-800: #4636ad;
+  --color-blue-900: #382b85;
+  --color-blue-950: #211a52;
 
-  --color-red-300: #d1373f;
+  --color-red-300: #dc2f4a;
   --color-amber-300: #b7791f;
-  --color-emerald-300: #16884a;
+  --color-emerald-300: #0f9d58;
 
-  --color-neutral-50: #0d0d0f;
-  --color-neutral-100: #17171a;
-  --color-neutral-200: #232326;
-  --color-neutral-300: #3a3a41;
-  --color-neutral-400: #6b6b74;
-  --color-neutral-500: #85858c;
-  --color-neutral-600: #a3a3ab;
-  --color-neutral-700: #c9c9ce;
-  --color-neutral-800: #e6e6ea;
+  --color-neutral-50: #0d0c12;
+  --color-neutral-100: #17151f;
+  --color-neutral-200: #211f2b;
+  --color-neutral-300: #3a3745;
+  --color-neutral-400: #6e6b7c;
+  --color-neutral-500: #857f92;
+  --color-neutral-600: #a3a0b0;
+  --color-neutral-700: #c7c4d1;
+  --color-neutral-800: #e8e6f0;
   --color-neutral-900: #ffffff;
-  --color-neutral-950: #f7f7f8;
+  --color-neutral-950: #f5f4fa;
 
-  /* Text color on a solid accent button flips per theme (see [data-theme="dark"] below) since the
-     mockup's dark accent is a pale lavender that needs dark text, not white, for contrast. */
+  /* Text color on a solid/gradient accent button flips per theme (see [data-theme="dark"] below)
+     since the mockup's dark accent is a pale lavender that needs dark text, not white, for
+     contrast. --grad/--accent-2/--shadow-* are plain CSS custom properties (not Tailwind color
+     tokens) — Tailwind has no gradient/shadow-recipe scale to hook into, so the .card/.btn-primary
+     component classes below reference them directly instead. */
   --btn-accent-text: #ffffff;
+  --accent-2: #c026d3;
+  --grad: linear-gradient(135deg, #6d5bfa 0%, #c026d3 100%);
+  --shadow-card: 0 1px 2px rgba(23, 21, 31, 0.04), 0 8px 24px -12px rgba(23, 21, 31, 0.1);
+  --shadow-pop: 0 12px 32px -8px rgba(109, 91, 250, 0.28), 0 4px 10px -4px rgba(23, 21, 31, 0.1);
 }
 
 /* Dark theme: same mapping, mockup's dark values. */
 [data-theme="dark"] {
-  --color-blue-300: #7c74ff;
-  --color-blue-600: #7c74ff;
+  --color-blue-300: #9c8bff;
+  --color-blue-600: #9c8bff;
 
-  --color-red-300: #ff6b6f;
+  --color-red-300: #ff6b81;
   --color-amber-300: #f0b429;
-  --color-emerald-300: #3ddc84;
+  --color-emerald-300: #34d399;
 
-  --color-neutral-50: #f8f8f9;
-  --color-neutral-100: #f2f2f4;
-  --color-neutral-200: #d8d8db;
-  --color-neutral-300: #b3b3b8;
-  --color-neutral-400: #96969f;
-  --color-neutral-500: #79797f;
-  --color-neutral-600: #5c5c64;
-  --color-neutral-700: #38383d;
-  --color-neutral-800: #242429;
-  --color-neutral-900: #131316;
-  --color-neutral-950: #0b0b0d;
+  --color-neutral-50: #f8f7fb;
+  --color-neutral-100: #f3f2f8;
+  --color-neutral-200: #d9d7e3;
+  --color-neutral-300: #b3b0c2;
+  --color-neutral-400: #9b98a8;
+  --color-neutral-500: #7d7a8c;
+  --color-neutral-600: #615e70;
+  --color-neutral-700: #3c3949;
+  --color-neutral-800: #2b2837;
+  --color-neutral-900: #18161f;
+  --color-neutral-950: #100f16;
 
-  --btn-accent-text: #0b0b0d;
+  --btn-accent-text: #100f16;
+  --accent-2: #e879f9;
+  --grad: linear-gradient(135deg, #9c8bff 0%, #e879f9 100%);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 28px -12px rgba(0, 0, 0, 0.55);
+  --shadow-pop: 0 14px 34px -8px rgba(156, 139, 255, 0.3), 0 4px 12px -4px rgba(0, 0, 0, 0.45);
 }
 
 @layer components {
   .card {
-    @apply rounded-lg border border-neutral-800 bg-neutral-900;
+    @apply rounded-2xl border border-neutral-800 bg-neutral-900;
+    box-shadow: var(--shadow-card);
   }
   .btn-primary {
-    @apply rounded-md border border-transparent bg-blue-600 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply rounded-xl border border-transparent px-3.5 py-1.5 text-sm font-semibold transition-[filter] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50;
     color: var(--btn-accent-text);
+    background-image: var(--grad);
+    box-shadow: var(--shadow-pop);
   }
   .btn-secondary {
-    @apply rounded-md border border-neutral-800 px-3 py-1.5 text-sm font-medium text-neutral-200 transition-colors hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply rounded-xl border border-neutral-800 px-3.5 py-1.5 text-sm font-medium text-neutral-200 transition-colors hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-danger {
-    @apply rounded-md border border-red-900 px-3 py-1.5 text-sm font-medium text-red-300 transition-colors hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply rounded-xl border border-red-900 px-3.5 py-1.5 text-sm font-medium text-red-300 transition-colors hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .input {
-    @apply w-full rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100;
+    @apply w-full rounded-xl border border-neutral-800 bg-neutral-950 px-2.5 py-1.5 text-sm text-neutral-100;
   }
   .page-title {
-    @apply text-lg font-semibold text-neutral-100;
+    @apply text-lg font-bold text-neutral-100;
+    font-family: var(--font-display);
   }
   .page-subtitle {
     @apply mt-1 text-sm text-neutral-400;
+  }
+  /* Small colored icon chip — stat tiles, nav items, quick-access tiles, avatars. Background/color
+     are set per usage (accent-soft, success-soft, a gradient for an active/filled state, ...). */
+  .icon-chip {
+    @apply flex shrink-0 items-center justify-center rounded-lg;
   }
 }
 

@@ -306,46 +306,61 @@ function NavIcon({ name }: { name: IconName }) {
 
 function Logo() {
   return (
-    <div className="flex items-center gap-2">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-        <rect x="3" y="3" width="18" height="18" rx="5" stroke="currentColor" strokeWidth="1.6" className="text-blue-600" />
-        <path d="M7.5 9H16.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="text-blue-600" />
-        <path d="M7.5 12.5H16.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="text-blue-600" />
-        <path d="M7.5 16H12.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="text-blue-600" />
-      </svg>
-      <span className="font-display text-sm font-semibold tracking-wide text-neutral-100">Homelab Panel</span>
+    <div className="flex items-center gap-2.5">
+      <div
+        className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[9px]"
+        style={{ backgroundImage: "var(--grad)", boxShadow: "0 4px 12px -3px rgba(109,91,250,0.55)" }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <rect x="3" y="3" width="8" height="8" rx="2" fill="white" fillOpacity="0.95" />
+          <rect x="13" y="3" width="8" height="8" rx="2" fill="white" fillOpacity="0.65" />
+          <rect x="3" y="13" width="8" height="8" rx="2" fill="white" fillOpacity="0.65" />
+          <rect x="13" y="13" width="8" height="8" rx="2" fill="white" fillOpacity="0.95" />
+        </svg>
+      </div>
+      <span className="font-display text-[15px] font-bold tracking-tight text-neutral-100">Homelab Panel</span>
     </div>
   );
 }
 
 function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
   return (
-    <nav className="flex-1 space-y-5 overflow-auto">
+    <nav className="flex-1 space-y-6 overflow-auto">
       {NAV_SECTIONS.map((section) => (
         <div key={section.label || "root"}>
           {section.label && (
-            <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-wider text-neutral-600">
+            <p className="mb-1.5 px-2.5 text-[10.5px] font-bold uppercase tracking-wider text-neutral-600">
               {section.label}
             </p>
           )}
           <div className="space-y-0.5">
-            {section.items.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={onNavigate}
-                className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors md:py-1.5 ${
-                  pathname === item.href
-                    ? "bg-blue-600/15 font-medium text-blue-300"
-                    : "text-neutral-400 hover:bg-neutral-800/70 hover:text-neutral-200"
-                }`}
-              >
-                <span className={pathname === item.href ? "opacity-100" : "opacity-85"}>
-                  <NavIcon name={item.icon} />
-                </span>
-                {item.label}
-              </Link>
-            ))}
+            {section.items.map((item) => {
+              const active = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={onNavigate}
+                  className={`flex items-center gap-2.5 rounded-[10px] px-2.5 py-[7.5px] text-[13.5px] transition-colors md:py-[7.5px] ${
+                    active
+                      ? "bg-blue-600/15 font-bold text-blue-300"
+                      : "font-medium text-neutral-400 hover:bg-neutral-800/70 hover:text-neutral-200"
+                  }`}
+                >
+                  <span
+                    className="icon-chip h-6 w-6"
+                    style={
+                      active
+                        ? { backgroundImage: "var(--grad)", color: "#fff" }
+                        : { background: "var(--color-neutral-950)", color: "inherit" }
+                    }
+                  >
+                    <NavIcon name={item.icon} />
+                  </span>
+                  {item.label}
+                </Link>
+              );
+            })}
           </div>
         </div>
       ))}
@@ -441,7 +456,7 @@ export default function Sidebar() {
       </div>
 
       {/* Desktop sidebar */}
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-neutral-800 bg-neutral-900 p-4 md:flex">
+      <aside className="hidden w-[260px] shrink-0 flex-col border-r border-neutral-800 bg-neutral-900 p-3.5 md:flex">
         <div className="mb-6 flex items-center justify-between px-1">
           <Logo />
           <ThemeToggle />
@@ -450,8 +465,13 @@ export default function Sidebar() {
         <PublicIps entries={publicIps} />
         <button
           onClick={handleLogout}
-          className="mt-4 rounded-md px-3 py-1.5 text-left text-sm text-neutral-500 hover:bg-neutral-800/70 hover:text-neutral-200"
+          className="mt-4 flex items-center gap-2.5 rounded-[10px] px-2.5 py-[7.5px] text-left text-[13.5px] font-medium text-neutral-500 hover:bg-neutral-800/70 hover:text-neutral-200"
         >
+          <span className="icon-chip h-6 w-6" style={{ background: "var(--color-neutral-950)" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <path d="M9 8l-4 4 4 4M15 8l4 4-4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
           Déconnexion
         </button>
       </aside>
@@ -490,8 +510,13 @@ export default function Sidebar() {
           <PublicIps entries={publicIps} />
           <button
             onClick={handleLogout}
-            className="mt-4 rounded-md px-3 py-2 text-left text-sm text-neutral-500 hover:bg-neutral-800/70 hover:text-neutral-200"
+            className="mt-4 flex items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left text-[13.5px] font-medium text-neutral-500 hover:bg-neutral-800/70 hover:text-neutral-200"
           >
+            <span className="icon-chip h-6 w-6" style={{ background: "var(--color-neutral-950)" }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path d="M9 8l-4 4 4 4M15 8l4 4-4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
             Déconnexion
           </button>
         </div>

@@ -1,17 +1,23 @@
 import type { Metadata } from "next";
-import { Instrument_Sans, JetBrains_Mono } from "next/font/google";
+import { Plus_Jakarta_Sans, Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import AppShell from "@/components/AppShell";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import ThemeInit from "@/components/ThemeInit";
 
-// "Minimal épuré" (Linear/Vercel) direction validated via mockup: Instrument Sans for both body
-// and headings (display font dropped — one typeface, weight does the work), JetBrains Mono for
-// code/terminal/tabular contexts.
-const instrumentSans = Instrument_Sans({
-  variable: "--font-instrument-sans",
+// "SaaS moderne & coloré" direction validated via mockup: Space Grotesk for headings/display
+// (characterful, geometric), Plus Jakarta Sans for body (warmer/rounder than a generic grotesk),
+// JetBrains Mono for code/terminal/tabular contexts.
+const plusJakartaSans = Plus_Jakarta_Sans({
+  variable: "--font-plus-jakarta-sans",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  weight: ["400", "500", "600", "700", "800"],
+});
+
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-space-grotesk",
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
 });
 
 const jetbrainsMono = JetBrains_Mono({
@@ -33,7 +39,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport = {
-  themeColor: "#4f46e5",
+  themeColor: "#6d5bfa",
   // viewportFit "cover" lets the standalone app draw under the notch/home-indicator area — the
   // safe-area-inset-* env() values used in AppShell/Sidebar only report non-zero once this is set.
   viewportFit: "cover",
@@ -45,7 +51,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="fr"
-      className={`${instrumentSans.variable} ${jetbrainsMono.variable} h-full antialiased`}
+      className={`${plusJakartaSans.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <head>

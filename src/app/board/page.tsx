@@ -22,10 +22,13 @@ function hostLabel(url: string): string {
 
 function FaviconOrInitial({ link }: { link: PublicLink }) {
   if (link.faviconDataUrl) {
-    return <img src={link.faviconDataUrl} alt="" className="h-10 w-10 rounded-lg" />;
+    return <img src={link.faviconDataUrl} alt="" className="h-10 w-10 rounded-xl" />;
   }
   return (
-    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600/20 text-base font-semibold text-blue-300">
+    <div
+      className="flex h-10 w-10 items-center justify-center rounded-xl text-base font-bold text-white"
+      style={{ backgroundImage: "var(--grad)" }}
+    >
       {link.name.charAt(0).toUpperCase() || "?"}
     </div>
   );
@@ -50,13 +53,18 @@ export default function BoardPage() {
       <nav className="border-b border-neutral-800 py-4">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6">
           <div className="flex items-center gap-2.5">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <rect x="3" y="3" width="18" height="18" rx="5" stroke="currentColor" strokeWidth="1.6" className="text-blue-600" />
-              <path d="M7.5 9H16.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="text-blue-600" />
-              <path d="M7.5 12.5H16.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="text-blue-600" />
-              <path d="M7.5 16H12.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="text-blue-600" />
-            </svg>
-            <span className="font-display text-base font-semibold">Services</span>
+            <div
+              className="flex h-7 w-7 items-center justify-center rounded-[8px]"
+              style={{ backgroundImage: "var(--grad)" }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <rect x="3" y="3" width="8" height="8" rx="2" fill="white" fillOpacity="0.95" />
+                <rect x="13" y="3" width="8" height="8" rx="2" fill="white" fillOpacity="0.65" />
+                <rect x="3" y="13" width="8" height="8" rx="2" fill="white" fillOpacity="0.65" />
+                <rect x="13" y="13" width="8" height="8" rx="2" fill="white" fillOpacity="0.95" />
+              </svg>
+            </div>
+            <span className="font-display text-base font-bold">Services</span>
           </div>
           <ThemeToggle />
         </div>
@@ -77,10 +85,7 @@ export default function BoardPage() {
         {links !== null && links.length > 0 && (
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {links.map((link) => (
-              <div
-                key={link.id}
-                className="flex flex-col justify-between overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 transition-colors hover:border-neutral-700"
-              >
+              <div key={link.id} className="card flex flex-col justify-between overflow-hidden transition-colors hover:border-neutral-700">
                 {link.screenshotDataUrl && (
                   <img src={link.screenshotDataUrl} alt="" className="h-40 w-full border-b border-neutral-800 object-cover object-top" />
                 )}

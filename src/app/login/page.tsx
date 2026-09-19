@@ -71,15 +71,20 @@ export default function LoginPage() {
 
   return (
     <main className="flex flex-1 items-center justify-center bg-neutral-950 p-6">
-      <div className="w-full max-w-sm rounded-lg border border-neutral-800 bg-neutral-900 p-8">
+      <div className="card w-full max-w-sm p-8">
         <div className="mb-6 flex flex-col items-center text-center">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" className="mb-3">
-            <rect x="3" y="3" width="18" height="18" rx="5" stroke="currentColor" strokeWidth="1.6" className="text-blue-600" />
-            <path d="M7.5 9H16.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="text-blue-600" />
-            <path d="M7.5 12.5H16.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="text-blue-600" />
-            <path d="M7.5 16H12.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="text-blue-600" />
-          </svg>
-          <h1 className="text-lg font-semibold text-neutral-100">Homelab Panel</h1>
+          <div
+            className="mb-3.5 flex h-11 w-11 items-center justify-center rounded-xl"
+            style={{ backgroundImage: "var(--grad)", boxShadow: "var(--shadow-pop)" }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <rect x="3" y="3" width="8" height="8" rx="2" fill="white" fillOpacity="0.95" />
+              <rect x="13" y="3" width="8" height="8" rx="2" fill="white" fillOpacity="0.65" />
+              <rect x="3" y="13" width="8" height="8" rx="2" fill="white" fillOpacity="0.65" />
+              <rect x="13" y="13" width="8" height="8" rx="2" fill="white" fillOpacity="0.95" />
+            </svg>
+          </div>
+          <h1 className="font-display text-lg font-bold text-neutral-100">Homelab Panel</h1>
           <p className="mt-1 text-sm text-neutral-500">Connexion sécurisée</p>
         </div>
 
