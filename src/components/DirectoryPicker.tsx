@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type FileEntry = { name: string; type: "file" | "directory" | "symlink" | "other"; size: number; modifiedAt: number };
 
@@ -31,21 +31,47 @@ export default function DirectoryPicker({
   onClose: () => void;
 }) {
   const [path, setPath] = useState(initialPath || "/");
+  // Separate from `path` so typing doesn't fire one SSH/SFTP connection per keystroke (that burst
+  // was tripping "Connection lost before handshake" against NAS-grade sshd connection limits) —
+  // the input is free to change on every keystroke, only `path` (debounced below) triggers a fetch.
+  const [inputValue, setInputValue] = useState(initialPath || "/");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function navigate(next: string) {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setInputValue(next);
+    setPath(next);
+  }
+
+  function handleInputChange(next: string) {
+    setInputValue(next);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setPath(next), 500);
+  }
+
+  useEffect(() => () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+  }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
     setError("");
-    fetch(`/api/files/${hostId}?path=${encodeURIComponent(path)}`)
+    fetch(`/api/files/${hostId}?path=${encodeURIComponent(path)}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((d) => {
         if (d.error) throw new Error(d.error);
         setEntries((d.entries as FileEntry[]).filter((e) => e.type === "directory").sort((a, b) => a.name.localeCompare(b.name)));
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Erreur."))
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setError(err instanceof Error ? err.message : "Erreur.");
+      })
       .finally(() => setLoading(false));
+    return () => controller.abort();
   }, [hostId, path]);
 
   return (
@@ -59,8 +85,11 @@ export default function DirectoryPicker({
         </div>
 
         <input
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
+          value={inputValue}
+          onChange={(e) => handleInputChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") navigate(inputValue);
+          }}
           className="mb-2 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 font-mono text-xs text-neutral-100"
         />
 
@@ -73,7 +102,7 @@ export default function DirectoryPicker({
                 <li>
                   <button
                     type="button"
-                    onClick={() => setPath(parentOf(path))}
+                    onClick={() => navigate(parentOf(path))}
                     className="w-full px-3 py-1.5 text-left text-sm text-neutral-400 hover:bg-neutral-900"
                   >
                     .. (dossier parent)
@@ -84,7 +113,7 @@ export default function DirectoryPicker({
                 <li key={e.name}>
                   <button
                     type="button"
-                    onClick={() => setPath(joinPath(path, e.name))}
+                    onClick={() => navigate(joinPath(path, e.name))}
                     className="w-full px-3 py-1.5 text-left text-sm text-neutral-200 hover:bg-neutral-900"
                   >
                     📁 {e.name}
@@ -106,10 +135,10 @@ export default function DirectoryPicker({
           </button>
           <button
             type="button"
-            onClick={() => onSelect(path)}
+            onClick={() => onSelect(inputValue)}
             className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500"
           >
-            Choisir « {path} »
+            Choisir « {inputValue} »
           </button>
         </div>
       </div>

@@ -8,7 +8,7 @@ export type FileEntry = {
   modifiedAt: number;
 };
 
-function withSftp<T>(hostId: number, fn: (sftp: SFTPWrapper, conn: SshClient) => Promise<T>): Promise<T> {
+function connectOnce<T>(hostId: number, fn: (sftp: SFTPWrapper, conn: SshClient) => Promise<T>): Promise<T> {
   const config = buildSshConfig(hostId);
   const conn = new SshClient();
 
@@ -33,6 +33,24 @@ function withSftp<T>(hostId: number, fn: (sftp: SFTPWrapper, conn: SshClient) =>
     });
     conn.on("error", reject);
     conn.connect(config);
+  });
+}
+
+/** A picker/explorer click can land while a NAS-grade sshd is momentarily out of free connection
+ * slots (or mid-rotation), surfacing as "Connection lost before handshake" — a one-off retry after
+ * a short delay clears the overwhelming majority of these without the caller ever seeing it,
+ * instead of failing a normal folder click outright. */
+function withSftp<T>(hostId: number, fn: (sftp: SFTPWrapper, conn: SshClient) => Promise<T>): Promise<T> {
+  return connectOnce(hostId, fn).catch((err) => {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!/connection lost before handshake|econnreset|timed out while waiting for handshake/i.test(message)) {
+      throw err;
+    }
+    return new Promise<T>((resolve, reject) => {
+      setTimeout(() => {
+        connectOnce(hostId, fn).then(resolve, reject);
+      }, 800);
+    });
   });
 }
 
