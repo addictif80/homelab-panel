@@ -1,5 +1,6 @@
 import { Client as SshClient, type SFTPWrapper } from "ssh2";
 import { buildSshConfig } from "./ssh";
+import { isDemoContext } from "./demo/context";
 
 export type FileEntry = {
   name: string;
@@ -41,6 +42,13 @@ function connectOnce<T>(hostId: number, fn: (sftp: SFTPWrapper, conn: SshClient)
  * a short delay clears the overwhelming majority of these without the caller ever seeing it,
  * instead of failing a normal folder click outright. */
 function withSftp<T>(hostId: number, fn: (sftp: SFTPWrapper, conn: SshClient) => Promise<T>): Promise<T> {
+  // /demo sandbox: no real network connection, and building a faithful fake SFTP filesystem isn't
+  // worth it for a feature that isn't central to the walkthrough — degrade to a clear message
+  // instead of crashing.
+  if (isDemoContext()) {
+    return Promise.reject(new Error("Explorateur de fichiers non disponible en mode démo."));
+  }
+
   return connectOnce(hostId, fn).catch((err) => {
     const message = err instanceof Error ? err.message : String(err);
     if (!/connection lost before handshake|econnreset|timed out while waiting for handshake/i.test(message)) {

@@ -2,6 +2,8 @@ import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
 import { randomBytes } from "crypto";
+import { getCurrentDemoId } from "./demo/context";
+import { getDemoDb } from "./demo/store";
 
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
 if (!fs.existsSync(/* turbopackIgnore: true */ DATA_DIR)) {
@@ -16,6 +18,24 @@ declare global {
 }
 
 export function getDb(): Database.Database {
+  // A request running inside a /demo sandbox (see lib/demo/context.ts, set from the raw incoming
+  // request in server.ts before Next's own routing runs) is redirected to its own isolated
+  // in-memory database instead of the real one — every existing DB-backed page/route "just works"
+  // against fake data without needing a demo-aware branch of its own. lib/demo/ ships in every
+  // export (unlike seed.ts below) — it holds no real secrets, only fictitious seed data — and is
+  // otherwise inert without SELLER_MODE (getCurrentDemoId() can never be non-null, since nothing
+  // can mint that cookie without it: see app/demo/route.ts).
+  const demoId = getCurrentDemoId();
+  if (demoId) {
+    const demoDb = getDemoDb(demoId);
+    // Never silently fall through to the real database just because a demo cookie didn't
+    // resolve (expired, or evicted under load) — that would mean a stale demo visitor's request
+    // starts reading/writing real production data instead. Surface a clear error; the client
+    // re-visits /demo for a fresh sandbox.
+    if (!demoDb) throw new Error("Session démo expirée — retourne sur /demo pour en obtenir une nouvelle.");
+    return demoDb;
+  }
+
   if (!global.__homelabDb) {
     const db = new Database(DB_PATH);
     db.pragma("journal_mode = WAL");
@@ -37,7 +57,7 @@ export function getDb(): Database.Database {
   return global.__homelabDb;
 }
 
-function migrate(db: Database.Database) {
+export function migrate(db: Database.Database) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

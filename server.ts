@@ -25,6 +25,16 @@ import { autoActivateFromBundledKey } from "./src/lib/license";
 import { startLicenseRenewalScheduler } from "./src/lib/licenseRenewalScheduler";
 import { startMailScheduler } from "./src/lib/mail/mailScheduler";
 import { startNpmFailoverScheduler } from "./src/lib/npmFailoverScheduler";
+import { startDemoSweeper } from "./src/lib/demo/store";
+import { runWithDemoId, DEMO_COOKIE_NAME } from "./src/lib/demo/context";
+
+/** Cheap manual parse — this is the one cookie server.ts itself needs to read, before Next's own
+ * request/cookie handling exists yet for this request. */
+function readDemoCookie(cookieHeader: string | undefined): string | null {
+  if (!cookieHeader) return null;
+  const match = cookieHeader.match(new RegExp(`(?:^|; )${DEMO_COOKIE_NAME}=([^;]+)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOST || "0.0.0.0";
@@ -35,7 +45,13 @@ const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
   const server = createServer((req, res) => {
-    handle(req, res);
+    // Routes every downstream getDb()/SSH call for this one request to its own isolated /demo
+    // sandbox instead of the real database — set here, before Next's own routing/middleware/RSC
+    // pipeline runs, so it's already in effect no matter which page or API route ends up handling
+    // the request. A request with no (or an unknown/expired) demo cookie falls straight through
+    // to the real app, unaffected.
+    const demoId = readDemoCookie(req.headers.cookie);
+    runWithDemoId(demoId, () => handle(req, res));
   });
 
   attachSshWebSocketServer(server);
@@ -48,6 +64,7 @@ app.prepare().then(() => {
   startLicenseRenewalScheduler();
   startMailScheduler();
   startNpmFailoverScheduler();
+  startDemoSweeper();
 
   server.listen(port, hostname, () => {
     console.log(`Homelab Panel prêt sur http://${hostname}:${port}`);

@@ -2,6 +2,8 @@ import { Client as SshClient } from "ssh2";
 import { getDb } from "./db";
 import { vaultDecrypt } from "./crypto";
 import type { ConnectConfig } from "ssh2";
+import { isDemoContext } from "./demo/context";
+import { fakeExec } from "./demo/fakeExec";
 
 type CredentialRow = {
   id: number;
@@ -189,6 +191,13 @@ export function runSshCommand(
   rawCommand: string,
   opts: { sudo?: boolean; timeoutMs?: number } = {}
 ): Promise<SshExecResult> {
+  // /demo sandbox: never open a real network connection — a public, unauthenticated demo is not
+  // something to let point an SSH client at an arbitrary attacker-chosen address. See
+  // lib/demo/fakeExec.ts for what gets simulated vs. a harmless empty success.
+  if (isDemoContext()) {
+    return Promise.resolve(fakeExec(hostId, rawCommand));
+  }
+
   const config = buildSshConfig(hostId);
   const { command, stdinPassword } = opts.sudo
     ? buildPrivilegedCommand(hostId, rawCommand)
@@ -246,6 +255,13 @@ export function runSshCommandStreaming(
   onChunk: (chunk: string) => void,
   opts: { sudo?: boolean; timeoutMs?: number } = {}
 ): Promise<number> {
+  if (isDemoContext()) {
+    const result = fakeExec(hostId, rawCommand);
+    if (result.stdout) onChunk(result.stdout);
+    if (result.stderr) onChunk(result.stderr);
+    return Promise.resolve(result.code);
+  }
+
   const config = buildSshConfig(hostId);
   const { command, stdinPassword } = opts.sudo
     ? buildPrivilegedCommand(hostId, rawCommand)

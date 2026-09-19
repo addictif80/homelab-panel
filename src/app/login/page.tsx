@@ -1,13 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const isDemo = searchParams.get("demo") === "1";
   const [step, setStep] = useState<"password" | "totp">("password");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  const [username, setUsername] = useState(isDemo ? "demo" : "");
+  const [password, setPassword] = useState(isDemo ? "demo" : "");
   const [code, setCode] = useState("");
   const [trustDevice, setTrustDevice] = useState(false);
   const [pendingToken, setPendingToken] = useState("");
@@ -85,7 +95,9 @@ export default function LoginPage() {
             </svg>
           </div>
           <h1 className="font-display text-lg font-bold text-neutral-100">Homelab Panel</h1>
-          <p className="mt-1 text-sm text-neutral-500">Connexion sécurisée</p>
+          <p className="mt-1 text-sm text-neutral-500">
+            {isDemo ? "Mode démo — identifiants pré-remplis" : "Connexion sécurisée"}
+          </p>
         </div>
 
         {step === "password" && (

@@ -12,6 +12,7 @@ import {
 } from "@/lib/auth";
 import { isTrustedDevice, TRUSTED_DEVICE_COOKIE_NAME } from "@/lib/trustedDevices";
 import { logAudit } from "@/lib/db";
+import { isDemoContext } from "@/lib/demo/context";
 
 export async function POST(req: NextRequest) {
   try {
@@ -41,10 +42,30 @@ export async function POST(req: NextRequest) {
     }
 
     if (!user.totp_enabled) {
-      return NextResponse.json(
-        { error: "La 2FA n'est pas encore configurée pour ce compte." },
-        { status: 403 }
-      );
+      // The 2FA-required rule (and the 2FA step itself, right below) is dropped only inside a
+      // /demo sandbox (see lib/demo/context.ts) — never reachable on a real install, since
+      // isDemoContext() can only be true for a request carrying a cookie minted by the /demo
+      // route, which itself 404s unless SELLER_MODE is set. The demo account has no real secret
+      // to protect and never has TOTP configured, so completing login here is the only option —
+      // asking a prospective buyer to also handle a TOTP code would defeat "sans rien avoir à
+      // installer" anyway.
+      if (!isDemoContext()) {
+        return NextResponse.json(
+          { error: "La 2FA n'est pas encore configurée pour ce compte." },
+          { status: 403 }
+        );
+      }
+      const sessionToken = await createSessionToken(username);
+      logAudit("login.success_demo", username, ip);
+      const res = NextResponse.json({ ok: true, trustedDevice: true });
+      res.cookies.set(SESSION_COOKIE_NAME, sessionToken, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "lax",
+        maxAge: SESSION_MAX_AGE,
+        path: "/",
+      });
+      return res;
     }
 
     const trustedToken = req.cookies.get(TRUSTED_DEVICE_COOKIE_NAME)?.value;

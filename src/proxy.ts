@@ -15,7 +15,7 @@ const PUBLIC_PWA_ASSETS = [
   "/icon-512.png",
   "/apple-touch-icon.png",
 ];
-const PUBLIC_PATHS = ["/login", "/setup", ...PUBLIC_PWA_ASSETS];
+const PUBLIC_PATHS = ["/login", "/setup", "/demo", ...PUBLIC_PWA_ASSETS];
 const PUBLIC_PATH_PREFIXES = ["/store", "/board"];
 const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/store/", "/api/download/", "/api/public/"];
 // Carved out of the otherwise auth-gated /api/seller/ prefix: every buyer's own self-hosted
