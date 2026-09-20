@@ -552,6 +552,15 @@ export function migrate(db: Database.Database) {
       content TEXT NOT NULL DEFAULT '',
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- Vue d'ensemble widget layout — one per user (same key as user_notes), never shared. layout
+    -- is a JSON array of widget ids in display order; a widget id absent from it is hidden. NULL/no
+    -- row means "never customized" — the client falls back to DEFAULT_LAYOUT (dashboardWidgets.ts).
+    CREATE TABLE IF NOT EXISTS user_dashboard_layout (
+      username TEXT PRIMARY KEY,
+      layout TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Trial clock starts the instant the database is first created — not on some later "first
