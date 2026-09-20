@@ -46,7 +46,7 @@ export function ResourcesWidget() {
   const avgCpu = reachable.length > 0 ? totals.cpuSum / reachable.length : null;
 
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 @sm:grid-cols-4">
       <StatCard
         label="CPU (moyenne)"
         value={avgCpu === null ? "—" : `${avgCpu.toFixed(0)}%`}

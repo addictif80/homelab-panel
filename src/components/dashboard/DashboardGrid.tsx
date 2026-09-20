@@ -1,94 +1,204 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   DndContext,
+  DragOverlay,
   KeyboardSensor,
   PointerSensor,
   closestCenter,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
 } from "@dnd-kit/core";
-import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
-import { DEFAULT_LAYOUT, WIDGET_CATALOG, getWidgetDef, type WidgetCategory } from "@/lib/dashboardWidgets";
+import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import {
+  WIDGET_CATALOG,
+  getWidgetDef,
+  type DashboardBlock,
+  type DashboardLayout,
+  type WidgetCategory,
+  type WidgetSize,
+} from "@/lib/dashboardWidgets";
 import { WIDGET_COMPONENTS } from "./registry";
-import { WidgetFrame } from "./WidgetFrame";
+import { WidgetFrame, SeparatorFrame } from "./WidgetFrame";
+import { ColumnDropZone } from "./ColumnDropZone";
+import { useDashboardLayout } from "./useDashboardLayout";
 
 const CATEGORY_ORDER: WidgetCategory[] = ["Ressources", "Sécurité", "Fiabilité", "Réseau", "Autres"];
+const COLUMN_GRID_CLASS: Record<1 | 2 | 3, string> = {
+  1: "grid-cols-1",
+  2: "grid-cols-1 md:grid-cols-2",
+  3: "grid-cols-1 md:grid-cols-2 xl:grid-cols-3",
+};
+
+function findColumnIndexOfBlock(columns: DashboardBlock[][], blockId: string): number {
+  return columns.findIndex((col) => col.some((b) => b.id === blockId));
+}
+
+function findColumnIndexFromOverId(columns: DashboardBlock[][], overId: string): number {
+  const direct = findColumnIndexOfBlock(columns, overId);
+  if (direct !== -1) return direct;
+  const match = /^col-placeholder-(\d+)$/.exec(overId);
+  return match ? Number(match[1]) : -1;
+}
 
 export function DashboardGrid() {
-  const [layout, setLayout] = useState<string[] | null>(null);
+  const { layout, setLayout, persist, loading } = useDashboardLayout();
   const [editing, setEditing] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
-  const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    fetch("/api/dashboard/layout")
-      .then((r) => r.json())
-      .then((d) => setLayout(d.layout ?? DEFAULT_LAYOUT));
-  }, []);
-
-  const persist = useCallback((next: string[]) => {
-    if (saveTimeout.current) clearTimeout(saveTimeout.current);
-    saveTimeout.current = setTimeout(() => {
-      fetch("/api/dashboard/layout", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ layout: next }),
-      });
-    }, 400);
-  }, []);
-
-  function updateLayout(next: string[]) {
-    setLayout(next);
-    persist(next);
-  }
+  const [activeId, setActiveId] = useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  function handleDragEnd(event: DragEndEvent) {
+  function handleDragStart(event: DragStartEvent) {
+    setActiveId(String(event.active.id));
+  }
+
+  function handleDragOver(event: DragOverEvent) {
     const { active, over } = event;
-    if (!over || active.id === over.id || !layout) return;
-    const oldIndex = layout.indexOf(String(active.id));
-    const newIndex = layout.indexOf(String(over.id));
-    if (oldIndex === -1 || newIndex === -1) return;
-    updateLayout(arrayMove(layout, oldIndex, newIndex));
+    if (!over || !layout) return;
+    const activeId = String(active.id);
+    const overId = String(over.id);
+    if (activeId === overId) return;
+
+    const fromCol = findColumnIndexOfBlock(layout.columns, activeId);
+    const toCol = findColumnIndexFromOverId(layout.columns, overId);
+    if (fromCol === -1 || toCol === -1 || fromCol === toCol) return;
+
+    const columns = layout.columns.map((c) => [...c]);
+    const fromIndex = columns[fromCol].findIndex((b) => b.id === activeId);
+    const [moved] = columns[fromCol].splice(fromIndex, 1);
+    const overIndex = columns[toCol].findIndex((b) => b.id === overId);
+    if (overIndex === -1) columns[toCol].push(moved);
+    else columns[toCol].splice(overIndex, 0, moved);
+    setLayout({ ...layout, columns });
   }
 
-  function removeWidget(id: string) {
+  function handleDragEnd(event: DragEndEvent) {
+    setActiveId(null);
+    const { active, over } = event;
+    if (!over || !layout) return;
+    const activeId = String(active.id);
+    const overId = String(over.id);
+
+    const col = findColumnIndexOfBlock(layout.columns, activeId);
+    if (col === -1) {
+      persist(layout);
+      return;
+    }
+    const overCol = findColumnIndexOfBlock(layout.columns, overId);
+    let next = layout;
+    if (overCol === col && activeId !== overId) {
+      const oldIndex = layout.columns[col].findIndex((b) => b.id === activeId);
+      const newIndex = layout.columns[col].findIndex((b) => b.id === overId);
+      if (oldIndex !== -1 && newIndex !== -1) {
+        const columns = layout.columns.map((c) => [...c]);
+        columns[col] = arrayMove(columns[col], oldIndex, newIndex);
+        next = { ...layout, columns };
+        setLayout(next);
+      }
+    }
+    persist(next);
+  }
+
+  function updateBlock(blockId: string, patch: Partial<DashboardBlock>) {
     if (!layout) return;
-    updateLayout(layout.filter((w) => w !== id));
+    const columns = layout.columns.map((col) => col.map((b) => (b.id === blockId ? ({ ...b, ...patch } as DashboardBlock) : b)));
+    const next = { ...layout, columns };
+    setLayout(next);
+    persist(next);
   }
 
-  function addWidget(id: string) {
-    if (!layout || layout.includes(id)) return;
-    updateLayout([...layout, id]);
+  function removeBlock(blockId: string) {
+    if (!layout) return;
+    const columns = layout.columns.map((col) => col.filter((b) => b.id !== blockId));
+    const next = { ...layout, columns };
+    setLayout(next);
+    persist(next);
   }
 
-  const available = useMemo(() => WIDGET_CATALOG.filter((w) => !layout?.includes(w.id)), [layout]);
+  function addWidget(widgetId: string) {
+    if (!layout) return;
+    const columns = layout.columns.map((c) => [...c]);
+    columns[0] = [...columns[0], { kind: "widget", id: widgetId, widgetId, size: "md" }];
+    const next = { ...layout, columns };
+    setLayout(next);
+    persist(next);
+  }
+
+  function addSeparator() {
+    if (!layout) return;
+    const columns = layout.columns.map((c) => [...c]);
+    // Not crypto.randomUUID(): that API is only exposed in "secure contexts" (HTTPS, or literally
+    // "localhost") — an instance reached over plain HTTP by IP (a raw LAN address, 0.0.0.0 in a
+    // test) would throw here. This only needs to be unique within one board, not unguessable.
+    const id = `sep-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    columns[0] = [...columns[0], { kind: "separator", id, label: "" }];
+    const next = { ...layout, columns };
+    setLayout(next);
+    persist(next);
+  }
+
+  function setColumnCount(count: 1 | 2 | 3) {
+    if (!layout || layout.columnCount === count) return;
+    const columns = layout.columns.map((c) => [...c]);
+    if (count > columns.length) {
+      while (columns.length < count) columns.push([]);
+    } else {
+      // Losing columns: their blocks move to the last surviving column rather than disappearing.
+      const overflow = columns.splice(count).flat();
+      columns[count - 1] = [...columns[count - 1], ...overflow];
+    }
+    const next: DashboardLayout = { columnCount: count, columns };
+    setLayout(next);
+    persist(next);
+  }
+
+  const placedWidgetIds = useMemo(() => new Set(layout?.columns.flat().filter((b) => b.kind === "widget").map((b) => (b as { widgetId: string }).widgetId) ?? []), [layout]);
   const availableByCategory = useMemo(() => {
     const map = new Map<WidgetCategory, typeof WIDGET_CATALOG>();
     for (const cat of CATEGORY_ORDER) map.set(cat, []);
-    for (const w of available) map.get(w.category)?.push(w);
+    for (const w of WIDGET_CATALOG) if (!placedWidgetIds.has(w.id)) map.get(w.category)?.push(w);
     return map;
-  }, [available]);
+  }, [placedWidgetIds]);
+  const availableCount = WIDGET_CATALOG.length - placedWidgetIds.size;
 
-  if (!layout) return <p className="text-sm text-neutral-500">Chargement du tableau de bord...</p>;
+  const activeBlock = activeId && layout ? layout.columns.flat().find((b) => b.id === activeId) : null;
+
+  if (loading || !layout) return <p className="text-sm text-neutral-500">Chargement du tableau de bord...</p>;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         {editing && (
-          <button
-            onClick={() => setShowPicker((s) => !s)}
-            className="rounded border border-neutral-700 px-3 py-1.5 text-xs font-medium hover:bg-neutral-800"
-          >
-            + Ajouter un widget
-          </button>
+          <>
+            <div className="flex items-center gap-1.5 text-xs text-neutral-500">
+              Colonnes :
+              <div className="flex overflow-hidden rounded border border-neutral-700">
+                {([1, 2, 3] as const).map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setColumnCount(n)}
+                    className={`px-2.5 py-1.5 ${n === layout.columnCount ? "bg-blue-600 text-white" : "hover:bg-neutral-800"}`}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button
+              onClick={() => setShowPicker((s) => !s)}
+              className="rounded border border-neutral-700 px-3 py-1.5 text-xs font-medium hover:bg-neutral-800"
+            >
+              + Ajouter
+            </button>
+          </>
         )}
         <button
           onClick={() => {
@@ -105,6 +215,12 @@ export function DashboardGrid() {
 
       {showPicker && (
         <div className="card space-y-3 p-4">
+          <div>
+            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-neutral-600">Mise en page</div>
+            <button onClick={addSeparator} className="rounded-full border border-neutral-700 px-3 py-1.5 text-xs hover:border-blue-600 hover:text-blue-500">
+              + Séparateur
+            </button>
+          </div>
           {CATEGORY_ORDER.map((cat) => {
             const items = availableByCategory.get(cat) ?? [];
             if (items.length === 0) return null;
@@ -126,35 +242,79 @@ export function DashboardGrid() {
               </div>
             );
           })}
-          {available.length === 0 && <p className="text-xs text-neutral-500">Tous les widgets disponibles sont déjà affichés.</p>}
+          {availableCount === 0 && <p className="text-xs text-neutral-500">Tous les widgets disponibles sont déjà affichés.</p>}
         </div>
       )}
 
-      {layout.length === 0 ? (
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+      >
+        <div className={`grid gap-4 ${COLUMN_GRID_CLASS[layout.columnCount]}`}>
+          {layout.columns.map((column, colIndex) => (
+            <ColumnDropZone key={colIndex} columnIndex={colIndex} blockIds={column.map((b) => b.id)} editing={editing}>
+              {column.map((block) =>
+                block.kind === "separator" ? (
+                  <SeparatorFrame
+                    key={block.id}
+                    blockId={block.id}
+                    label={block.label}
+                    editing={editing}
+                    onRemove={() => removeBlock(block.id)}
+                    onLabelChange={(label) => updateBlock(block.id, { label })}
+                  />
+                ) : (
+                  (() => {
+                    const def = getWidgetDef(block.widgetId);
+                    const Widget = WIDGET_COMPONENTS[block.widgetId];
+                    if (!def || !Widget) return null;
+                    return (
+                      <WidgetFrame
+                        key={block.id}
+                        blockId={block.id}
+                        def={def}
+                        size={block.size}
+                        editing={editing}
+                        onRemove={() => removeBlock(block.id)}
+                        onSizeChange={(size: WidgetSize) => updateBlock(block.id, { size })}
+                      >
+                        <Widget />
+                      </WidgetFrame>
+                    );
+                  })()
+                )
+              )}
+            </ColumnDropZone>
+          ))}
+        </div>
+        <DragOverlay>
+          {activeBlock ? (
+            <div className="card p-4 opacity-90 shadow-lg">
+              <span className="text-sm font-semibold">
+                {activeBlock.kind === "separator" ? activeBlock.label || "Séparateur" : getWidgetDef(activeBlock.widgetId)?.title}
+              </span>
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+
+      {layout.columns.every((c) => c.length === 0) && (
         <p className="text-sm text-neutral-500">
           Aucun widget affiché.{" "}
-          <button onClick={() => { setEditing(true); setShowPicker(true); }} className="text-blue-600 hover:underline">
+          <button
+            onClick={() => {
+              setEditing(true);
+              setShowPicker(true);
+            }}
+            className="text-blue-600 hover:underline"
+          >
             Ajoutes-en un
           </button>
           .
         </p>
-      ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={layout} strategy={rectSortingStrategy}>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {layout.map((id) => {
-                const def = getWidgetDef(id);
-                const Widget = WIDGET_COMPONENTS[id];
-                if (!def || !Widget) return null;
-                return (
-                  <WidgetFrame key={id} def={def} editing={editing} onRemove={() => removeWidget(id)}>
-                    <Widget />
-                  </WidgetFrame>
-                );
-              })}
-            </div>
-          </SortableContext>
-        </DndContext>
       )}
     </div>
   );

@@ -67,7 +67,7 @@ const MODULE_ICON: Record<string, React.ReactNode> = {
 
 export function QuickAccessWidget() {
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 @sm:grid-cols-4">
       {MODULES.map((m) => (
         <a
           key={m.href}
