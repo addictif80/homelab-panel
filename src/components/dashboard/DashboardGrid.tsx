@@ -18,7 +18,6 @@ import {
   WIDGET_CATALOG,
   getWidgetDef,
   type DashboardBlock,
-  type DashboardLayout,
   type WidgetCategory,
   type WidgetSize,
 } from "@/lib/dashboardWidgets";
@@ -46,7 +45,7 @@ function findColumnIndexFromOverId(columns: DashboardBlock[][], overId: string):
 }
 
 export function DashboardGrid() {
-  const { layout, setLayout, persist, loading } = useDashboardLayout();
+  const { layout, setLayout, loading } = useDashboardLayout();
   const [editing, setEditing] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -62,102 +61,107 @@ export function DashboardGrid() {
 
   function handleDragOver(event: DragOverEvent) {
     const { active, over } = event;
-    if (!over || !layout) return;
+    if (!over) return;
     const activeId = String(active.id);
     const overId = String(over.id);
     if (activeId === overId) return;
 
-    const fromCol = findColumnIndexOfBlock(layout.columns, activeId);
-    const toCol = findColumnIndexFromOverId(layout.columns, overId);
-    if (fromCol === -1 || toCol === -1 || fromCol === toCol) return;
+    // Functional update: dnd-kit can fire several onDragOver calls in quick succession (a fast
+    // mouse move covers many intermediate positions) before React has re-rendered in between —
+    // reading `layout` from the closure would then have every one of those calls compute its move
+    // from the same stale snapshot, so only the last call's result "wins" and earlier moves in the
+    // same batch are silently discarded. Deriving from the updater's own `prev` avoids that.
+    setLayout((prev) => {
+      if (!prev) return prev;
+      const fromCol = findColumnIndexOfBlock(prev.columns, activeId);
+      const toCol = findColumnIndexFromOverId(prev.columns, overId);
+      if (fromCol === -1 || toCol === -1 || fromCol === toCol) return prev;
 
-    const columns = layout.columns.map((c) => [...c]);
-    const fromIndex = columns[fromCol].findIndex((b) => b.id === activeId);
-    const [moved] = columns[fromCol].splice(fromIndex, 1);
-    const overIndex = columns[toCol].findIndex((b) => b.id === overId);
-    if (overIndex === -1) columns[toCol].push(moved);
-    else columns[toCol].splice(overIndex, 0, moved);
-    setLayout({ ...layout, columns });
+      const columns = prev.columns.map((c) => [...c]);
+      const fromIndex = columns[fromCol].findIndex((b) => b.id === activeId);
+      const [moved] = columns[fromCol].splice(fromIndex, 1);
+      const overIndex = columns[toCol].findIndex((b) => b.id === overId);
+      if (overIndex === -1) columns[toCol].push(moved);
+      else columns[toCol].splice(overIndex, 0, moved);
+      return { ...prev, columns };
+    });
   }
 
   function handleDragEnd(event: DragEndEvent) {
     setActiveId(null);
     const { active, over } = event;
-    if (!over || !layout) return;
+    if (!over) return;
     const activeId = String(active.id);
     const overId = String(over.id);
 
-    const col = findColumnIndexOfBlock(layout.columns, activeId);
-    if (col === -1) {
-      persist(layout);
-      return;
-    }
-    const overCol = findColumnIndexOfBlock(layout.columns, overId);
-    let next = layout;
-    if (overCol === col && activeId !== overId) {
-      const oldIndex = layout.columns[col].findIndex((b) => b.id === activeId);
-      const newIndex = layout.columns[col].findIndex((b) => b.id === overId);
-      if (oldIndex !== -1 && newIndex !== -1) {
-        const columns = layout.columns.map((c) => [...c]);
-        columns[col] = arrayMove(columns[col], oldIndex, newIndex);
-        next = { ...layout, columns };
-        setLayout(next);
-      }
-    }
-    persist(next);
+    // Same functional-update reasoning as handleDragOver.
+    setLayout((prev) => {
+      if (!prev) return prev;
+      const col = findColumnIndexOfBlock(prev.columns, activeId);
+      if (col === -1) return prev;
+      const overCol = findColumnIndexOfBlock(prev.columns, overId);
+      if (overCol !== col || activeId === overId) return prev;
+      const oldIndex = prev.columns[col].findIndex((b) => b.id === activeId);
+      const newIndex = prev.columns[col].findIndex((b) => b.id === overId);
+      if (oldIndex === -1 || newIndex === -1) return prev;
+      const columns = prev.columns.map((c) => [...c]);
+      columns[col] = arrayMove(columns[col], oldIndex, newIndex);
+      return { ...prev, columns };
+    });
   }
 
   function updateBlock(blockId: string, patch: Partial<DashboardBlock>) {
-    if (!layout) return;
-    const columns = layout.columns.map((col) => col.map((b) => (b.id === blockId ? ({ ...b, ...patch } as DashboardBlock) : b)));
-    const next = { ...layout, columns };
-    setLayout(next);
-    persist(next);
+    setLayout((prev) => {
+      if (!prev) return prev;
+      const columns = prev.columns.map((col) => col.map((b) => (b.id === blockId ? ({ ...b, ...patch } as DashboardBlock) : b)));
+      return { ...prev, columns };
+    });
   }
 
   function removeBlock(blockId: string) {
-    if (!layout) return;
-    const columns = layout.columns.map((col) => col.filter((b) => b.id !== blockId));
-    const next = { ...layout, columns };
-    setLayout(next);
-    persist(next);
+    setLayout((prev) => {
+      if (!prev) return prev;
+      const columns = prev.columns.map((col) => col.filter((b) => b.id !== blockId));
+      return { ...prev, columns };
+    });
   }
 
   function addWidget(widgetId: string) {
-    if (!layout) return;
-    const columns = layout.columns.map((c) => [...c]);
-    columns[0] = [...columns[0], { kind: "widget", id: widgetId, widgetId, size: "md" }];
-    const next = { ...layout, columns };
-    setLayout(next);
-    persist(next);
+    setLayout((prev) => {
+      if (!prev) return prev;
+      const columns = prev.columns.map((c) => [...c]);
+      columns[0] = [...columns[0], { kind: "widget", id: widgetId, widgetId, size: "md" }];
+      return { ...prev, columns };
+    });
   }
 
   function addSeparator() {
-    if (!layout) return;
-    const columns = layout.columns.map((c) => [...c]);
-    // Not crypto.randomUUID(): that API is only exposed in "secure contexts" (HTTPS, or literally
-    // "localhost") — an instance reached over plain HTTP by IP (a raw LAN address, 0.0.0.0 in a
-    // test) would throw here. This only needs to be unique within one board, not unguessable.
-    const id = `sep-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    columns[0] = [...columns[0], { kind: "separator", id, label: "" }];
-    const next = { ...layout, columns };
-    setLayout(next);
-    persist(next);
+    setLayout((prev) => {
+      if (!prev) return prev;
+      const columns = prev.columns.map((c) => [...c]);
+      // Not crypto.randomUUID(): that API is only exposed in "secure contexts" (HTTPS, or
+      // literally "localhost") — an instance reached over plain HTTP by IP (a raw LAN address,
+      // 0.0.0.0 in a test) would throw here. This only needs to be unique within one board, not
+      // unguessable.
+      const id = `sep-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      columns[0] = [...columns[0], { kind: "separator", id, label: "" }];
+      return { ...prev, columns };
+    });
   }
 
   function setColumnCount(count: 1 | 2 | 3) {
-    if (!layout || layout.columnCount === count) return;
-    const columns = layout.columns.map((c) => [...c]);
-    if (count > columns.length) {
-      while (columns.length < count) columns.push([]);
-    } else {
-      // Losing columns: their blocks move to the last surviving column rather than disappearing.
-      const overflow = columns.splice(count).flat();
-      columns[count - 1] = [...columns[count - 1], ...overflow];
-    }
-    const next: DashboardLayout = { columnCount: count, columns };
-    setLayout(next);
-    persist(next);
+    setLayout((prev) => {
+      if (!prev || prev.columnCount === count) return prev;
+      const columns = prev.columns.map((c) => [...c]);
+      if (count > columns.length) {
+        while (columns.length < count) columns.push([]);
+      } else {
+        // Losing columns: their blocks move to the last surviving column rather than disappearing.
+        const overflow = columns.splice(count).flat();
+        columns[count - 1] = [...columns[count - 1], ...overflow];
+      }
+      return { columnCount: count, columns };
+    });
   }
 
   const placedWidgetIds = useMemo(() => new Set(layout?.columns.flat().filter((b) => b.kind === "widget").map((b) => (b as { widgetId: string }).widgetId) ?? []), [layout]);
