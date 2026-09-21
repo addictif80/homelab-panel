@@ -47,21 +47,42 @@ export async function getOrCreateBackupKeypair(): Promise<{ publicKey: string; p
 }
 
 /**
- * A bare `~` or `$HOME` resolves against whatever user the shell process actually runs as — and
- * with `sudo: true` (buildPrivilegedCommand wraps the whole script in `sudo ... bash -lc '...'`),
- * that's root, not necessarily the configured SSH login user. `~<user>` instead does a passwd
- * lookup for that *specific* user regardless of the shell's own effective UID, assigned to a
- * variable so it can still be used inside a double-quoted string afterwards (tilde expansion only
- * happens in an unquoted or assignment position, never inside "..."). This matters most for
- * ensurePublicKeyAuthorized below: writing to root's ~/.ssh/authorized_keys instead of the actual
- * login user's silently leaves that user's real authorized_keys untouched, so the key it just
- * "authorized" is never found — sshd falls back to password auth and every backup between two
- * ordinary sudo-using hosts fails with "Permission denied, please try again." regardless of which
- * hosts are involved, since this bug doesn't depend on any one host's own configuration.
+ * Both operations below only ever write inside the SSH login user's *own* home directory —
+ * something that user can always do without any elevated privilege, so neither call passes
+ * `sudo: true`, regardless of whether the host is otherwise configured to need it for privileged
+ * commands (docker, apt...). This isn't just least-privilege tidiness: running as root via
+ * `sudo -S ... bash -lc` forces a *login* shell, and bash's own login-shell startup unconditionally
+ * tries to chdir into $HOME and prints "Could not chdir to home directory ... No such file or
+ * directory" when that fails — which happens on NAS OSes (Synology in particular) whose "User
+ * Home" service isn't enabled for a given account, or whose home volume isn't the one currently
+ * mounted. That warning, plus root's own profile/PATH chain, only ever muddies what's actually a
+ * much simpler operation. Running as the real login user directly avoids the login-shell chdir
+ * entirely and resolves `~`/$HOME the same way that user's own normal SSH session would.
+ *
+ * `~<user>` (rather than a bare `~`) still does an explicit passwd lookup for that user, assigned
+ * to a variable so it can be used inside a double-quoted string afterwards (tilde expansion only
+ * happens in an unquoted or assignment position) — harmless here since the process already runs
+ * as that same user, but it keeps this resilient if sudo were ever reintroduced for some host.
  */
 function homeVarAssignment(hostId: number): string {
   const { user } = getHostConnectionInfo(hostId);
   return `BACKUP_HOME=~${user}`;
+}
+
+/** A NAS-side "the account's home directory doesn't actually exist" failure (Synology's "User
+ * Home" service disabled for that account is the classic case) surfaces as a raw, cryptic
+ * mkdir/bash error — spelled out here once so it points at the actual fix instead of looking like
+ * a panel bug. */
+function explainHomeDirError(stderr: string): string {
+  if (/chdir to home directory|No such file or directory/i.test(stderr)) {
+    return (
+      `${stderr}\n\nLe dossier personnel du compte SSH de cette machine semble ne pas exister réellement sur le ` +
+      `disque (courant sur un NAS Synology quand le service "Dossier personnel de l'utilisateur" n'est pas activé ` +
+      `pour ce compte). La clé de sauvegarde doit être placée dans le vrai dossier personnel de ce compte pour que ` +
+      `SSH l'accepte — active ce service (ou choisis un compte qui a déjà un dossier personnel) côté machine.`
+    );
+  }
+  return stderr;
 }
 
 /**
@@ -79,8 +100,8 @@ export async function ensurePrivateKeyDeployed(hostId: number): Promise<string> 
     `chmod 600 "$BACKUP_HOME/.ssh/homelab_panel_backup_key"`,
     `echo "___KEYPATH___$BACKUP_HOME/.ssh/homelab_panel_backup_key"`,
   ].join("\n");
-  const { code, stdout, stderr } = await runSshCommand(hostId, command, { sudo: true });
-  if (code !== 0) throw new Error(stderr || "Impossible d'installer la clé de sauvegarde sur cette machine.");
+  const { code, stdout, stderr } = await runSshCommand(hostId, command);
+  if (code !== 0) throw new Error(explainHomeDirError(stderr) || "Impossible d'installer la clé de sauvegarde sur cette machine.");
   const match = stdout.match(/___KEYPATH___(\S+)/);
   if (!match) throw new Error("Impossible de déterminer le chemin de la clé de sauvegarde sur cette machine.");
   return match[1];
@@ -97,6 +118,6 @@ export async function ensurePublicKeyAuthorized(hostId: number): Promise<void> {
     `touch "$BACKUP_HOME/.ssh/authorized_keys" && chmod 600 "$BACKUP_HOME/.ssh/authorized_keys"`,
     `grep -qF ${shellQuote(AUTHORIZED_KEYS_MARKER)} "$BACKUP_HOME/.ssh/authorized_keys" || echo ${shellQuote(line)} >> "$BACKUP_HOME/.ssh/authorized_keys"`,
   ].join(" && ");
-  const { code, stderr } = await runSshCommand(hostId, command, { sudo: true });
-  if (code !== 0) throw new Error(stderr || "Impossible d'autoriser la clé de sauvegarde sur cette machine.");
+  const { code, stderr } = await runSshCommand(hostId, command);
+  if (code !== 0) throw new Error(explainHomeDirError(stderr) || "Impossible d'autoriser la clé de sauvegarde sur cette machine.");
 }
