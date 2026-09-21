@@ -37,10 +37,17 @@ function connectOnce<T>(hostId: number, fn: (sftp: SFTPWrapper, conn: SshClient)
   });
 }
 
+function isTransientHandshakeError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /connection lost before handshake|econnreset|timed out while waiting for handshake/i.test(message);
+}
+
 /** A picker/explorer click can land while a NAS-grade sshd is momentarily out of free connection
- * slots (or mid-rotation), surfacing as "Connection lost before handshake" — a one-off retry after
- * a short delay clears the overwhelming majority of these without the caller ever seeing it,
- * instead of failing a normal folder click outright. */
+ * slots (or mid-rotation), surfacing as "Connection lost before handshake". A single 800ms retry
+ * clears most of these, but some embedded NAS distros (ZimaOS in particular — a very lightweight
+ * sshd with a strict, slow-to-clear cap on concurrent/per-minute connection attempts) need longer
+ * than that to free up a slot, so this backs off through several attempts before giving up rather
+ * than failing a normal folder click after one quick retry. */
 function withSftp<T>(hostId: number, fn: (sftp: SFTPWrapper, conn: SshClient) => Promise<T>): Promise<T> {
   // /demo sandbox: no real network connection, and building a faithful fake SFTP filesystem isn't
   // worth it for a feature that isn't central to the walkthrough — degrade to a clear message
@@ -49,17 +56,20 @@ function withSftp<T>(hostId: number, fn: (sftp: SFTPWrapper, conn: SshClient) =>
     return Promise.reject(new Error("Explorateur de fichiers non disponible en mode démo."));
   }
 
-  return connectOnce(hostId, fn).catch((err) => {
-    const message = err instanceof Error ? err.message : String(err);
-    if (!/connection lost before handshake|econnreset|timed out while waiting for handshake/i.test(message)) {
-      throw err;
+  const retryDelaysMs = [800, 2000, 4000, 6000];
+
+  async function attempt(remaining: number[]): Promise<T> {
+    try {
+      return await connectOnce(hostId, fn);
+    } catch (err) {
+      if (remaining.length === 0 || !isTransientHandshakeError(err)) throw err;
+      const [delay, ...rest] = remaining;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return attempt(rest);
     }
-    return new Promise<T>((resolve, reject) => {
-      setTimeout(() => {
-        connectOnce(hostId, fn).then(resolve, reject);
-      }, 800);
-    });
-  });
+  }
+
+  return attempt(retryDelaysMs);
 }
 
 function modeToType(mode: number): FileEntry["type"] {
