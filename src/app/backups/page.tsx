@@ -590,6 +590,7 @@ function CreatePlanForm({
   const [selectedContainers, setSelectedContainers] = useState<Set<string>>(new Set());
 
   // database
+  const [dbDeployment, setDbDeployment] = useState<"docker" | "native">("docker");
   const [dbContainerId, setDbContainerId] = useState("");
   const [dbEngine, setDbEngine] = useState<"mysql" | "postgres">("mysql");
   const [dbUser, setDbUser] = useState("root");
@@ -645,9 +646,11 @@ function CreatePlanForm({
       if (selectedContainers.size === 0) return onError("Sélectionne au moins un conteneur.");
       sourceConfig = { containerIds: [...selectedContainers] };
     } else if (sourceType === "database") {
-      if (!dbContainerId || !dbPassword) return onError("Conteneur et mot de passe requis.");
+      if (dbDeployment === "docker" && !dbContainerId) return onError("Conteneur requis.");
+      if (!dbPassword) return onError("Mot de passe requis.");
       sourceConfig = {
-        containerId: dbContainerId,
+        deployment: dbDeployment,
+        containerId: dbDeployment === "docker" ? dbContainerId : undefined,
         engine: dbEngine,
         user: dbUser,
         databases: dbAll ? "all" : dbNames.split(",").map((d) => d.trim()).filter(Boolean),
@@ -831,17 +834,30 @@ function CreatePlanForm({
 
       {sourceType === "database" && (
         <div className="grid grid-cols-2 gap-3">
-          <label className="block">
-            <span className="mb-1 block text-xs text-neutral-400">Conteneur de la base de données</span>
-            <select value={dbContainerId} onChange={(e) => setDbContainerId(e.target.value)} className={INPUT_CLASS}>
-              <option value="">— choisir —</option>
-              {containers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
+          <label className="col-span-2 block">
+            <span className="mb-1 block text-xs text-neutral-400">Installation</span>
+            <select
+              value={dbDeployment}
+              onChange={(e) => setDbDeployment(e.target.value as "docker" | "native")}
+              className={INPUT_CLASS}
+            >
+              <option value="docker">Dans un conteneur Docker</option>
+              <option value="native">Installée directement sur la machine (sans Docker)</option>
             </select>
           </label>
+          {dbDeployment === "docker" && (
+            <label className="block">
+              <span className="mb-1 block text-xs text-neutral-400">Conteneur de la base de données</span>
+              <select value={dbContainerId} onChange={(e) => setDbContainerId(e.target.value)} className={INPUT_CLASS}>
+                <option value="">— choisir —</option>
+                {containers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="block">
             <span className="mb-1 block text-xs text-neutral-400">Moteur</span>
             <select value={dbEngine} onChange={(e) => setDbEngine(e.target.value as "mysql" | "postgres")} className={INPUT_CLASS}>
