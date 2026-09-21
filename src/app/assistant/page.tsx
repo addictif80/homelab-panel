@@ -246,7 +246,11 @@ export default function AssistantPage() {
         <p className="mb-3 rounded border border-purple-900 bg-purple-950/20 p-2 text-xs text-purple-300">
           En mode pilotage, l&apos;IA peut consulter l&apos;état de tes machines et agir dessus (commandes SSH,
           correctifs, blocage d&apos;IP). Toute action qui modifie quelque chose t&apos;est présentée en détail avant
-          exécution — rien ne se lance sans ta confirmation explicite.
+          exécution — rien ne se lance sans ta confirmation explicite. Elle peut aussi répondre en direct à des
+          questions chiffrées sur tes propres données (ex. &laquo; est-ce que mes sauvegardes respectent la règle
+          3-2-1 ? &raquo;, &laquo; combien me coûte mon infra en électricité ? &raquo;, &laquo; y a-t-il eu des
+          coupures internet ce mois-ci ? &raquo;) — jamais en devinant, toujours en interrogeant les vraies données
+          du panel.
         </p>
       )}
 

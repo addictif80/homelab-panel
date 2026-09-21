@@ -211,6 +211,23 @@ export function migrate(db: Database.Database) {
     -- latest backup, see lib/backup/resurrect.ts) or "clonage" (the same, looped over every
     -- backup plan of one host, onto one new machine). plan_id is NULL for a clone job since it
     -- spans several plans — its own log carries the per-plan breakdown instead.
+    -- One row per restoration drill (see lib/backup/drill.ts): restores a plan's latest snapshot
+    -- into a disposable scratch directory on its own source host, counts the files that actually
+    -- came back, and deletes the scratch copy — proof the backup is real and restorable, not just
+    -- that the last run "succeeded" (which only proves the copy step worked, not that it's usable).
+    CREATE TABLE IF NOT EXISTS restore_drills (
+      id TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL REFERENCES backup_plans(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','success','failed')),
+      files_expected INTEGER,
+      files_restored INTEGER,
+      log TEXT NOT NULL DEFAULT '',
+      started_at TEXT NOT NULL DEFAULT (datetime('now')),
+      finished_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_restore_drills_plan ON restore_drills(plan_id, started_at DESC);
+
     CREATE TABLE IF NOT EXISTS service_resurrections (
       id TEXT PRIMARY KEY,
       kind TEXT NOT NULL CHECK (kind IN ('single','clone')),

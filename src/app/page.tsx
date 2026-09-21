@@ -1,4 +1,5 @@
 import { DashboardGrid } from "@/components/dashboard/DashboardGrid";
+import ProactiveInsightBanner from "@/components/ProactiveInsightBanner";
 
 export default function Home() {
   return (
@@ -7,6 +8,7 @@ export default function Home() {
         <h1 className="page-title text-xl">Vue d&apos;ensemble</h1>
         <p className="page-subtitle">Panneau de contrôle centralisé du homelab.</p>
       </div>
+      <ProactiveInsightBanner />
       <DashboardGrid />
     </div>
   );

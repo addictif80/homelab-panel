@@ -6,6 +6,7 @@ import Link from "next/link";
 import AppTemplatesPanel, { type AppTemplate } from "@/components/AppTemplatesPanel";
 import DockerStacksPanel from "@/components/DockerStacksPanel";
 import MigrationJobLog from "@/components/MigrationJobLog";
+import ProvisionModal, { type ProvisionSuggestion } from "@/components/ProvisionModal";
 
 const Terminal = dynamic(() => import("@/components/Terminal"), { ssr: false });
 
@@ -51,6 +52,7 @@ export default function DockerPage() {
   const [migrateJobId, setMigrateJobId] = useState<string | null>(null);
   const [migrateError, setMigrateError] = useState("");
   const [migrateStarting, setMigrateStarting] = useState(false);
+  const [showProvision, setShowProvision] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -223,6 +225,18 @@ export default function DockerPage() {
     setShowRunForm(true);
   }
 
+  function applyProvisionSuggestion(s: ProvisionSuggestion) {
+    if (s.hostId) setRunHostId(s.hostId);
+    setRunImage(s.image);
+    setRunName(s.name);
+    setRunPorts(s.ports.join("\n"));
+    setRunVolumes(s.volumes.join("\n"));
+    setRunEnv(s.env.join("\n"));
+    setRunRestart(s.restartPolicy);
+    setShowProvision(false);
+    setShowRunForm(true);
+  }
+
   const visibleContainers = containers.filter((c) => hostFilter === "all" || c.hostId === hostFilter);
   const erroredHosts = hostStatuses.filter((h) => h.error);
 
@@ -268,6 +282,12 @@ export default function DockerPage() {
           >
             + Lancer un conteneur
           </button>
+          <button
+            onClick={() => setShowProvision(true)}
+            className="rounded border border-purple-700 bg-purple-950/30 px-3 py-1.5 text-sm text-purple-200 hover:bg-purple-950/50"
+          >
+            Provisionner en une phrase
+          </button>
           <Link
             href="/inventory"
             className="rounded border border-neutral-700 px-3 py-1.5 text-sm hover:bg-neutral-800"
@@ -278,6 +298,10 @@ export default function DockerPage() {
       </div>
 
       {showTemplates && <AppTemplatesPanel onUse={useTemplate} />}
+
+      {showProvision && (
+        <ProvisionModal onClose={() => setShowProvision(false)} onApply={applyProvisionSuggestion} />
+      )}
 
       {showRunForm && (
         <form onSubmit={submitRun} className="max-w-lg space-y-3 rounded border border-neutral-800 p-4">

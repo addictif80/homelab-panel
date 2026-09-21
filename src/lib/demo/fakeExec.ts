@@ -107,6 +107,14 @@ export function fakeExec(hostId: number, rawCommand: string): ExecResult {
     return { stdout: fakeDockerInspect(restoredInspectMatch[1]), stderr: "", code: 0 };
   }
 
+  if (rawCommand.includes("-type f 2>/dev/null | wc -l")) {
+    // A restoration drill's file count check (lib/backup/drill.ts): the scratch directory it
+    // restores into always "wins" against the snapshot's own count, so a demo drill reliably
+    // shows success rather than a coin flip on fake numbers that don't actually correspond to
+    // any real transfer in demo mode.
+    return { stdout: rawCommand.includes("homelab-panel-drill-") ? "500" : "40", stderr: "", code: 0 };
+  }
+
   if (rawCommand.includes("___KEYPATH___")) {
     return { stdout: "___KEYPATH___/home/demo/.ssh/homelab_panel_backup_key", stderr: "", code: 0 };
   }

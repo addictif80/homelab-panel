@@ -4,6 +4,12 @@ import { withTimeout } from "./timeout";
 import { scanSingleHost } from "./security/scan";
 import { applySecurityFix } from "./security/fixes";
 import { blockIp, blockIpEverywhere } from "./firewall";
+import { checkRule321 } from "./backup/rule321";
+import { listPlans } from "./backup/plans";
+import { getLatestRun } from "./backup/runs";
+import { getOutageSummary } from "./isp/report";
+import { getPowerCostSummary } from "./power/cost";
+import { getLatestRunId, getRunResults } from "./throughput";
 
 export type AiToolDef = {
   name: string;
@@ -64,6 +70,13 @@ export const AI_TOOLS: AiToolDef[] = [
     sensitive: true,
   },
   {
+    name: "get_panel_metrics",
+    description:
+      "Retourne un instantané des données déjà connues du panel, sans rien exécuter sur les machines : conformité à la règle 3-2-1 des sauvegardes, dernier résultat du test de débit réel entre machines, coût électrique estimé, coupures internet détectées. À utiliser pour répondre à toute question chiffrée sur l'état de l'infra (BI conversationnelle) plutôt que de deviner une réponse.",
+    parameters: { type: "object", properties: {}, required: [] },
+    sensitive: false,
+  },
+  {
     name: "block_ip",
     description:
       "Bloque une adresse IP au pare-feu, sur une seule machine ou sur toute l'infrastructure. Action sensible : ne s'exécute qu'après confirmation humaine.",
@@ -115,6 +128,24 @@ export async function executeAiTool(name: string, args: Record<string, unknown>)
         if (!hostId || !fixId) return "Erreur : hostId ou fixId manquant.";
         const result = await applySecurityFix(hostId, fixId, args.params as Record<string, string> | undefined);
         return JSON.stringify(result);
+      }
+      case "get_panel_metrics": {
+        const rule321 = checkRule321();
+        const plans = listPlans();
+        const backupPlans = plans.map((p) => ({
+          name: p.name,
+          sourceType: p.sourceType,
+          latestRun: getLatestRun(p.id)?.status ?? "jamais exécuté",
+        }));
+        const throughputRunId = getLatestRunId();
+        const throughput = throughputRunId ? getRunResults(throughputRunId) : [];
+        return JSON.stringify({
+          backupRule321: rule321,
+          backupPlans,
+          throughputTestMbps: throughput.map((r) => ({ from: r.sourceHostName, to: r.targetHostName, mbps: r.mbps, error: r.error })),
+          electricity: getPowerCostSummary(),
+          ispOutages: getOutageSummary(),
+        });
       }
       case "block_ip": {
         const ip = String(args.ip ?? "");

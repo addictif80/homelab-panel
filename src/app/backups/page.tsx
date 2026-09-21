@@ -75,6 +75,8 @@ export default function BackupsPage() {
   const [resurrecting, setResurrecting] = useState<BackupPlan | null>(null);
   const [showClone, setShowClone] = useState(false);
   const [resurrectionJobId, setResurrectionJobId] = useState<string | null>(null);
+  const [drillJobId, setDrillJobId] = useState<string | null>(null);
+  const [drilling, setDrilling] = useState<string | null>(null);
   const logRef = useRef<HTMLPreElement>(null);
 
   async function importPanelConfig(runId: string) {
@@ -127,6 +129,21 @@ export default function BackupsPage() {
       cancelled = true;
     };
   }, [activeRunId, loadPlans]);
+
+  async function startDrill(planId: string) {
+    setError("");
+    setDrilling(planId);
+    try {
+      const res = await fetch(`/api/backups/${planId}/drill`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setDrillJobId(data.drillId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setDrilling(null);
+    }
+  }
 
   async function runNow(planId: string) {
     setError("");
@@ -243,12 +260,21 @@ export default function BackupsPage() {
                     Sauvegarder maintenant
                   </button>
                   {plan.latestRun?.status === "success" && (
-                    <button
-                      onClick={() => setResurrecting(plan)}
-                      className="rounded border border-emerald-700 bg-emerald-900/30 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-900/50"
-                    >
-                      Renaissance ailleurs
-                    </button>
+                    <>
+                      <button
+                        onClick={() => startDrill(plan.id)}
+                        disabled={drilling === plan.id}
+                        className="rounded border border-violet-700 bg-violet-900/30 px-2 py-1 text-xs text-violet-200 hover:bg-violet-900/50 disabled:opacity-50"
+                      >
+                        {drilling === plan.id ? "Drill..." : "Drill de restauration"}
+                      </button>
+                      <button
+                        onClick={() => setResurrecting(plan)}
+                        className="rounded border border-emerald-700 bg-emerald-900/30 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-900/50"
+                      >
+                        Renaissance ailleurs
+                      </button>
+                    </>
                   )}
                   <button
                     onClick={() => loadHistory(plan.id)}
@@ -383,6 +409,8 @@ export default function BackupsPage() {
       {resurrectionJobId && (
         <ResurrectionJobPanel jobId={resurrectionJobId} onClose={() => setResurrectionJobId(null)} />
       )}
+
+      {drillJobId && <DrillJobPanel drillId={drillJobId} onClose={() => setDrillJobId(null)} />}
     </div>
   );
 }
@@ -1111,6 +1139,61 @@ function ResurrectionJobPanel({ jobId, onClose }: { jobId: string; onClose: () =
       </div>
       <pre ref={logRef} className="max-h-64 overflow-auto whitespace-pre-wrap bg-black p-2 font-mono text-[11px] text-neutral-300">
         {job?.log || "Démarrage..."}
+      </pre>
+    </div>
+  );
+}
+
+type Drill = {
+  id: string;
+  status: "running" | "success" | "failed";
+  filesExpected: number | null;
+  filesRestored: number | null;
+  log: string;
+};
+
+/** Live log for a restoration drill (see lib/backup/drill.ts) — restores into a scratch dir on
+ * the plan's own source host and reports back how many files actually came back vs. expected. */
+function DrillJobPanel({ drillId, onClose }: { drillId: string; onClose: () => void }) {
+  const [drill, setDrill] = useState<Drill | null>(null);
+  const logRef = useRef<HTMLPreElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function poll() {
+      const res = await fetch(`/api/backups/drills/${drillId}`);
+      if (cancelled) return;
+      const data = await res.json();
+      setDrill(data);
+      if (data.status === "running") setTimeout(poll, 1500);
+    }
+    poll();
+    return () => {
+      cancelled = true;
+    };
+  }, [drillId]);
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [drill?.log]);
+
+  const title =
+    drill?.status === "running"
+      ? "Drill de restauration en cours..."
+      : drill?.status === "success"
+        ? `Drill réussi (${drill.filesRestored}/${drill.filesExpected} fichiers)`
+        : `Drill en échec${drill?.filesRestored !== null && drill?.filesExpected !== null ? ` (${drill?.filesRestored}/${drill?.filesExpected} fichiers)` : ""}`;
+
+  return (
+    <div className="fixed bottom-4 right-4 z-40 w-full max-w-lg rounded border border-violet-800 bg-neutral-950 shadow-xl">
+      <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
+        <span className="text-sm text-neutral-200">{title}</span>
+        <button onClick={onClose} className="text-xs text-neutral-500 hover:text-neutral-300">
+          Fermer
+        </button>
+      </div>
+      <pre ref={logRef} className="max-h-64 overflow-auto whitespace-pre-wrap bg-black p-2 font-mono text-[11px] text-neutral-300">
+        {drill?.log || "Démarrage..."}
       </pre>
     </div>
   );
