@@ -1,6 +1,6 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { mkdtempSync, readFileSync, rmSync } from "fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 import { getDb } from "../db";
@@ -21,16 +21,32 @@ function getStoredKeypair(): { publicKey: string; privateKey: string } | null {
   return { publicKey: row.public_key, privateKey: vaultDecrypt(row.private_key_encrypted) };
 }
 
-/**
- * A single ed25519 keypair dedicated to backup transfers, generated once and reused for every
- * plan — separate from any login credential already on file for these hosts, so it can be
- * deployed narrowly (private key only on machines that run a backup, public key only on
- * machines that receive one) without touching the user's own SSH access.
- */
-export async function getOrCreateBackupKeypair(): Promise<{ publicKey: string; privateKey: string }> {
-  const existing = getStoredKeypair();
-  if (existing) return existing;
+/** Only the algorithm + key material fields matter for an equality check — a trailing comment
+ * (`ssh-keygen -y`'s output carries whatever `-C` comment the private key itself embeds, which may
+ * differ cosmetically from what's stored) shouldn't cause a false mismatch. */
+function keyFingerprint(publicKeyLine: string): string {
+  return publicKeyLine.trim().split(/\s+/).slice(0, 2).join(" ");
+}
 
+/** Derives the public key back out of a private key blob (locally, never over the network) and
+ * checks it against what's supposed to be its pair — the one local, cheap way to tell a genuinely
+ * usable keypair from one that got corrupted at rest (a botched write, a vault re-encryption gone
+ * wrong...) before ever deploying it to a real host. */
+async function verifyKeypair(privateKey: string, publicKey: string): Promise<boolean> {
+  const dir = mkdtempSync(path.join(tmpdir(), "homelab-backup-key-verify-"));
+  const keyPath = path.join(dir, "id_ed25519");
+  try {
+    writeFileSync(keyPath, privateKey, { mode: 0o600 });
+    const { stdout } = await execFileAsync("ssh-keygen", ["-y", "-f", keyPath]);
+    return keyFingerprint(stdout) === keyFingerprint(publicKey);
+  } catch {
+    return false;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+async function generateAndStoreKeypair(): Promise<{ publicKey: string; privateKey: string }> {
   const dir = mkdtempSync(path.join(tmpdir(), "homelab-backup-key-"));
   const keyPath = path.join(dir, "id_ed25519");
   try {
@@ -38,12 +54,33 @@ export async function getOrCreateBackupKeypair(): Promise<{ publicKey: string; p
     const privateKey = readFileSync(keyPath, "utf8");
     const publicKey = readFileSync(`${keyPath}.pub`, "utf8").trim();
     getDb()
-      .prepare(`INSERT INTO backup_ssh_key (id, public_key, private_key_encrypted) VALUES (1, ?, ?)`)
+      .prepare(
+        `INSERT INTO backup_ssh_key (id, public_key, private_key_encrypted) VALUES (1, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET public_key = excluded.public_key, private_key_encrypted = excluded.private_key_encrypted`
+      )
       .run(publicKey, vaultEncrypt(privateKey));
     return { publicKey, privateKey };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/**
+ * A single ed25519 keypair dedicated to backup transfers, generated once and reused for every
+ * plan — separate from any login credential already on file for these hosts, so it can be
+ * deployed narrowly (private key only on machines that run a backup, public key only on
+ * machines that receive one) without touching the user's own SSH access.
+ *
+ * Self-healing: a stored keypair that no longer verifies against itself (see verifyKeypair) would
+ * otherwise be silently redeployed everywhere forever, failing "Permission denied" on every single
+ * host it touches with no way to fix it short of a developer clearing the database row by hand —
+ * regenerating here instead means one bad keypair costs a single failed backup, not a permanently
+ * broken feature.
+ */
+export async function getOrCreateBackupKeypair(): Promise<{ publicKey: string; privateKey: string }> {
+  const existing = getStoredKeypair();
+  if (existing && (await verifyKeypair(existing.privateKey, existing.publicKey))) return existing;
+  return generateAndStoreKeypair();
 }
 
 /**
@@ -92,16 +129,37 @@ function explainHomeDirError(stderr: string): string {
  * caller needs a real path to embed in that argument.
  */
 export async function ensurePrivateKeyDeployed(hostId: number): Promise<string> {
-  const { privateKey } = await getOrCreateBackupKeypair();
+  const { privateKey, publicKey } = await getOrCreateBackupKeypair();
   const command = [
     homeVarAssignment(hostId),
     `mkdir -p "$BACKUP_HOME/.ssh" && chmod 700 "$BACKUP_HOME/.ssh"`,
     `cat > "$BACKUP_HOME/.ssh/homelab_panel_backup_key" <<'HOMELAB_BACKUP_KEY_EOF'\n${privateKey}\nHOMELAB_BACKUP_KEY_EOF`,
     `chmod 600 "$BACKUP_HOME/.ssh/homelab_panel_backup_key"`,
+    // Derives the public key straight back out of the file that was just written, on this same
+    // host — the one way to prove the deployed key is actually intact and usable rather than
+    // corrupted by some quoting/encoding edge case, before any later "Permission denied" during
+    // the real rsync leaves that as just one hypothesis among several. ssh-keygen ships with every
+    // OpenSSH install (client or server), so its absence would itself be unusual enough to surface
+    // rather than silently ignore.
+    `echo "___PUBFP___$(ssh-keygen -y -f "$BACKUP_HOME/.ssh/homelab_panel_backup_key" 2>&1)"`,
     `echo "___KEYPATH___$BACKUP_HOME/.ssh/homelab_panel_backup_key"`,
   ].join("\n");
   const { code, stdout, stderr } = await runSshCommand(hostId, command);
   if (code !== 0) throw new Error(explainHomeDirError(stderr) || "Impossible d'installer la clé de sauvegarde sur cette machine.");
+
+  const pubMatch = stdout.match(/___PUBFP___(.*)/);
+  const derivedPublicKey = pubMatch?.[1].trim() ?? "";
+  // Only a line that actually looks like a public key is treated as a verification result — an
+  // error (ssh-keygen missing from PATH, an unreadable file for some unrelated reason) shouldn't
+  // be misread as "the key is corrupted" when it really just means verification couldn't run.
+  if (/^(ssh-|ecdsa-|sk-)\S+ /.test(derivedPublicKey) && keyFingerprint(derivedPublicKey) !== keyFingerprint(publicKey)) {
+    throw new Error(
+      `La clé privée déployée sur cette machine ne correspond pas à la clé publique attendue une fois relue depuis ` +
+        `le disque (${derivedPublicKey}) — écriture corrompue plutôt qu'un problème d'autorisation. Relance la ` +
+        `sauvegarde ; si ça persiste sur toutes les machines, la paire de clés elle-même est peut-être à régénérer.`
+    );
+  }
+
   const match = stdout.match(/___KEYPATH___(\S+)/);
   if (!match) throw new Error("Impossible de déterminer le chemin de la clé de sauvegarde sur cette machine.");
   return match[1];
