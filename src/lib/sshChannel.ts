@@ -54,7 +54,7 @@ export function openSshChannel(
     return { write: () => {}, resize: () => {}, close: () => {} };
   }
 
-  const conn = new SshClient();
+  let conn = new SshClient();
 
   // See ssh-ws.ts's original comment: the caller's initial size (and any input) can race ahead of
   // the SSH handshake + shell allocation, so both are buffered here and flushed once the channel
@@ -62,6 +62,7 @@ export function openSshChannel(
   let stream: import("ssh2").ClientChannel | null = null;
   let pendingResize = initialSize;
   const pendingInput: string[] = [];
+  let closed = false;
 
   const wireChannel = (newStream: import("ssh2").ClientChannel) => {
     stream = newStream;
@@ -76,7 +77,11 @@ export function openSshChannel(
     });
   };
 
-  conn.on("ready", () => {
+  const onReady = () => {
+    // Past this point the connection is real and staying up for the whole session — any further
+    // 'error' (a mid-session drop) goes straight to the caller, not through the connect-retry path.
+    conn.on("error", (err) => callbacks.onError(err.message));
+
     const ptyOptions = {
       term: "xterm-256color",
       ...(pendingResize ? { cols: pendingResize.cols, rows: pendingResize.rows } : {}),
@@ -109,10 +114,35 @@ export function openSshChannel(
         newStream.write(`${sudoPassword}\n`);
       }
     });
-  });
+  };
 
-  conn.on("error", (err) => callbacks.onError(err.message));
-  conn.connect(config);
+  // Some NAS-grade sshd (ZimaOS's very lightweight one in particular) intermittently drops a
+  // brand new connection attempt before the handshake completes — "Connection lost before
+  // handshake" / ECONNRESET — under momentary load, with no shell/exec requested yet at that
+  // point. Retrying the connect itself a few times with backoff clears the overwhelming majority
+  // of these instead of failing a terminal open outright (same retry budget as the SFTP browser
+  // in lib/sftp.ts, for the same class of host).
+  const CONNECT_RETRY_DELAYS_MS = [800, 2000, 4000, 6000];
+
+  function attemptConnect(remaining: number[]) {
+    conn.once("ready", onReady);
+    conn.once("error", (err) => {
+      if (closed) return;
+      if (remaining.length > 0 && /connection lost before handshake|econnreset|timed out while waiting for handshake/i.test(err.message)) {
+        const [delay, ...rest] = remaining;
+        setTimeout(() => {
+          if (closed) return;
+          conn = new SshClient();
+          attemptConnect(rest);
+        }, delay);
+        return;
+      }
+      callbacks.onError(err.message);
+    });
+    conn.connect(config);
+  }
+
+  attemptConnect(CONNECT_RETRY_DELAYS_MS);
 
   return {
     write: (data) => {
@@ -124,6 +154,7 @@ export function openSshChannel(
       if (stream) stream.setWindow(rows, cols, 0, 0);
     },
     close: () => {
+      closed = true;
       stream?.close();
       conn.end();
     },

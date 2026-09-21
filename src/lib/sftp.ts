@@ -42,6 +42,21 @@ function isTransientHandshakeError(err: unknown): boolean {
   return /connection lost before handshake|econnreset|timed out while waiting for handshake/i.test(message);
 }
 
+/** SFTP browses as the plain SSH login user with no sudo elevation (SFTP has no such concept) —
+ * unlike the shell commands the rest of the panel runs, which can be configured to sudo. A raw
+ * "Permission denied" from the SFTP layer is easy to misread as a bug, so it's spelled out here
+ * once, centrally, instead of leaving every caller to guess why a folder that shell commands can
+ * reach still can't be browsed or picked as a backup destination. */
+function explainSftpError(err: unknown): Error {
+  const message = err instanceof Error ? err.message : String(err);
+  if (/permission denied/i.test(message)) {
+    return new Error(
+      "Permission refusée sur ce chemin — l'explorateur de fichiers et le sélecteur de dossier naviguent avec le compte SSH de cette machine, sans les privilèges élevés (sudo) que le panel peut utiliser ailleurs. Donne à ce compte les droits de lecture (et d'écriture, pour une destination de sauvegarde) sur ce dossier côté machine, ou choisis un compte qui les a déjà."
+    );
+  }
+  return err instanceof Error ? err : new Error(message);
+}
+
 /** A picker/explorer click can land while a NAS-grade sshd is momentarily out of free connection
  * slots (or mid-rotation), surfacing as "Connection lost before handshake". A single 800ms retry
  * clears most of these, but some embedded NAS distros (ZimaOS in particular — a very lightweight
@@ -62,10 +77,12 @@ function withSftp<T>(hostId: number, fn: (sftp: SFTPWrapper, conn: SshClient) =>
     try {
       return await connectOnce(hostId, fn);
     } catch (err) {
-      if (remaining.length === 0 || !isTransientHandshakeError(err)) throw err;
-      const [delay, ...rest] = remaining;
-      await new Promise((resolve) => setTimeout(resolve, delay));
-      return attempt(rest);
+      if (remaining.length > 0 && isTransientHandshakeError(err)) {
+        const [delay, ...rest] = remaining;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return attempt(rest);
+      }
+      throw explainSftpError(err);
     }
   }
 

@@ -25,14 +25,22 @@ function probeHost(address: string, port: number): Promise<{ reachable: boolean;
     const start = Date.now();
     const socket = new net.Socket();
     let settled = false;
-    const finish = (reachable: boolean) => {
+    // A successful connect is closed gracefully (FIN via end()), never abruptly (RST via
+    // destroy()) — this probe repeats every 15s, forever, against every host's SSH port, and a
+    // TCP handshake immediately followed by a reset is exactly the signature some lightweight
+    // sshd distributions' built-in flood/scan protection watches for (ZimaOS's in particular:
+    // it started intermittently dropping/refusing real SSH connections — both the web terminal
+    // and SFTP — to a host this probe was hitting on schedule). destroy() is still fine for the
+    // error/timeout paths below since there's no established connection to close politely there.
+    const finish = (reachable: boolean, graceful = false) => {
       if (settled) return;
       settled = true;
-      socket.destroy();
+      if (graceful) socket.end();
+      else socket.destroy();
       resolve({ reachable, latencyMs: reachable ? Date.now() - start : null });
     };
     socket.setTimeout(PROBE_TIMEOUT_MS);
-    socket.once("connect", () => finish(true));
+    socket.once("connect", () => finish(true, true));
     socket.once("error", (err: NodeJS.ErrnoException) => finish(err.code === "ECONNREFUSED"));
     socket.once("timeout", () => finish(false));
     socket.connect(port, address);
