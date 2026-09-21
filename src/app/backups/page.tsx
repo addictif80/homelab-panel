@@ -190,6 +190,8 @@ export default function BackupsPage() {
 
       {error && <div className="rounded border border-red-900 bg-red-950/30 p-3 text-sm text-red-300">{error}</div>}
 
+      <Rule321Panel />
+
       {showCreate && (
         <CreatePlanForm
           hosts={hosts}
@@ -334,6 +336,73 @@ export default function BackupsPage() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+type Rule321Status = {
+  hostId: number;
+  hostName: string;
+  totalCopies: number;
+  distinctDestinations: number;
+  hasOffsiteDestination: boolean;
+  offsiteStale: boolean;
+  offsiteLastSuccessAt: string | null;
+  compliant: boolean;
+  reasons: string[];
+};
+
+/** Real verification of the 3-2-1 rule (3 copies, 2 media, 1 offsite) per source host — not just
+ * "the last run succeeded", but whether the strategy around it actually survives losing that
+ * host entirely. See lib/backup/rule321.ts for how each condition is derived. */
+function Rule321Panel() {
+  const [statuses, setStatuses] = useState<Rule321Status[] | null>(null);
+
+  useEffect(() => {
+    fetch("/api/backups/rule321")
+      .then((r) => r.json())
+      .then((d) => setStatuses(d.statuses ?? []))
+      .catch(() => setStatuses([]));
+  }, []);
+
+  if (statuses === null) return null;
+  if (statuses.length === 0) return null;
+
+  const nonCompliant = statuses.filter((s) => !s.compliant);
+
+  return (
+    <div className="rounded border border-neutral-800 bg-neutral-900 p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-neutral-100">Règle 3-2-1</h2>
+        <span className={`text-xs ${nonCompliant.length === 0 ? "text-emerald-400" : "text-amber-400"}`}>
+          {nonCompliant.length === 0
+            ? "Toutes les machines sauvegardées respectent la règle"
+            : `${nonCompliant.length}/${statuses.length} machine(s) à risque`}
+        </span>
+      </div>
+      <p className="mb-3 text-xs text-neutral-500">
+        3 copies de chaque donnée, sur 2 supports différents, dont 1 hors-site — vérifié pour de vrai à partir de
+        tes plans de sauvegarde, pas juste « le dernier run a réussi ».
+      </p>
+      <div className="space-y-2">
+        {statuses.map((s) => (
+          <div key={s.hostId} className={`rounded border px-3 py-2 text-xs ${s.compliant ? "border-neutral-800" : "border-amber-900 bg-amber-950/20"}`}>
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-neutral-200">{s.hostName}</span>
+              <span className={s.compliant ? "text-emerald-400" : "text-amber-400"}>
+                {s.compliant ? "Conforme" : "Non conforme"}
+              </span>
+            </div>
+            {!s.compliant && (
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-neutral-400">
+                {s.reasons.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

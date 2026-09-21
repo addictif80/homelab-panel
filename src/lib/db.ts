@@ -109,6 +109,11 @@ export function migrate(db: Database.Database) {
       proxmox_node TEXT,
       router_provider TEXT,
       notes TEXT,
+      -- Set by hand, never inferred from IP/subnet (too easy to get wrong on a home network that
+      -- routes several sites over the same private range) — feeds the 3-2-1 backup rule check
+      -- (lib/backup/rule321.ts), which needs a real answer to "is this destination actually
+      -- somewhere else" rather than a guess.
+      offsite INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -585,6 +590,9 @@ export function migrate(db: Database.Database) {
   }
   if (!hostColumns.some((c) => c.name === "router_provider")) {
     db.exec(`ALTER TABLE hosts ADD COLUMN router_provider TEXT`);
+  }
+  if (!hostColumns.some((c) => c.name === "offsite")) {
+    db.exec(`ALTER TABLE hosts ADD COLUMN offsite INTEGER NOT NULL DEFAULT 0`);
   }
 
   const licenseColumns = db.prepare(`PRAGMA table_info(license)`).all() as { name: string }[];

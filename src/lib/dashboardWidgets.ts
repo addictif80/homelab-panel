@@ -23,6 +23,7 @@ export const WIDGET_CATALOG: WidgetDef[] = [
   { id: "mailEvents", title: "Événements mail suspects", category: "Sécurité", description: "Derniers événements suspects détectés sur le mail." },
   { id: "lockdown", title: "Statut Lockdown", category: "Sécurité", description: "Indique si le mode Lockdown est actif." },
   { id: "backups", title: "Sauvegardes", category: "Fiabilité", description: "Statut du dernier run de chaque plan de sauvegarde." },
+  { id: "backupRule321", title: "Règle 3-2-1", category: "Fiabilité", description: "Vérifie que chaque machine sauvegardée a bien 3 copies, sur 2 supports, dont 1 hors-site." },
   { id: "certificates", title: "Certificats SSL", category: "Fiabilité", description: "Domaines surveillés proches de l'expiration." },
   { id: "uptime", title: "Uptime Kuma", category: "Fiabilité", description: "Aperçu embarqué de ton instance Uptime Kuma." },
   { id: "maintenance", title: "Maintenance", category: "Fiabilité", description: "Nombre de fenêtres de maintenance configurées." },

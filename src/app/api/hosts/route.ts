@@ -22,6 +22,7 @@ export type Host = {
   proxmox_node: string | null;
   router_provider: string | null;
   notes: string | null;
+  offsite: number;
 };
 
 export async function GET() {
@@ -59,6 +60,7 @@ export async function POST(req: NextRequest) {
     needs_sudo,
     proxmox_node,
     notes,
+    offsite,
   } = body;
 
   if (!name || typeof name !== "string") {
@@ -85,8 +87,8 @@ export async function POST(req: NextRequest) {
   try {
     const info = db
       .prepare(
-        `INSERT INTO hosts (name, slug, kind, role, os, cluster, lan_ip, tailscale_ip, public_ip, ssh_port, ssh_user, docker_enabled, update_method, needs_sudo, proxmox_node, notes)
-         VALUES (@name, @slug, @kind, @role, @os, @cluster, @lan_ip, @tailscale_ip, @public_ip, @ssh_port, @ssh_user, @docker_enabled, @update_method, @needs_sudo, @proxmox_node, @notes)`
+        `INSERT INTO hosts (name, slug, kind, role, os, cluster, lan_ip, tailscale_ip, public_ip, ssh_port, ssh_user, docker_enabled, update_method, needs_sudo, proxmox_node, notes, offsite)
+         VALUES (@name, @slug, @kind, @role, @os, @cluster, @lan_ip, @tailscale_ip, @public_ip, @ssh_port, @ssh_user, @docker_enabled, @update_method, @needs_sudo, @proxmox_node, @notes, @offsite)`
       )
       .run({
         name,
@@ -105,6 +107,7 @@ export async function POST(req: NextRequest) {
         needs_sudo: needs_sudo === undefined ? 1 : needs_sudo ? 1 : 0,
         proxmox_node: proxmox_node ?? null,
         notes: notes ?? null,
+        offsite: offsite ? 1 : 0,
       });
     logAudit("host.created", name);
     return NextResponse.json({ id: info.lastInsertRowid }, { status: 201 });

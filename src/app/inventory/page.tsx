@@ -20,6 +20,7 @@ type Host = {
   needs_sudo: number;
   proxmox_node: string | null;
   notes: string | null;
+  offsite: number;
 };
 
 type Link = { id: number; host_a_id: number; host_b_id: number; link_type: string };
@@ -62,6 +63,7 @@ type FormState = {
   needs_sudo: boolean;
   proxmox_node: string;
   notes: string;
+  offsite: boolean;
 };
 
 const EMPTY_FORM: FormState = {
@@ -80,6 +82,7 @@ const EMPTY_FORM: FormState = {
   needs_sudo: true,
   proxmox_node: "",
   notes: "",
+  offsite: false,
 };
 
 function hostToForm(h: Host): FormState {
@@ -99,6 +102,7 @@ function hostToForm(h: Host): FormState {
     needs_sudo: !!h.needs_sudo,
     proxmox_node: h.proxmox_node ?? "",
     notes: h.notes ?? "",
+    offsite: !!h.offsite,
   };
 }
 
@@ -119,6 +123,7 @@ function formToPayload(f: FormState) {
     needs_sudo: f.needs_sudo,
     proxmox_node: f.proxmox_node || null,
     notes: f.notes || null,
+    offsite: f.offsite,
   };
 }
 
@@ -598,6 +603,14 @@ export default function InventoryPage() {
                     onChange={(e) => setForm({ ...form, needs_sudo: e.target.checked })}
                   />
                   Nécessite sudo -i
+                </label>
+                <label className="flex items-center gap-2 text-xs text-neutral-400" title="Sert à la vérification de la règle 3-2-1 des sauvegardes : au moins une copie doit être ailleurs qu'ici.">
+                  <input
+                    type="checkbox"
+                    checked={form.offsite}
+                    onChange={(e) => setForm({ ...form, offsite: e.target.checked })}
+                  />
+                  Site distant (hors-site)
                 </label>
               </div>
               <div className="col-span-2">

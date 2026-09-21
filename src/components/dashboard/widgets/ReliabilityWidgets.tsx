@@ -5,6 +5,7 @@ import { MiniStat, WidgetLoading } from "../shared";
 
 type BackupPlan = { id: string; name: string; enabled: boolean };
 type BackupRun = { status: "running" | "success" | "failed"; finishedAt: string | null } | null;
+type Rule321Status = { hostId: number; hostName: string; compliant: boolean; reasons: string[] };
 
 export function BackupsWidget() {
   const [plans, setPlans] = useState<{ plan: BackupPlan; latestRun: BackupRun }[] | null>(null);
@@ -48,6 +49,44 @@ export function BackupsWidget() {
       </ul>
       <a href="/backups" className="inline-block text-xs text-blue-600 hover:underline">
         Voir plus →
+      </a>
+    </div>
+  );
+}
+
+export function BackupRule321Widget() {
+  const [statuses, setStatuses] = useState<Rule321Status[] | null>(null);
+
+  useEffect(() => {
+    fetch("/api/backups/rule321")
+      .then((r) => r.json())
+      .then((d) => setStatuses(d.statuses ?? []))
+      .catch(() => setStatuses([]));
+  }, []);
+
+  if (statuses === null) return <WidgetLoading />;
+  if (statuses.length === 0) return <p className="text-xs text-neutral-500">Aucun plan de sauvegarde configuré.</p>;
+
+  const nonCompliant = statuses.filter((s) => !s.compliant);
+
+  return (
+    <div className="space-y-2">
+      <MiniStat
+        value={`${statuses.length - nonCompliant.length}/${statuses.length}`}
+        label="machine(s) conformes à la règle 3-2-1"
+        tone={nonCompliant.length === 0 ? "success" : "warning"}
+      />
+      {nonCompliant.length > 0 && (
+        <ul className="space-y-1 text-xs text-neutral-400">
+          {nonCompliant.slice(0, 3).map((s) => (
+            <li key={s.hostId} className="truncate">
+              <span className="text-amber-400">{s.hostName}</span> — {s.reasons[0]}
+            </li>
+          ))}
+        </ul>
+      )}
+      <a href="/backups" className="inline-block text-xs text-blue-600 hover:underline">
+        Voir le détail →
       </a>
     </div>
   );
