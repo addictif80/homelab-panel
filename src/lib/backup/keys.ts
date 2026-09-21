@@ -107,8 +107,15 @@ export async function ensurePrivateKeyDeployed(hostId: number): Promise<string> 
   return match[1];
 }
 
-/** Authorizes the backup public key on a host that needs to receive data — idempotent, only
- * appends the line once (marked with a comment so it's identifiable/removable later). */
+/**
+ * Authorizes the backup public key on a host that needs to receive data — self-healing rather
+ * than a plain "skip if a marker-tagged line is already there" idempotency check: several bugs in
+ * this exact function got fixed across earlier sessions (wrong home directory under sudo, needing
+ * sudo at all...), any of which could have already left a stale or malformed marker-tagged line
+ * behind from a past failed run. A dumb `grep marker || append` would see that old line, consider
+ * the key "already authorized", and never fix it — so this always drops any existing
+ * marker-tagged line first, then appends a fresh one matching the keypair actually on file today.
+ */
 export async function ensurePublicKeyAuthorized(hostId: number): Promise<void> {
   const { publicKey } = await getOrCreateBackupKeypair();
   const line = `${publicKey.trim()} ${AUTHORIZED_KEYS_MARKER}`;
@@ -116,7 +123,9 @@ export async function ensurePublicKeyAuthorized(hostId: number): Promise<void> {
     homeVarAssignment(hostId),
     `mkdir -p "$BACKUP_HOME/.ssh" && chmod 700 "$BACKUP_HOME/.ssh"`,
     `touch "$BACKUP_HOME/.ssh/authorized_keys" && chmod 600 "$BACKUP_HOME/.ssh/authorized_keys"`,
-    `grep -qF ${shellQuote(AUTHORIZED_KEYS_MARKER)} "$BACKUP_HOME/.ssh/authorized_keys" || echo ${shellQuote(line)} >> "$BACKUP_HOME/.ssh/authorized_keys"`,
+    `{ grep -vF ${shellQuote(AUTHORIZED_KEYS_MARKER)} "$BACKUP_HOME/.ssh/authorized_keys" || true; } > "$BACKUP_HOME/.ssh/authorized_keys.tmp"`,
+    `mv "$BACKUP_HOME/.ssh/authorized_keys.tmp" "$BACKUP_HOME/.ssh/authorized_keys"`,
+    `echo ${shellQuote(line)} >> "$BACKUP_HOME/.ssh/authorized_keys"`,
   ].join(" && ");
   const { code, stderr } = await runSshCommand(hostId, command);
   if (code !== 0) throw new Error(explainHomeDirError(stderr) || "Impossible d'autoriser la clé de sauvegarde sur cette machine.");
