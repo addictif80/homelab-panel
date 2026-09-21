@@ -31,6 +31,7 @@ export const WIDGET_CATALOG: WidgetDef[] = [
   { id: "updates", title: "Mises à jour", category: "Fiabilité", description: "Machines avec une méthode de mise à jour configurée." },
   { id: "tailscale", title: "Tailscale", category: "Réseau", description: "Appareils connectés/déconnectés sur le tailnet." },
   { id: "publicIp", title: "IP publique", category: "Réseau", description: "IP publique actuelle du panel." },
+  { id: "ispOutages", title: "Coupures FAI", category: "Réseau", description: "Coupures internet détectées automatiquement, avec rapport téléchargeable." },
   { id: "audit", title: "Journal d'audit", category: "Autres", description: "Dernières actions enregistrées sur le panel." },
   { id: "license", title: "Licence", category: "Autres", description: "Statut d'activation et jours d'essai restants." },
   { id: "notes", title: "Notes", category: "Autres", description: "Bloc-notes personnel, visible uniquement par toi." },

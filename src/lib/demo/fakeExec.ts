@@ -70,5 +70,20 @@ export function fakeExec(hostId: number, rawCommand: string): ExecResult {
     return { stdout: monitoringStats(hostId), stderr: "", code: 0 };
   }
 
+  if (rawCommand.includes("___KEYPATH___")) {
+    return { stdout: "___KEYPATH___/home/demo/.ssh/homelab_panel_backup_key", stderr: "", code: 0 };
+  }
+
+  if (rawCommand.includes("___THROUGHPUT_NS___")) {
+    // A believable, slightly-varying Mb/s per (source, target) pair — LAN-speed range, not a real
+    // measurement, purely so the demo's throughput matrix doesn't show identical numbers everywhere.
+    const targetMatch = rawCommand.match(/@[\w.-]+\s*"cat/);
+    const seed = hostId * 7 + (targetMatch ? targetMatch[0].length : 0);
+    const wobble = (Date.now() / 60_000 + seed) % 10;
+    const mbps = 180 + ((seed * 53) % 650) + wobble * 5;
+    const elapsedNs = Math.round((64 * 8 * 1e9) / mbps);
+    return { stdout: `___THROUGHPUT_NS___${elapsedNs}`, stderr: "", code: 0 };
+  }
+
   return { stdout: "", stderr: "", code: 0 };
 }

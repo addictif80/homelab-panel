@@ -3,7 +3,7 @@ import { QuickAccessWidget } from "./widgets/QuickAccessWidget";
 import { DockerWidget, ElectricityCostWidget, ProxmoxWidget, UpdatesWidget } from "./widgets/InfraWidgets";
 import { BlockedIpsWidget, LockdownWidget, MailEventsWidget, SecurityFindingsWidget } from "./widgets/SecurityWidgets";
 import { BackupRule321Widget, BackupsWidget, CertificatesWidget, MaintenanceWidget, UptimeWidget } from "./widgets/ReliabilityWidgets";
-import { PublicIpWidget, TailscaleWidget } from "./widgets/NetworkWidgets";
+import { IspOutagesWidget, PublicIpWidget, TailscaleWidget } from "./widgets/NetworkWidgets";
 import { AuditWidget } from "./widgets/AuditWidget";
 import { LicenseWidget } from "./widgets/LicenseWidget";
 import { NotesWidget } from "./widgets/NotesWidget";
@@ -32,6 +32,7 @@ export const WIDGET_COMPONENTS: Record<string, React.ComponentType> = {
   updates: UpdatesWidget,
   tailscale: TailscaleWidget,
   publicIp: PublicIpWidget,
+  ispOutages: IspOutagesWidget,
   audit: AuditWidget,
   license: LicenseWidget,
   notes: NotesWidget,

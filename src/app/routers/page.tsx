@@ -221,6 +221,8 @@ export default function RoutersPage() {
         </p>
       </div>
 
+      <IspOutageSection />
+
       {hosts.length === 0 ? (
         <p className="text-sm text-neutral-500">
           Aucune machine de type "Réseau" dans l&apos;inventaire — ajoutes-en une depuis{" "}
@@ -530,6 +532,100 @@ export default function RoutersPage() {
             </div>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+type OutageRow = { id: number; startedAt: string; endedAt: string | null; durationMinutes: number | null };
+type OutageSummary = {
+  outages: OutageRow[];
+  totalOutages: number;
+  totalDowntimeMinutes: number;
+  longestOutageMinutes: number | null;
+  ongoing: boolean;
+};
+
+function formatOutageDate(iso: string): string {
+  return new Date(`${iso}Z`).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function formatOutageDuration(minutes: number | null): string {
+  if (minutes === null) return "en cours";
+  if (minutes < 1) return "< 1 min";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h > 0 ? `${h} h ${m} min` : `${m} min`;
+}
+
+/** Detects and lists every WAN outage the panel itself observed (see lib/isp/outageRecorder.ts —
+ * probes three independent public DNS resolvers every minute, never the ISP's own status page),
+ * with a one-click download of a plain-text report ready to attach to an ISP complaint or
+ * compensation request. */
+function IspOutageSection() {
+  const [summary, setSummary] = useState<OutageSummary | null>(null);
+
+  useEffect(() => {
+    fetch("/api/isp-outages")
+      .then((r) => r.json())
+      .then(setSummary)
+      .catch(() => setSummary(null));
+  }, []);
+
+  if (!summary) return null;
+
+  return (
+    <div className="rounded border border-neutral-800 bg-neutral-900 p-4">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-neutral-100">Preuve de panne FAI</h2>
+        <a
+          href="/api/isp-outages/report"
+          className="rounded border border-neutral-700 px-2 py-1 text-xs hover:bg-neutral-800"
+        >
+          Télécharger le rapport (.txt)
+        </a>
+      </div>
+      <p className="mb-3 text-xs text-neutral-500">
+        Le panel teste sa connexion à trois résolveurs DNS publics indépendants (Cloudflare, Google, Quad9) toutes
+        les 60 secondes. Une coupure n&apos;est comptée que si les trois échouent en même temps — ce relevé sert de
+        preuve horodatée en cas de réclamation auprès de ton fournisseur d&apos;accès.
+      </p>
+
+      <div className="mb-3 flex flex-wrap gap-4 text-sm">
+        <div>
+          <span className="text-lg font-bold tabular-nums text-neutral-100">{summary.totalOutages}</span>
+          <span className="ml-1 text-xs text-neutral-500">coupure(s) / 90j</span>
+        </div>
+        <div>
+          <span className="text-lg font-bold tabular-nums text-neutral-100">
+            {formatOutageDuration(summary.totalDowntimeMinutes)}
+          </span>
+          <span className="ml-1 text-xs text-neutral-500">cumulées</span>
+        </div>
+        {summary.longestOutageMinutes !== null && (
+          <div>
+            <span className="text-lg font-bold tabular-nums text-neutral-100">
+              {formatOutageDuration(summary.longestOutageMinutes)}
+            </span>
+            <span className="ml-1 text-xs text-neutral-500">la plus longue</span>
+          </div>
+        )}
+        {summary.ongoing && <span className="rounded bg-red-900/40 px-2 py-0.5 text-xs text-red-300">Coupure en cours</span>}
+      </div>
+
+      {summary.outages.length === 0 ? (
+        <p className="text-xs text-neutral-600">Aucune coupure détectée sur les 90 derniers jours.</p>
+      ) : (
+        <div className="space-y-1">
+          {summary.outages.slice(0, 8).map((o) => (
+            <div key={o.id} className="flex items-center justify-between text-xs">
+              <span className="text-neutral-300">
+                {formatOutageDate(o.startedAt)} → {o.endedAt ? formatOutageDate(o.endedAt) : "en cours"}
+              </span>
+              <span className="text-neutral-500">{formatOutageDuration(o.durationMinutes)}</span>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

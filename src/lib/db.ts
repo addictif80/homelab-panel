@@ -336,6 +336,31 @@ export function migrate(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_power_samples_time ON power_samples(recorded_at);
 
+    -- One row per WAN outage the panel itself observed (see lib/isp/outageRecorder.ts) — probing
+    -- well-known external hosts every minute, never the ISP's own status page (which is often the
+    -- first thing to go down, or to lie). ended_at stays NULL while the outage is ongoing; a row
+    -- with ended_at set is the raw material for the auto-generated proof-of-outage report.
+    CREATE TABLE IF NOT EXISTS isp_outages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      started_at TEXT NOT NULL,
+      ended_at TEXT
+    );
+
+    -- One row per (source, target) pair tested in a throughput run (see lib/throughput.ts) —
+    -- manual-trigger only, like the security scan: testing every pair on a schedule would mean
+    -- constant multi-hundred-MB transfers between every machine in the fleet for no reason.
+    CREATE TABLE IF NOT EXISTS throughput_tests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id TEXT NOT NULL,
+      source_host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+      target_host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+      mbps REAL,
+      error TEXT,
+      tested_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_throughput_tests_run ON throughput_tests(run_id);
+
     -- A buyer's support request. access_token is the only credential needed to view/reply to a
     -- ticket from the public store site — no account required, same spirit as download_tokens.
     CREATE TABLE IF NOT EXISTS support_tickets (

@@ -21,6 +21,7 @@ import { startNotificationScheduler } from "./src/lib/notifications/scheduler";
 import { startBackupScheduler } from "./src/lib/backup/scheduler";
 import { startPulseRecorder } from "./src/lib/pulseRecorder";
 import { startPowerRecorder } from "./src/lib/power/recorder";
+import { startIspOutageRecorder } from "./src/lib/isp/outageRecorder";
 import { startHostPublicIpScheduler } from "./src/lib/hostPublicIpScheduler";
 import { autoActivateFromBundledKey } from "./src/lib/license";
 import { startLicenseRenewalScheduler } from "./src/lib/licenseRenewalScheduler";
@@ -61,6 +62,7 @@ app.prepare().then(() => {
   startBackupScheduler();
   startPulseRecorder();
   startPowerRecorder();
+  startIspOutageRecorder();
   startHostPublicIpScheduler();
   autoActivateFromBundledKey().catch(() => {});
   startLicenseRenewalScheduler();

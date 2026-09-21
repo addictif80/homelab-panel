@@ -38,3 +38,26 @@ export function PublicIpWidget() {
 
   return <MiniStat value={ip ?? "—"} label="IP publique actuelle du panel" />;
 }
+
+type OutageSummary = { totalOutages: number; ongoing: boolean };
+
+export function IspOutagesWidget() {
+  const [summary, setSummary] = useState<OutageSummary | null>(null);
+
+  useEffect(() => {
+    fetch("/api/isp-outages")
+      .then((r) => r.json())
+      .then(setSummary)
+      .catch(() => setSummary(null));
+  }, []);
+
+  if (!summary) return <WidgetLoading />;
+
+  return (
+    <MiniStat
+      value={summary.ongoing ? "En cours" : String(summary.totalOutages)}
+      label={summary.ongoing ? "coupure FAI en cours" : "coupure(s) FAI détectée(s) / 90j"}
+      href="/routers"
+    />
+  );
+}
