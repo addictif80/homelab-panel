@@ -65,6 +65,7 @@ export default function BackupsPage() {
   const [plans, setPlans] = useState<BackupPlan[] | null>(null);
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<BackupPlan | null>(null);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [runHistory, setRunHistory] = useState<Record<string, BackupRun[]>>({});
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
@@ -208,7 +209,10 @@ export default function BackupsPage() {
             Cloner vers une machine neuve
           </button>
           <button
-            onClick={() => setShowCreate((s) => !s)}
+            onClick={() => {
+              setEditingPlan(null);
+              setShowCreate((s) => !s);
+            }}
             className="rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-200 hover:bg-neutral-800"
           >
             {showCreate ? "Annuler" : "+ Nouveau plan"}
@@ -220,12 +224,19 @@ export default function BackupsPage() {
 
       <Rule321Panel />
 
-      {showCreate && (
+      {(showCreate || editingPlan) && (
         <CreatePlanForm
+          key={editingPlan?.id ?? "new"}
           hosts={hosts}
+          editingPlan={editingPlan}
           onCreated={() => {
             setShowCreate(false);
+            setEditingPlan(null);
             loadPlans();
+          }}
+          onCancel={() => {
+            setShowCreate(false);
+            setEditingPlan(null);
           }}
           onError={setError}
         />
@@ -258,6 +269,15 @@ export default function BackupsPage() {
                     className="rounded border border-blue-700 bg-blue-900/40 px-2 py-1 text-xs text-blue-200 hover:bg-blue-900/60"
                   >
                     Sauvegarder maintenant
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowCreate(false);
+                      setEditingPlan(plan);
+                    }}
+                    className="rounded border border-neutral-600 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+                  >
+                    Modifier
                   </button>
                   {plan.latestRun?.status === "success" && (
                     <>
@@ -563,44 +583,76 @@ function RestoreModal({
   );
 }
 
+/** Parses a plan's stored sourceConfig JSON for the one field this form actually needs to
+ * prefill, on the matching sourceType only — a plan being edited always has a sourceConfig that
+ * matches its own sourceType, but a mismatched call site (or a future sourceType this form
+ * doesn't know about yet) should prefill nothing rather than throw. */
+function parseSourceConfig<T>(plan: BackupPlan | null | undefined, expectedType: SourceType): T | null {
+  if (!plan || plan.sourceType !== expectedType) return null;
+  try {
+    return JSON.parse(plan.sourceConfig) as T;
+  } catch {
+    return null;
+  }
+}
+
 function CreatePlanForm({
   hosts,
+  editingPlan,
   onCreated,
+  onCancel,
   onError,
 }: {
   hosts: Host[];
+  editingPlan?: BackupPlan | null;
   onCreated: () => void;
+  onCancel: () => void;
   onError: (msg: string) => void;
 }) {
-  const [name, setName] = useState("");
-  const [sourceType, setSourceType] = useState<SourceType>("paths");
-  const [sourceHostId, setSourceHostId] = useState<number | null>(hosts[0]?.id ?? null);
-  const [destHostId, setDestHostId] = useState<number | null>(hosts[0]?.id ?? null);
-  const [destPath, setDestPath] = useState("/volume1/backups/homelab-panel");
-  const [schedule, setSchedule] = useState<Schedule>("daily");
-  const [retentionCount, setRetentionCount] = useState(7);
+  const [name, setName] = useState(editingPlan?.name ?? "");
+  const [sourceType, setSourceType] = useState<SourceType>(editingPlan?.sourceType ?? "paths");
+  const [sourceHostId, setSourceHostId] = useState<number | null>(editingPlan?.sourceHostId ?? hosts[0]?.id ?? null);
+  const [destHostId, setDestHostId] = useState<number | null>(editingPlan?.destHostId ?? hosts[0]?.id ?? null);
+  const [destPath, setDestPath] = useState(editingPlan?.destPath ?? "/volume1/backups/homelab-panel");
+  const [schedule, setSchedule] = useState<Schedule>(editingPlan?.schedule ?? "daily");
+  const [retentionCount, setRetentionCount] = useState(editingPlan?.retentionCount ?? 7);
   const [creating, setCreating] = useState(false);
 
   // paths
-  const [pathsText, setPathsText] = useState("/etc");
+  const [pathsText, setPathsText] = useState(
+    () => parseSourceConfig<{ paths: string[] }>(editingPlan, "paths")?.paths.join("\n") ?? "/etc"
+  );
   const [browsing, setBrowsing] = useState<"source" | "dest" | null>(null);
 
   // docker
   const [containers, setContainers] = useState<DockerContainer[]>([]);
-  const [selectedContainers, setSelectedContainers] = useState<Set<string>>(new Set());
+  const [selectedContainers, setSelectedContainers] = useState<Set<string>>(
+    () => new Set(parseSourceConfig<{ containerIds: string[] }>(editingPlan, "docker")?.containerIds ?? [])
+  );
 
   // database
-  const [dbDeployment, setDbDeployment] = useState<"docker" | "native">("docker");
-  const [dbContainerId, setDbContainerId] = useState("");
-  const [dbEngine, setDbEngine] = useState<"mysql" | "postgres">("mysql");
-  const [dbUser, setDbUser] = useState("root");
+  const existingDbConfig = parseSourceConfig<{
+    deployment?: "docker" | "native";
+    containerId?: string;
+    engine: "mysql" | "postgres";
+    user: string;
+    databases: "all" | string[];
+  }>(editingPlan, "database");
+  const [dbDeployment, setDbDeployment] = useState<"docker" | "native">(existingDbConfig?.deployment ?? "docker");
+  const [dbContainerId, setDbContainerId] = useState(existingDbConfig?.containerId ?? "");
+  const [dbEngine, setDbEngine] = useState<"mysql" | "postgres">(existingDbConfig?.engine ?? "mysql");
+  const [dbUser, setDbUser] = useState(existingDbConfig?.user ?? "root");
   const [dbPassword, setDbPassword] = useState("");
-  const [dbAll, setDbAll] = useState(true);
-  const [dbNames, setDbNames] = useState("");
+  const [dbAll, setDbAll] = useState(existingDbConfig ? existingDbConfig.databases === "all" : true);
+  const [dbNames, setDbNames] = useState(
+    existingDbConfig && existingDbConfig.databases !== "all" ? existingDbConfig.databases.join(", ") : ""
+  );
 
   // proxmox
   const [pveResources, setPveResources] = useState<ProxmoxResource[]>([]);
-  const [selectedVmid, setSelectedVmid] = useState<number | null>(null);
+  const [selectedVmid, setSelectedVmid] = useState<number | null>(
+    parseSourceConfig<{ vmid: number }>(editingPlan, "proxmox_vm")?.vmid ?? null
+  );
   const [containersError, setContainersError] = useState("");
 
   useEffect(() => {
@@ -647,7 +699,9 @@ function CreatePlanForm({
       sourceConfig = { containerIds: [...selectedContainers] };
     } else if (sourceType === "database") {
       if (dbDeployment === "docker" && !dbContainerId) return onError("Conteneur requis.");
-      if (!dbPassword) return onError("Mot de passe requis.");
+      // A new plan needs a password up front; an edit can leave it blank to keep the one on file
+      // (the PATCH route only re-encrypts it when a new value is actually sent — see api/backups/[id]).
+      if (!editingPlan && !dbPassword) return onError("Mot de passe requis.");
       sourceConfig = {
         deployment: dbDeployment,
         containerId: dbDeployment === "docker" ? dbContainerId : undefined,
@@ -655,7 +709,7 @@ function CreatePlanForm({
         user: dbUser,
         databases: dbAll ? "all" : dbNames.split(",").map((d) => d.trim()).filter(Boolean),
       };
-      password = dbPassword;
+      if (dbPassword) password = dbPassword;
     } else if (sourceType === "proxmox_vm") {
       const resource = pveResources.find((r) => r.vmid === selectedVmid);
       if (!resource) return onError("Sélectionne une VM/CT.");
@@ -664,21 +718,27 @@ function CreatePlanForm({
 
     setCreating(true);
     try {
-      const res = await fetch("/api/backups", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          sourceHostId,
-          sourceType,
-          sourceConfig,
-          password,
-          destHostId,
-          destPath,
-          schedule,
-          retentionCount,
-        }),
-      });
+      const res = editingPlan
+        ? await fetch(`/api/backups/${editingPlan.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, destHostId, destPath, schedule, retentionCount, sourceConfig, password }),
+          })
+        : await fetch("/api/backups", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name,
+              sourceHostId,
+              sourceType,
+              sourceConfig,
+              password,
+              destHostId,
+              destPath,
+              schedule,
+              retentionCount,
+            }),
+          });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       onCreated();
@@ -691,14 +751,22 @@ function CreatePlanForm({
 
   return (
     <div className="space-y-3 rounded border border-neutral-800 bg-neutral-900 p-4">
+      {editingPlan && <h2 className="text-sm font-semibold text-neutral-100">Modifier le plan</h2>}
       <div className="grid grid-cols-2 gap-3">
         <label className="block">
           <span className="mb-1 block text-xs text-neutral-400">Nom du plan</span>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="ex: Configs Mailcow" className={INPUT_CLASS} />
         </label>
         <label className="block">
-          <span className="mb-1 block text-xs text-neutral-400">Type de sauvegarde</span>
-          <select value={sourceType} onChange={(e) => setSourceType(e.target.value as SourceType)} className={INPUT_CLASS}>
+          <span className="mb-1 block text-xs text-neutral-400">
+            Type de sauvegarde{editingPlan && " (fixé à la création)"}
+          </span>
+          <select
+            value={sourceType}
+            onChange={(e) => setSourceType(e.target.value as SourceType)}
+            disabled={!!editingPlan}
+            className={`${INPUT_CLASS} disabled:opacity-60`}
+          >
             {Object.entries(SOURCE_TYPE_LABELS).map(([v, l]) => (
               <option key={v} value={v}>
                 {l}
@@ -707,8 +775,15 @@ function CreatePlanForm({
           </select>
         </label>
         <label className="block">
-          <span className="mb-1 block text-xs text-neutral-400">Machine source</span>
-          <select value={sourceHostId ?? ""} onChange={(e) => setSourceHostId(Number(e.target.value))} className={INPUT_CLASS}>
+          <span className="mb-1 block text-xs text-neutral-400">
+            Machine source{editingPlan && " (fixée à la création)"}
+          </span>
+          <select
+            value={sourceHostId ?? ""}
+            onChange={(e) => setSourceHostId(Number(e.target.value))}
+            disabled={!!editingPlan}
+            className={`${INPUT_CLASS} disabled:opacity-60`}
+          >
             {hosts.map((h) => (
               <option key={h.id} value={h.id}>
                 {h.name}
@@ -870,7 +945,9 @@ function CreatePlanForm({
             <input value={dbUser} onChange={(e) => setDbUser(e.target.value)} className={INPUT_CLASS} />
           </label>
           <label className="block">
-            <span className="mb-1 block text-xs text-neutral-400">Mot de passe</span>
+            <span className="mb-1 block text-xs text-neutral-400">
+              Mot de passe{editingPlan && " (laisser vide pour conserver l'actuel)"}
+            </span>
             <input type="password" value={dbPassword} onChange={(e) => setDbPassword(e.target.value)} className={INPUT_CLASS} />
           </label>
           <label className="col-span-2 flex items-center gap-2 text-sm text-neutral-300">
@@ -900,13 +977,16 @@ function CreatePlanForm({
         </label>
       )}
 
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <button onClick={onCancel} disabled={creating} className="rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800">
+          Annuler
+        </button>
         <button
           onClick={submit}
           disabled={creating}
           className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60 disabled:opacity-50"
         >
-          {creating ? "Création..." : "Créer le plan"}
+          {creating ? "Enregistrement..." : editingPlan ? "Enregistrer les modifications" : "Créer le plan"}
         </button>
       </div>
     </div>

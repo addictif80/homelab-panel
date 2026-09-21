@@ -83,7 +83,12 @@ export function createPlan(input: Omit<BackupPlan, "id" | "createdAt">): BackupP
 export function updatePlan(id: string, patch: Partial<Omit<BackupPlan, "id" | "createdAt">>): void {
   const current = getPlan(id);
   if (!current) throw new Error("Plan de sauvegarde introuvable.");
-  const merged = { ...current, ...patch };
+  // A key present in `patch` but set to undefined (any caller that only sends the fields it
+  // actually means to change, like the plan-edit form, which never touches `enabled`) must leave
+  // that field alone — {...current, ...patch} would otherwise spread the literal `undefined` over
+  // it, silently disabling/blanking whatever wasn't explicitly passed.
+  const definedPatch = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+  const merged = { ...current, ...definedPatch };
   getDb()
     .prepare(
       `UPDATE backup_plans SET name=?, source_host_id=?, source_type=?, source_config=?, dest_host_id=?, dest_path=?, schedule=?, retention_count=?, enabled=? WHERE id=?`
