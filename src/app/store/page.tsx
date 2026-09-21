@@ -296,6 +296,107 @@ const FEATURES = [
       </>
     ),
   },
+  {
+    title: "Vue d'ensemble entièrement personnalisable",
+    text: "Ressources, sécurité, sauvegardes, Docker, Tailscale... plus de 20 widgets à glisser-déposer sur 1 à 3 colonnes, redimensionnables et séparables par des titres — chacun choisit son propre tableau de bord.",
+    icon: (
+      <>
+        <rect x="3.5" y="4" width="7" height="16" rx="1.2" stroke="currentColor" strokeWidth="1.6" />
+        <rect x="13.5" y="4" width="7" height="7" rx="1.2" stroke="currentColor" strokeWidth="1.6" />
+        <rect x="13.5" y="13" width="7" height="7" rx="1.2" stroke="currentColor" strokeWidth="1.6" />
+      </>
+    ),
+  },
+  {
+    title: "Démo publique, sans rien installer",
+    text: "Un bac à sable isolé avec des données fictives, accessible en un clic depuis cette page : explore tout le panel — dashboard, Docker, sécurité — avant même de télécharger quoi que ce soit.",
+    icon: (
+      <>
+        <rect x="3.5" y="4.5" width="17" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M9 20.5h6M12 16.5v4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <path d="M9.5 8.5l3 2.2-3 2.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </>
+    ),
+  },
+];
+
+type FeatureCategory = { title: string; items: string[] };
+const FEATURE_CATEGORIES: FeatureCategory[] = [
+  {
+    title: "Infrastructure & virtualisation",
+    items: [
+      "Inventaire unifié des serveurs physiques, VM/LXC Proxmox, NAS et VPS",
+      "Proxmox : snapshots (créer, lister, restaurer, supprimer) et migration de VM/LXC entre nœuds ou clusters",
+      "Docker : conteneurs, stacks Docker Compose, modèles d'applications en un clic, détection des images à mettre à jour, migration de conteneurs entre hôtes",
+      "Terminal SSH intégré vers machine, VM, LXC ou conteneur, élévation sudo gérée automatiquement",
+      "Explorateur de fichiers SFTP avec copie directe d'un serveur à un autre",
+      "Gestionnaire de bases de données MySQL/PostgreSQL, y compris via conteneur Docker",
+      "Mises à jour système en un clic par machine, ou en fenêtres de maintenance planifiées et échelonnées",
+      "Santé matérielle en direct : températures, état SMART des disques, RAID, charge de l'onduleur",
+    ],
+  },
+  {
+    title: "Réseau",
+    items: [
+      "Box & routeurs : OpenWrt, pfSense, Freebox (appairage, redirections de ports, Wi-Fi)",
+      "Tailscale : appareils, ACL, routes de sous-réseaux annoncées",
+      "Reverse proxy Nginx Proxy Manager avec bascule (failover) automatique vers un serveur de secours",
+      "DNS multi-registrar : Cloudflare, OVH, Gandi, Namecheap",
+      "Supervision Uptime Kuma intégrée directement dans le panel",
+      "Découverte réseau automatique et carte de topologie de l'inventaire",
+    ],
+  },
+  {
+    title: "Sécurité",
+    items: [
+      "Centre de sécurité : scan actif par SSH, explication claire de chaque faille, correctif en un clic ou commandes à copier",
+      "Audit de ports passif, sans jamais tenter la moindre authentification",
+      "Blocage d'IP persistant façon fail2ban, et mode Lockdown en un clic pour verrouiller tout accès externe",
+      "Anti-spam mail avec blocage en un clic des IP et expéditeurs suspects",
+      "Suivi d'expiration des certificats SSL et renouvellement automatique",
+      "Journal d'audit de toutes les actions effectuées dans le panel",
+      "Coffre de récupération hors-ligne : export/import chiffré (AES-256) de toute la configuration",
+    ],
+  },
+  {
+    title: "Sauvegardes",
+    items: [
+      "Système unique façon Hyper Backup, cross-OS : Proxmox, Synology, ZimaOS, OpenWrt, VPS Debian/Ubuntu",
+      "Sources multiples : chemins de fichiers, volumes Docker, dumps de bases de données, VM Proxmox",
+      "Historique de versions avec rétention configurable, planification automatique, restauration en un clic",
+    ],
+  },
+  {
+    title: "Services & annuaire",
+    items: [
+      "Tableau de bord interne de tous les services hébergés (nom, favicon, capture d'écran, compteur de clics)",
+      "Page publique de statut, personnalisable, pour partager ses services",
+      "Annuaire public communautaire pour référencer son instance",
+      "Gestion de sites CyberPanel (sites web, paquets)",
+    ],
+  },
+  {
+    title: "Interface du panel",
+    items: [
+      "Vue d'ensemble personnalisable : plus de 20 widgets en glisser-déposer, 1 à 3 colonnes, redimensionnement, séparateurs",
+      "Comptes multi-utilisateurs avec accès limité (lecture seule / administrateur)",
+      "Notes personnelles privées, thème clair/sombre, application installable (PWA)",
+      "Assistant IA local (Ollama) pour interroger l'état de l'infrastructure en langage naturel",
+      "Alertes multi-canal configurables : email SMTP, webhook générique, ntfy, Discord, Slack",
+      "Mode démo public accessible sans installation, avec données fictives et réinitialisation automatique",
+    ],
+  },
+  {
+    title: "Intégrations supportées",
+    items: [
+      "Virtualisation & OS : Proxmox VE, Docker, Synology, ZimaOS, TrueNAS, VPS Debian/Ubuntu",
+      "Réseau : OpenWrt, pfSense, Freebox, Tailscale, Nginx Proxy Manager",
+      "DNS : Cloudflare, OVH, Gandi, Namecheap",
+      "Supervision & IA : Uptime Kuma, Ollama",
+      "Web & mail : CyberPanel, Mailcow / Postfix / Dovecot",
+      "Notifications : SMTP, webhook générique, ntfy, Discord, Slack",
+    ],
+  },
 ];
 
 const COMPARISON_ROWS = [
@@ -545,6 +646,9 @@ export default function StorePage() {
               >
                 Essai gratuit{trialDays ? ` — ${trialDays} jours` : ""}
               </a>
+              <a href="/demo" className="px-6 py-3 text-sm font-medium text-neutral-300 underline decoration-neutral-700 underline-offset-4 hover:text-neutral-100 hover:decoration-neutral-500">
+                Voir la démo, sans rien installer →
+              </a>
             </div>
             {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
             <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-2">
@@ -646,6 +750,33 @@ export default function StorePage() {
           <h2 className="mt-3 text-3xl font-semibold">Ce qui fait la différence</h2>
         </div>
         <FeatureSlider features={FEATURES} />
+
+        {/* Full feature breakdown, by category — the slider above only surfaces a handful of
+            highlights; this is the exhaustive list for anyone comparing feature-by-feature
+            before buying. */}
+        <div className="mt-20">
+          <div className="mb-10 text-center">
+            <span className="font-mono text-xs uppercase tracking-wider text-blue-400">Le détail complet</span>
+            <h3 className="mt-3 text-2xl font-semibold">Toutes les fonctionnalités, par catégorie</h3>
+          </div>
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {FEATURE_CATEGORIES.map((cat) => (
+              <div key={cat.title} className="card p-5">
+                <h4 className="mb-3 text-sm font-semibold text-blue-400">{cat.title}</h4>
+                <ul className="space-y-2.5">
+                  {cat.items.map((item) => (
+                    <li key={item} className="flex gap-2 text-sm leading-snug text-neutral-400">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="mt-0.5 shrink-0 text-emerald-400">
+                        <path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
 
         {/* Comparison table */}
         <div className="mt-20 overflow-x-auto rounded-xl border border-neutral-800">
