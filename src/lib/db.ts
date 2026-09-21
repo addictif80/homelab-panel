@@ -114,6 +114,10 @@ export function migrate(db: Database.Database) {
       -- (lib/backup/rule321.ts), which needs a real answer to "is this destination actually
       -- somewhere else" rather than a guess.
       offsite INTEGER NOT NULL DEFAULT 0,
+      -- Estimated power draw at idle / full load, in watts — set by hand (see the ALTER TABLE
+      -- below for why this is never guessed), feeds the electricity cost estimate.
+      watts_idle INTEGER,
+      watts_max INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -318,6 +322,19 @@ export function migrate(db: Database.Database) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_pulse_history_time ON pulse_history(recorded_at);
+
+    -- Sampled every 15 min (see lib/power/recorder.ts), not on every dashboard load like the live
+    -- monitoring stats — CPU load is read over SSH, and this table exists purely to average it
+    -- over a billing period, which doesn't need second-by-second resolution. Pruned to
+    -- POWER_RETENTION_DAYS, same rolling-window spirit as pulse_history.
+    CREATE TABLE IF NOT EXISTS power_samples (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+      cpu_percent REAL,
+      recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_power_samples_time ON power_samples(recorded_at);
 
     -- A buyer's support request. access_token is the only credential needed to view/reply to a
     -- ticket from the public store site — no account required, same spirit as download_tokens.
@@ -593,6 +610,15 @@ export function migrate(db: Database.Database) {
   }
   if (!hostColumns.some((c) => c.name === "offsite")) {
     db.exec(`ALTER TABLE hosts ADD COLUMN offsite INTEGER NOT NULL DEFAULT 0`);
+  }
+  // Never inferred from CPU/PSU specs — real-world idle/max draw varies too much by model and PSU
+  // efficiency to guess honestly. Left null (host excluded from the cost estimate, not silently
+  // assumed to be zero) until the user measures or looks up their own numbers.
+  if (!hostColumns.some((c) => c.name === "watts_idle")) {
+    db.exec(`ALTER TABLE hosts ADD COLUMN watts_idle INTEGER`);
+  }
+  if (!hostColumns.some((c) => c.name === "watts_max")) {
+    db.exec(`ALTER TABLE hosts ADD COLUMN watts_max INTEGER`);
   }
 
   const licenseColumns = db.prepare(`PRAGMA table_info(license)`).all() as { name: string }[];

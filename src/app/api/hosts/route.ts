@@ -23,6 +23,8 @@ export type Host = {
   router_provider: string | null;
   notes: string | null;
   offsite: number;
+  watts_idle: number | null;
+  watts_max: number | null;
 };
 
 export async function GET() {

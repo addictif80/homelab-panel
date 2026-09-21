@@ -21,6 +21,8 @@ type Host = {
   proxmox_node: string | null;
   notes: string | null;
   offsite: number;
+  watts_idle: number | null;
+  watts_max: number | null;
 };
 
 type Link = { id: number; host_a_id: number; host_b_id: number; link_type: string };
@@ -64,6 +66,8 @@ type FormState = {
   proxmox_node: string;
   notes: string;
   offsite: boolean;
+  watts_idle: string;
+  watts_max: string;
 };
 
 const EMPTY_FORM: FormState = {
@@ -83,6 +87,8 @@ const EMPTY_FORM: FormState = {
   proxmox_node: "",
   notes: "",
   offsite: false,
+  watts_idle: "",
+  watts_max: "",
 };
 
 function hostToForm(h: Host): FormState {
@@ -103,6 +109,8 @@ function hostToForm(h: Host): FormState {
     proxmox_node: h.proxmox_node ?? "",
     notes: h.notes ?? "",
     offsite: !!h.offsite,
+    watts_idle: h.watts_idle !== null ? String(h.watts_idle) : "",
+    watts_max: h.watts_max !== null ? String(h.watts_max) : "",
   };
 }
 
@@ -124,6 +132,8 @@ function formToPayload(f: FormState) {
     proxmox_node: f.proxmox_node || null,
     notes: f.notes || null,
     offsite: f.offsite,
+    watts_idle: f.watts_idle.trim() ? Number(f.watts_idle) : null,
+    watts_max: f.watts_max.trim() ? Number(f.watts_max) : null,
   };
 }
 
@@ -612,6 +622,30 @@ export default function InventoryPage() {
                   />
                   Site distant (hors-site)
                 </label>
+              </div>
+              <div>
+                <label className="block text-xs mb-1" title="Consommation mesurée ou trouvée sur la fiche technique — utilisé pour l'estimation de coût électrique.">
+                  Conso. au repos (W)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.watts_idle}
+                  onChange={(e) => setForm({ ...form, watts_idle: e.target.value })}
+                  placeholder="ex : 15"
+                  className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs mb-1">Conso. en pleine charge (W)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.watts_max}
+                  onChange={(e) => setForm({ ...form, watts_max: e.target.value })}
+                  placeholder="ex : 65"
+                  className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                />
               </div>
               <div className="col-span-2">
                 <label className="block text-xs mb-1">Notes</label>

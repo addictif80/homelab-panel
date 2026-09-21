@@ -22,6 +22,8 @@ const EDITABLE_FIELDS = [
   "router_provider",
   "notes",
   "offsite",
+  "watts_idle",
+  "watts_max",
 ] as const;
 
 // better-sqlite3 only binds numbers, strings, bigints, buffers and null — booleans throw.

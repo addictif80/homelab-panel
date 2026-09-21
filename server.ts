@@ -20,6 +20,7 @@ import { attachLogsWebSocketServer } from "./src/server/logs-ws";
 import { startNotificationScheduler } from "./src/lib/notifications/scheduler";
 import { startBackupScheduler } from "./src/lib/backup/scheduler";
 import { startPulseRecorder } from "./src/lib/pulseRecorder";
+import { startPowerRecorder } from "./src/lib/power/recorder";
 import { startHostPublicIpScheduler } from "./src/lib/hostPublicIpScheduler";
 import { autoActivateFromBundledKey } from "./src/lib/license";
 import { startLicenseRenewalScheduler } from "./src/lib/licenseRenewalScheduler";
@@ -59,6 +60,7 @@ app.prepare().then(() => {
   startNotificationScheduler();
   startBackupScheduler();
   startPulseRecorder();
+  startPowerRecorder();
   startHostPublicIpScheduler();
   autoActivateFromBundledKey().catch(() => {});
   startLicenseRenewalScheduler();

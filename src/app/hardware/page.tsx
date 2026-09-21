@@ -17,6 +17,28 @@ type HardwareHealth = { temperatures: TemperatureReading[]; disks: DiskHealth[];
 
 type HostState = { loading: boolean; health: HardwareHealth | null; error: string | null };
 
+type HostPowerCost = {
+  hostId: number;
+  hostName: string;
+  configured: boolean;
+  avgCpuPercent: number | null;
+  avgWatts: number | null;
+  sampleCount: number;
+  estimatedMonthlyKwh: number | null;
+  estimatedMonthlyCost: number | null;
+};
+type PowerCostSummary = {
+  pricePerKwh: number;
+  hosts: HostPowerCost[];
+  totalMonthlyCost: number;
+  totalMonthlyKwh: number;
+  unconfiguredHostNames: string[];
+};
+
+function formatEur(value: number): string {
+  return value.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 2 });
+}
+
 function tempColor(celsius: number): string {
   if (celsius >= 75) return "text-red-400";
   if (celsius >= 60) return "text-amber-400";
@@ -58,6 +80,8 @@ export default function HardwarePage() {
           d&apos;échouer silencieusement.
         </p>
       </div>
+
+      <ElectricityCostSection />
 
       <div className="grid gap-4 md:grid-cols-2">
         {hosts.map((h) => {
@@ -142,6 +166,103 @@ export default function HardwarePage() {
         })}
         {hosts.length === 0 && <p className="text-sm text-neutral-500">Aucune machine SSH dans l&apos;inventaire.</p>}
       </div>
+    </div>
+  );
+}
+
+/** Estimated, never claimed as measured: watts come from what the user entered per host
+ * (inventaire), averaged against real CPU load samples collected every 15 min (lib/power/recorder.ts)
+ * — a host with no idle/max wattage filled in is listed as "not configured" rather than silently
+ * left out of the total or guessed at with a generic number. */
+function ElectricityCostSection() {
+  const [summary, setSummary] = useState<PowerCostSummary | null>(null);
+  const [priceInput, setPriceInput] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const load = () => {
+    fetch("/api/power/cost")
+      .then((r) => r.json())
+      .then((d: PowerCostSummary) => {
+        setSummary(d);
+        setPriceInput(String(d.pricePerKwh));
+      })
+      .catch(() => setSummary(null));
+  };
+
+  useEffect(load, []);
+
+  async function savePrice() {
+    const price = Number(priceInput.replace(",", "."));
+    if (!Number.isFinite(price) || price <= 0) return;
+    setSaving(true);
+    await fetch("/api/power/cost", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pricePerKwh: price }),
+    });
+    setSaving(false);
+    load();
+  }
+
+  if (!summary) return null;
+
+  return (
+    <div className="rounded border border-neutral-800 bg-neutral-900 p-4">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-neutral-100">Coût électrique estimé</h2>
+        <div className="flex items-center gap-1.5 text-xs text-neutral-400">
+          <span>Prix du kWh :</span>
+          <input
+            value={priceInput}
+            onChange={(e) => setPriceInput(e.target.value)}
+            className="w-16 rounded border border-neutral-700 bg-neutral-950 px-1.5 py-0.5 text-right font-mono text-xs"
+          />
+          <span>€</span>
+          <button
+            onClick={savePrice}
+            disabled={saving}
+            className="rounded border border-neutral-700 px-2 py-0.5 hover:bg-neutral-800 disabled:opacity-50"
+          >
+            OK
+          </button>
+        </div>
+      </div>
+      <p className="mb-3 text-xs text-neutral-500">
+        Estimation à partir de la consommation à vide/en charge que tu renseignes par machine (inventaire) et de la
+        charge CPU moyenne réelle des 30 derniers jours — pas une mesure directe, à ajuster avec tes propres chiffres
+        si tu as une prise connectée.
+      </p>
+
+      <div className="mb-3 flex items-baseline gap-2">
+        <span className="text-2xl font-bold tabular-nums text-neutral-100">{formatEur(summary.totalMonthlyCost)}</span>
+        <span className="text-xs text-neutral-500">estimé / mois ({summary.totalMonthlyKwh.toFixed(1)} kWh)</span>
+      </div>
+
+      <div className="space-y-1.5">
+        {summary.hosts.map((h) => (
+          <div key={h.hostId} className="flex items-center justify-between text-xs">
+            <span className="text-neutral-300">{h.hostName}</span>
+            {h.configured ? (
+              h.estimatedMonthlyCost !== null ? (
+                <span className="text-neutral-400">
+                  {formatEur(h.estimatedMonthlyCost)} ({h.avgWatts!.toFixed(0)} W moy., {h.avgCpuPercent!.toFixed(0)}% CPU)
+                </span>
+              ) : (
+                <span className="text-neutral-600">Pas encore d&apos;échantillon (attends ~15 min)</span>
+              )
+            ) : (
+              <span className="text-neutral-600">Watts non renseignés</span>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {summary.unconfiguredHostNames.length > 0 && (
+        <p className="mt-3 text-[11px] text-neutral-600">
+          Renseigne la consommation au repos/en charge de {summary.unconfiguredHostNames.join(", ")} dans
+          l&apos;inventaire pour les inclure dans l&apos;estimation.
+        </p>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { AlertsWidget, MachinesWidget, ResourcesWidget } from "./widgets/ResourceWidgets";
 import { QuickAccessWidget } from "./widgets/QuickAccessWidget";
-import { DockerWidget, ProxmoxWidget, UpdatesWidget } from "./widgets/InfraWidgets";
+import { DockerWidget, ElectricityCostWidget, ProxmoxWidget, UpdatesWidget } from "./widgets/InfraWidgets";
 import { BlockedIpsWidget, LockdownWidget, MailEventsWidget, SecurityFindingsWidget } from "./widgets/SecurityWidgets";
 import { BackupRule321Widget, BackupsWidget, CertificatesWidget, MaintenanceWidget, UptimeWidget } from "./widgets/ReliabilityWidgets";
 import { PublicIpWidget, TailscaleWidget } from "./widgets/NetworkWidgets";
@@ -19,6 +19,7 @@ export const WIDGET_COMPONENTS: Record<string, React.ComponentType> = {
   quickAccess: QuickAccessWidget,
   docker: DockerWidget,
   proxmox: ProxmoxWidget,
+  electricityCost: ElectricityCostWidget,
   securityFindings: SecurityFindingsWidget,
   blockedIps: BlockedIpsWidget,
   mailEvents: MailEventsWidget,

@@ -18,6 +18,7 @@ export const WIDGET_CATALOG: WidgetDef[] = [
   { id: "quickAccess", title: "Accès rapide", category: "Autres", description: "Raccourcis vers les modules principaux du panel." },
   { id: "docker", title: "Docker", category: "Ressources", description: "Conteneurs actifs/arrêtés par hôte." },
   { id: "proxmox", title: "Proxmox", category: "Ressources", description: "Nombre de nœuds Proxmox connus." },
+  { id: "electricityCost", title: "Coût électrique", category: "Ressources", description: "Estimation de la consommation et du coût mensuel de l'infra." },
   { id: "securityFindings", title: "Scan de sécurité", category: "Sécurité", description: "Lance un scan à la demande et résume les failles trouvées." },
   { id: "blockedIps", title: "IPs bloquées", category: "Sécurité", description: "Dernières IPs bloquées automatiquement." },
   { id: "mailEvents", title: "Événements mail suspects", category: "Sécurité", description: "Derniers événements suspects détectés sur le mail." },

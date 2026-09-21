@@ -66,3 +66,30 @@ export function UpdatesWidget() {
 
   return <MiniStat value={`${configured}/${hosts.length}`} label="machines avec mises à jour configurées" href="/updates" />;
 }
+
+type PowerCostSummary = { totalMonthlyCost: number; totalMonthlyKwh: number; unconfiguredHostNames: string[] };
+
+export function ElectricityCostWidget() {
+  const [summary, setSummary] = useState<PowerCostSummary | null>(null);
+
+  useEffect(() => {
+    fetch("/api/power/cost")
+      .then((r) => r.json())
+      .then(setSummary)
+      .catch(() => setSummary(null));
+  }, []);
+
+  if (!summary) return <WidgetLoading />;
+
+  return (
+    <MiniStat
+      value={summary.totalMonthlyCost.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
+      label={
+        summary.unconfiguredHostNames.length > 0
+          ? `estimé / mois — ${summary.unconfiguredHostNames.length} machine(s) sans watts renseignés`
+          : `estimé / mois (${summary.totalMonthlyKwh.toFixed(0)} kWh)`
+      }
+      href="/hardware"
+    />
+  );
+}
