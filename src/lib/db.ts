@@ -207,6 +207,21 @@ export function migrate(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_backup_runs_plan ON backup_runs(plan_id, started_at DESC);
 
+    -- One job per "renaissance" (a single service restored + relaunched elsewhere from its
+    -- latest backup, see lib/backup/resurrect.ts) or "clonage" (the same, looped over every
+    -- backup plan of one host, onto one new machine). plan_id is NULL for a clone job since it
+    -- spans several plans — its own log carries the per-plan breakdown instead.
+    CREATE TABLE IF NOT EXISTS service_resurrections (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL CHECK (kind IN ('single','clone')),
+      plan_id TEXT REFERENCES backup_plans(id) ON DELETE SET NULL,
+      target_host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','success','failed')),
+      log TEXT NOT NULL DEFAULT '',
+      started_at TEXT NOT NULL DEFAULT (datetime('now')),
+      finished_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS license (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       status TEXT NOT NULL DEFAULT 'trial' CHECK (status IN ('trial','activated')),

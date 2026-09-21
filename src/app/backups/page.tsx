@@ -72,6 +72,9 @@ export default function BackupsPage() {
   const [restoring, setRestoring] = useState<{ plan: BackupPlan; run: BackupRun; path: string } | null>(null);
   const [importingRunId, setImportingRunId] = useState<string | null>(null);
   const [importMsg, setImportMsg] = useState("");
+  const [resurrecting, setResurrecting] = useState<BackupPlan | null>(null);
+  const [showClone, setShowClone] = useState(false);
+  const [resurrectionJobId, setResurrectionJobId] = useState<string | null>(null);
   const logRef = useRef<HTMLPreElement>(null);
 
   async function importPanelConfig(runId: string) {
@@ -180,12 +183,20 @@ export default function BackupsPage() {
             transférée directement d&apos;une machine à l&apos;autre — le HP ou le Synology par exemple.
           </p>
         </div>
-        <button
-          onClick={() => setShowCreate((s) => !s)}
-          className="rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-200 hover:bg-neutral-800"
-        >
-          {showCreate ? "Annuler" : "+ Nouveau plan"}
-        </button>
+        <div className="flex shrink-0 gap-2">
+          <button
+            onClick={() => setShowClone(true)}
+            className="rounded border border-emerald-700 bg-emerald-900/30 px-3 py-1.5 text-sm text-emerald-200 hover:bg-emerald-900/50"
+          >
+            Cloner vers une machine neuve
+          </button>
+          <button
+            onClick={() => setShowCreate((s) => !s)}
+            className="rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-200 hover:bg-neutral-800"
+          >
+            {showCreate ? "Annuler" : "+ Nouveau plan"}
+          </button>
+        </div>
       </div>
 
       {error && <div className="rounded border border-red-900 bg-red-950/30 p-3 text-sm text-red-300">{error}</div>}
@@ -231,6 +242,14 @@ export default function BackupsPage() {
                   >
                     Sauvegarder maintenant
                   </button>
+                  {plan.latestRun?.status === "success" && (
+                    <button
+                      onClick={() => setResurrecting(plan)}
+                      className="rounded border border-emerald-700 bg-emerald-900/30 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-900/50"
+                    >
+                      Renaissance ailleurs
+                    </button>
+                  )}
                   <button
                     onClick={() => loadHistory(plan.id)}
                     className="rounded border border-neutral-600 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
@@ -335,6 +354,34 @@ export default function BackupsPage() {
             setActiveRun({ id: runId, planId: restoring.plan.id, status: "running", log: "", snapshotPath: null, paths: [], startedAt: new Date().toISOString(), finishedAt: null });
           }}
         />
+      )}
+
+      {resurrecting && (
+        <ResurrectModal
+          hosts={hosts}
+          plan={resurrecting}
+          onClose={() => setResurrecting(null)}
+          onStarted={(jobId) => {
+            setResurrecting(null);
+            setResurrectionJobId(jobId);
+          }}
+        />
+      )}
+
+      {showClone && (
+        <CloneModal
+          hosts={hosts}
+          plans={plans ?? []}
+          onClose={() => setShowClone(false)}
+          onStarted={(jobId) => {
+            setShowClone(false);
+            setResurrectionJobId(jobId);
+          }}
+        />
+      )}
+
+      {resurrectionJobId && (
+        <ResurrectionJobPanel jobId={resurrectionJobId} onClose={() => setResurrectionJobId(null)} />
       )}
     </div>
   );
@@ -818,6 +865,253 @@ function CreatePlanForm({
           {creating ? "Création..." : "Créer le plan"}
         </button>
       </div>
+    </div>
+  );
+}
+
+type ResurrectionJob = {
+  id: string;
+  kind: "single" | "clone";
+  status: "running" | "success" | "failed";
+  log: string;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
+/**
+ * Picks the machine that gets the service back — the plan's own destination host holds the
+ * snapshot, so it's excluded (that's the source of the data, never a sensible resurrection
+ * target). Used by both "Renaissance ailleurs" (one plan) and "Cloner vers une machine neuve"
+ * (every plan of a host, looped — see lib/backup/resurrect.ts).
+ */
+function ResurrectModal({
+  hosts,
+  plan,
+  onClose,
+  onStarted,
+}: {
+  hosts: Host[];
+  plan: BackupPlan;
+  onClose: () => void;
+  onStarted: (jobId: string) => void;
+}) {
+  const candidates = hosts.filter((h) => h.id !== plan.destHostId);
+  const [targetHostId, setTargetHostId] = useState(candidates[0]?.id ?? plan.sourceHostId);
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState("");
+
+  async function start() {
+    setStarting(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/backups/${plan.id}/resurrect`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetHostId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      onStarted(data.jobId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-md space-y-3 rounded border border-neutral-700 bg-neutral-950 p-4">
+        <h2 className="text-sm font-semibold text-neutral-100">Renaissance ailleurs</h2>
+        <p className="text-xs text-neutral-500">
+          Restaure la dernière sauvegarde réussie de &laquo; {plan.name} &raquo; sur une autre machine — et, si
+          c&apos;est une sauvegarde Docker, relance directement le(s) conteneur(s) dessus.
+        </p>
+        <label className="block">
+          <span className="mb-1 block text-xs text-neutral-400">Machine cible</span>
+          <select value={targetHostId} onChange={(e) => setTargetHostId(Number(e.target.value))} className={INPUT_CLASS}>
+            {candidates.map((h) => (
+              <option key={h.id} value={h.id}>
+                {h.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {error && <p className="text-sm text-red-400">{error}</p>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} disabled={starting} className="rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800">
+            Annuler
+          </button>
+          <button
+            onClick={start}
+            disabled={starting || !targetHostId}
+            className="rounded border border-emerald-700 bg-emerald-900/40 px-3 py-1.5 text-sm text-emerald-200 hover:bg-emerald-900/60 disabled:opacity-50"
+          >
+            {starting ? "Démarrage..." : "Lancer la renaissance"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * "Clone tout ton setup" — every backup plan of one machine, replayed onto a fresh one in a
+ * single job. Honest framing: this replays what's actually been backed up (dossiers, volumes
+ * Docker, dumps...), not an image of the OS itself — see lib/backup/resurrect.ts.
+ */
+function CloneModal({
+  hosts,
+  plans,
+  onClose,
+  onStarted,
+}: {
+  hosts: Host[];
+  plans: BackupPlan[];
+  onClose: () => void;
+  onStarted: (jobId: string) => void;
+}) {
+  const sourceHostIds = Array.from(new Set(plans.map((p) => p.sourceHostId)));
+  const sourceHosts = hosts.filter((h) => sourceHostIds.includes(h.id));
+  const [sourceHostId, setSourceHostId] = useState<number | null>(sourceHosts[0]?.id ?? null);
+  const [targetHostId, setTargetHostId] = useState<number | null>(hosts.find((h) => h.id !== sourceHosts[0]?.id)?.id ?? null);
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState("");
+
+  const planCount = plans.filter((p) => p.sourceHostId === sourceHostId).length;
+
+  async function start() {
+    if (!sourceHostId || !targetHostId) return;
+    setStarting(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/hosts/clone`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceHostId, targetHostId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      onStarted(data.jobId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-md space-y-3 rounded border border-neutral-700 bg-neutral-950 p-4">
+        <h2 className="text-sm font-semibold text-neutral-100">Cloner vers une machine neuve</h2>
+        <p className="text-xs text-neutral-500">
+          Rejoue toutes les dernières sauvegardes réussies d&apos;une machine sur une machine neuve déjà présente
+          dans l&apos;inventaire — dossiers, volumes Docker (avec relance des conteneurs), dumps de bases de
+          données. Pas un clonage d&apos;OS : seulement ce que tes plans de sauvegarde couvrent déjà.
+        </p>
+        {sourceHosts.length === 0 ? (
+          <p className="rounded border border-amber-900 bg-amber-950/30 p-2 text-xs text-amber-300">
+            Aucun plan de sauvegarde n&apos;existe pour l&apos;instant — crées-en au moins un avant de pouvoir cloner
+            une machine.
+          </p>
+        ) : (
+          <>
+            <label className="block">
+              <span className="mb-1 block text-xs text-neutral-400">Machine à cloner</span>
+              <select
+                value={sourceHostId ?? ""}
+                onChange={(e) => setSourceHostId(Number(e.target.value))}
+                className={INPUT_CLASS}
+              >
+                {sourceHosts.map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {h.name}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-1 block text-[11px] text-neutral-500">{planCount} plan(s) de sauvegarde seront rejoués.</span>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-neutral-400">Machine neuve (destination)</span>
+              <select
+                value={targetHostId ?? ""}
+                onChange={(e) => setTargetHostId(Number(e.target.value))}
+                className={INPUT_CLASS}
+              >
+                {hosts
+                  .filter((h) => h.id !== sourceHostId)
+                  .map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          </>
+        )}
+        {error && <p className="text-sm text-red-400">{error}</p>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} disabled={starting} className="rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800">
+            Annuler
+          </button>
+          <button
+            onClick={start}
+            disabled={starting || !sourceHostId || !targetHostId || sourceHosts.length === 0}
+            className="rounded border border-emerald-700 bg-emerald-900/40 px-3 py-1.5 text-sm text-emerald-200 hover:bg-emerald-900/60 disabled:opacity-50"
+          >
+            {starting ? "Démarrage..." : "Lancer le clonage"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Live log for a renaissance/clonage job, polled while running — same spirit as the backup run
+ * panel above, just against /api/backups/resurrections instead of a backup run. */
+function ResurrectionJobPanel({ jobId, onClose }: { jobId: string; onClose: () => void }) {
+  const [job, setJob] = useState<ResurrectionJob | null>(null);
+  const logRef = useRef<HTMLPreElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function poll() {
+      const res = await fetch(`/api/backups/resurrections/${jobId}`);
+      if (cancelled) return;
+      const data = await res.json();
+      setJob(data);
+      if (data.status === "running") setTimeout(poll, 1500);
+    }
+    poll();
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [job?.log]);
+
+  const title =
+    job?.status === "running"
+      ? job.kind === "clone"
+        ? "Clonage en cours..."
+        : "Renaissance en cours..."
+      : job?.status === "success"
+        ? "Terminé"
+        : "Échec";
+
+  return (
+    <div className="fixed bottom-4 right-4 z-40 w-full max-w-lg rounded border border-neutral-700 bg-neutral-950 shadow-xl">
+      <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
+        <span className="text-sm text-neutral-200">{title}</span>
+        <button onClick={onClose} className="text-xs text-neutral-500 hover:text-neutral-300">
+          Fermer
+        </button>
+      </div>
+      <pre ref={logRef} className="max-h-64 overflow-auto whitespace-pre-wrap bg-black p-2 font-mono text-[11px] text-neutral-300">
+        {job?.log || "Démarrage..."}
+      </pre>
     </div>
   );
 }

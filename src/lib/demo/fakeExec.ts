@@ -18,6 +18,33 @@ function fakeStats(hostId: number): { cores: number; memTotalKb: number; memAvai
   return { cores, memTotalKb, memAvailKb, diskTotalKb, diskUsedKb, idlePercent };
 }
 
+function findDemoContainer(containerId: string): { name: string; image: string } | null {
+  for (const containers of Object.values(DEMO_CONTAINERS)) {
+    const match = containers.find((c) => c.id === containerId);
+    if (match) return { name: match.name, image: match.image };
+  }
+  return null;
+}
+
+/** A `docker inspect` result plausible enough to drive the demo's service-resurrection flow end to
+ * end — one named volume, an image/restart policy, no real ports — not a faithful reproduction of
+ * dockerPsJson's richer per-host container list above. */
+function fakeDockerInspect(containerId: string): string {
+  const known = findDemoContainer(containerId);
+  const name = known?.name ?? `conteneur-${containerId.slice(0, 8)}`;
+  const image = known?.image ?? "demo/app:latest";
+  return JSON.stringify([
+    {
+      Name: `/${name}`,
+      Config: { Image: image, Env: ["TZ=Europe/Paris"], Cmd: null },
+      HostConfig: { RestartPolicy: { Name: "unless-stopped" }, PortBindings: {} },
+      Mounts: [
+        { Type: "volume", Name: `${name}_data`, Source: `/var/lib/docker/volumes/${name}_data/_data`, Destination: "/data" },
+      ],
+    },
+  ]);
+}
+
 function hostSlug(hostId: number): string | null {
   const row = getDb().prepare(`SELECT slug FROM hosts WHERE id = ?`).get(hostId) as { slug: string } | undefined;
   return row?.slug ?? null;
@@ -68,6 +95,16 @@ export function fakeExec(hostId: number, rawCommand: string): ExecResult {
 
   if (rawCommand.includes("CORES:$(nproc)")) {
     return { stdout: monitoringStats(hostId), stderr: "", code: 0 };
+  }
+
+  const inspectMatch = rawCommand.match(/^docker inspect '([^']+)'/);
+  if (inspectMatch) {
+    return { stdout: fakeDockerInspect(inspectMatch[1]), stderr: "", code: 0 };
+  }
+
+  const restoredInspectMatch = rawCommand.match(/^cat '[^']*homelab-panel-inspect-([^']+)\.json'/);
+  if (restoredInspectMatch) {
+    return { stdout: fakeDockerInspect(restoredInspectMatch[1]), stderr: "", code: 0 };
   }
 
   if (rawCommand.includes("___KEYPATH___")) {
