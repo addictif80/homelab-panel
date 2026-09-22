@@ -98,6 +98,14 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon:
     : []),
 ];
 
+// The env-gated section above is baked in at build time, but a /demo sandbox running on this same
+// seller instance still needs it hidden per-request — filtered out here rather than in
+// NAV_SECTIONS itself, based on the isDemo flag Sidebar() fetches from /api/auth/me. The actual
+// access control lives server-side in proxy.ts; this only keeps the link from being shown at all.
+function navSectionsFor(isDemo: boolean) {
+  return isDemo ? NAV_SECTIONS.filter((s) => s.label !== "Vendeur") : NAV_SECTIONS;
+}
+
 function NavIcon({ name }: { name: IconName }) {
   const common = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none" } as const;
   switch (name) {
@@ -332,10 +340,10 @@ function Logo() {
   );
 }
 
-function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+function NavLinks({ pathname, isDemo, onNavigate }: { pathname: string; isDemo: boolean; onNavigate?: () => void }) {
   return (
     <nav className="flex-1 space-y-6 overflow-auto">
-      {NAV_SECTIONS.map((section) => (
+      {navSectionsFor(isDemo).map((section) => (
         <div key={section.label || "root"}>
           {section.label && (
             <p className="mb-1.5 px-2.5 text-[10.5px] font-bold uppercase tracking-wider text-neutral-600">
@@ -403,6 +411,14 @@ export default function Sidebar() {
   const router = useRouter();
   const [publicIps, setPublicIps] = useState<PublicIpEntry[]>([]);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isDemo, setIsDemo] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((d) => setIsDemo(!!d?.isDemo))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -470,7 +486,7 @@ export default function Sidebar() {
           <Logo />
           <ThemeToggle />
         </div>
-        <NavLinks pathname={pathname} />
+        <NavLinks pathname={pathname} isDemo={isDemo} />
         <PublicIps entries={publicIps} />
         <button
           onClick={handleLogout}
@@ -515,7 +531,7 @@ export default function Sidebar() {
               </svg>
             </button>
           </div>
-          <NavLinks pathname={pathname} onNavigate={() => setMobileOpen(false)} />
+          <NavLinks pathname={pathname} isDemo={isDemo} onNavigate={() => setMobileOpen(false)} />
           <PublicIps entries={publicIps} />
           <button
             onClick={handleLogout}

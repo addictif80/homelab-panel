@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken, createSessionToken, getUserRole, SESSION_COOKIE_NAME, SESSION_MAX_AGE } from "@/lib/auth";
 import { isMutationBlocked } from "@/lib/license";
+import { isDemoContext } from "@/lib/demo/context";
 
 // PWA installability assets: the browser (and, on iOS, the Safari "Add to Home Screen" sheet)
 // fetches these without necessarily carrying a session cookie yet — e.g. from the login screen,
@@ -47,6 +48,22 @@ export async function proxy(req: NextRequest) {
     pathname === "/favicon.ico"
   ) {
     return NextResponse.next();
+  }
+
+  // The seller admin area (Stripe keys, pricing, license keys, promo codes, sales, support
+  // tickets...) has no role check of its own — see api/seller/config/route.ts and friends, which
+  // rely entirely on this middleware's plain "is logged in" gate below. That's fine for the real
+  // seller instance (only the seller themselves ever has a session), but a /demo visitor also
+  // gets a real, fully authenticated session (against their own isolated sandbox DB — see
+  // lib/db.ts) and would otherwise be able to reach this internal business tooling too. It's
+  // irrelevant to a product demo regardless of whether the data behind it is fake, so it's cut
+  // off here rather than trusted to a nav-link visibility check alone (Sidebar.tsx also hides the
+  // link, but that's cosmetic — this is the actual gate).
+  if (isDemoContext() && (pathname === "/seller" || pathname.startsWith("/api/seller/"))) {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "Introuvable." }, { status: 404 });
+    }
+    return NextResponse.redirect(new URL("/", req.url));
   }
 
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
