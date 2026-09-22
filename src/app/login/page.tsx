@@ -23,6 +23,8 @@ function LoginForm() {
   const [pendingToken, setPendingToken] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/status")
@@ -56,6 +58,25 @@ function LoginForm() {
       setError(err instanceof Error ? err.message : "Erreur inconnue");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function sendEmailCode() {
+    setError("");
+    setSendingEmail(true);
+    try {
+      const res = await fetch("/api/auth/login/email-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pendingToken }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erreur");
+      setEmailSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur inconnue");
+    } finally {
+      setSendingEmail(false);
     }
   }
 
@@ -145,6 +166,18 @@ function LoginForm() {
                 maxLength={6}
                 autoFocus
               />
+              <p className="mt-1.5 text-xs text-neutral-500">
+                Depuis l&apos;application d&apos;authentification, ou{" "}
+                <button
+                  type="button"
+                  onClick={sendEmailCode}
+                  disabled={sendingEmail}
+                  className="text-blue-400 hover:underline disabled:opacity-50"
+                >
+                  {sendingEmail ? "Envoi..." : emailSent ? "renvoyer le code par email" : "recevoir un code par email"}
+                </button>
+                {emailSent && <span className="text-emerald-400"> — envoyé, vérifie ta boîte mail.</span>}
+              </p>
             </div>
             <label className="flex items-center gap-2 text-sm text-neutral-300">
               <input

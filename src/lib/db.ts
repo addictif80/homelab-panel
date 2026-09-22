@@ -668,6 +668,26 @@ export function migrate(db: Database.Database) {
     // keeps full access on upgrade rather than being silently downgraded to viewer.
     db.exec(`ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'`);
   }
+  if (!userColumns.some((c) => c.name === "email")) {
+    // Optional — only needed to unlock the "receive the 2FA code by email" alternative to the
+    // authenticator app (see lib/emailTwoFactor.ts). Nobody is forced to set one.
+    db.exec(`ALTER TABLE users ADD COLUMN email TEXT`);
+  }
+
+  // One-time codes for the email-delivered 2FA alternative — deliberately its own table rather
+  // than reusing trusted_devices or login_attempts, since a code here is short-lived (minutes,
+  // not days) and single-use, and needs its own hash + consumed flag. Rows outlive their expiry
+  // only until the next code is requested for that username (see emailTwoFactor.ts), which
+  // deletes any previous one first — nothing here needs a scheduled sweep.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS email_login_codes (
+      username TEXT PRIMARY KEY,
+      code_hash TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      consumed INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
 
   const hostColumns = db.prepare(`PRAGMA table_info(hosts)`).all() as { name: string }[];
   if (!hostColumns.some((c) => c.name === "needs_sudo")) {

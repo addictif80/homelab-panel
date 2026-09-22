@@ -5,6 +5,7 @@ import { generateTotpSecret, encryptTotpSecret, buildOtpAuthQrDataUrl } from "./
 export type UserSummary = {
   id: number;
   username: string;
+  email: string | null;
   role: UserRole;
   totpEnabled: boolean;
   createdAt: string;
@@ -13,6 +14,7 @@ export type UserSummary = {
 type UserRow = {
   id: number;
   username: string;
+  email: string | null;
   role: UserRole;
   totp_enabled: number;
   created_at: string;
@@ -21,15 +23,20 @@ type UserRow = {
 export function listUsers(): UserSummary[] {
   return (
     getDb()
-      .prepare(`SELECT id, username, role, totp_enabled, created_at FROM users ORDER BY created_at ASC`)
+      .prepare(`SELECT id, username, email, role, totp_enabled, created_at FROM users ORDER BY created_at ASC`)
       .all() as UserRow[]
   ).map((r) => ({
     id: r.id,
     username: r.username,
+    email: r.email,
     role: r.role,
     totpEnabled: !!r.totp_enabled,
     createdAt: r.created_at,
   }));
+}
+
+export function setUserEmail(id: number, email: string | null): void {
+  getDb().prepare(`UPDATE users SET email = ? WHERE id = ?`).run(email || null, id);
 }
 
 export function countAdmins(): number {
@@ -52,15 +59,16 @@ export async function createUser(input: {
   username: string;
   password: string;
   role: UserRole;
+  email?: string;
 }): Promise<{ qrDataUrl: string; secret: string }> {
   const totpSecret = generateTotpSecret();
   const passwordHash = hashPassword(input.password);
 
   getDb()
     .prepare(
-      `INSERT INTO users (username, password_hash, totp_secret_encrypted, totp_enabled, role) VALUES (?, ?, ?, 0, ?)`
+      `INSERT INTO users (username, password_hash, totp_secret_encrypted, totp_enabled, role, email) VALUES (?, ?, ?, 0, ?, ?)`
     )
-    .run(input.username, passwordHash, encryptTotpSecret(totpSecret), input.role);
+    .run(input.username, passwordHash, encryptTotpSecret(totpSecret), input.role, input.email || null);
 
   const qrDataUrl = await buildOtpAuthQrDataUrl(input.username, totpSecret);
   return { qrDataUrl, secret: totpSecret };

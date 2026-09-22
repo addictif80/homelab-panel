@@ -3,9 +3,16 @@
 import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 
-type UserSummary = { id: number; username: string; role: "admin" | "viewer"; totpEnabled: boolean; createdAt: string };
+type UserSummary = {
+  id: number;
+  username: string;
+  email: string | null;
+  role: "admin" | "viewer";
+  totpEnabled: boolean;
+  createdAt: string;
+};
 
-const EMPTY_FORM = { username: "", password: "", role: "viewer" as "admin" | "viewer" };
+const EMPTY_FORM = { username: "", password: "", role: "viewer" as "admin" | "viewer", email: "" };
 
 export default function UsersPage() {
   const [me, setMe] = useState<{ username: string; role: string } | null>(null);
@@ -63,6 +70,23 @@ export default function UsersPage() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur");
+    }
+  }
+
+  async function changeEmail(u: UserSummary, email: string) {
+    if (email === (u.email || "")) return;
+    setError("");
+    try {
+      const res = await fetch(`/api/users/${u.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -143,6 +167,17 @@ export default function UsersPage() {
               <option value="admin">Administrateur</option>
             </select>
           </div>
+          <div>
+            <label className="mb-1 block text-xs text-neutral-400">
+              Email (optionnel — permet de recevoir le code 2FA par email en plus de l&apos;appli)
+            </label>
+            <input
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+              className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+            />
+          </div>
           <button
             type="submit"
             disabled={creating}
@@ -179,6 +214,7 @@ export default function UsersPage() {
             <thead className="bg-neutral-900 text-left text-neutral-400">
               <tr>
                 <th className="px-3 py-2 font-medium">Utilisateur</th>
+                <th className="px-3 py-2 font-medium">Email (2FA)</th>
                 <th className="px-3 py-2 font-medium">Rôle</th>
                 <th className="px-3 py-2 font-medium">2FA</th>
                 <th className="px-3 py-2 font-medium">Créé le</th>
@@ -190,6 +226,15 @@ export default function UsersPage() {
                 <tr key={u.id} className="border-t border-neutral-800">
                   <td className="px-3 py-2 font-medium">
                     {u.username} {me?.username === u.username && <span className="text-xs text-neutral-500">(toi)</span>}
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="email"
+                      defaultValue={u.email || ""}
+                      placeholder="non configuré"
+                      onBlur={(e) => changeEmail(u, e.target.value)}
+                      className="w-full min-w-[10rem] rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs placeholder:text-neutral-600"
+                    />
                   </td>
                   <td className="px-3 py-2">
                     <select

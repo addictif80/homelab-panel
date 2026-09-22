@@ -20,10 +20,11 @@ export async function POST(req: NextRequest) {
   const admin = await requireAdmin(req);
   if (!admin) return NextResponse.json({ error: "Réservé aux administrateurs." }, { status: 403 });
 
-  const { username, password, role } = (await req.json()) as {
+  const { username, password, role, email } = (await req.json()) as {
     username?: string;
     password?: string;
     role?: UserRole;
+    email?: string;
   };
 
   if (!username || username.length < 3) {
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { qrDataUrl, secret } = await createUser({ username, password, role });
+    const { qrDataUrl, secret } = await createUser({ username, password, role, email: email?.trim() || undefined });
     logAudit("user.create", username, `role=${role} par ${admin}`);
     return NextResponse.json({ qrDataUrl, secret });
   } catch (err) {

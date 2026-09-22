@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken, getUserByUsername, getUserRole, SESSION_COOKIE_NAME, type UserRole } from "@/lib/auth";
-import { deleteUser, setUserRole, countAdmins, getUserRoleById } from "@/lib/users";
+import { deleteUser, setUserRole, setUserEmail, countAdmins, getUserRoleById } from "@/lib/users";
 import { logAudit } from "@/lib/db";
 
 async function requireAdmin(req: NextRequest): Promise<string | null> {
@@ -35,20 +35,27 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { id } = await params;
   const targetId = Number(id);
-  const { role } = (await req.json()) as { role?: UserRole };
-  if (role !== "admin" && role !== "viewer") {
-    return NextResponse.json({ error: "Rôle invalide." }, { status: 400 });
+  const { role, email } = (await req.json()) as { role?: UserRole; email?: string | null };
+
+  if (role !== undefined) {
+    if (role !== "admin" && role !== "viewer") {
+      return NextResponse.json({ error: "Rôle invalide." }, { status: 400 });
+    }
+    const self = getUserByUsername(admin);
+    if (self?.id === targetId && role !== "admin") {
+      return NextResponse.json({ error: "Impossible de retirer tes propres droits d'administrateur." }, { status: 400 });
+    }
+    if (getUserRoleById(targetId) === "admin" && role === "viewer" && countAdmins() <= 1) {
+      return NextResponse.json({ error: "Impossible de rétrograder le dernier compte administrateur." }, { status: 400 });
+    }
+    setUserRole(targetId, role);
+    logAudit("user.role_change", String(targetId), `${role} par ${admin}`);
   }
 
-  const self = getUserByUsername(admin);
-  if (self?.id === targetId && role !== "admin") {
-    return NextResponse.json({ error: "Impossible de retirer tes propres droits d'administrateur." }, { status: 400 });
-  }
-  if (getUserRoleById(targetId) === "admin" && role === "viewer" && countAdmins() <= 1) {
-    return NextResponse.json({ error: "Impossible de rétrograder le dernier compte administrateur." }, { status: 400 });
+  if (email !== undefined) {
+    setUserEmail(targetId, email ? email.trim() || null : null);
+    logAudit("user.email_change", String(targetId), `par ${admin}`);
   }
 
-  setUserRole(targetId, role);
-  logAudit("user.role_change", String(targetId), `${role} par ${admin}`);
   return NextResponse.json({ ok: true });
 }

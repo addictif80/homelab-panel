@@ -10,6 +10,7 @@ import {
   recordLoginAttempt,
 } from "@/lib/auth";
 import { decryptTotpSecret, verifyTotpCode } from "@/lib/totp";
+import { verifyEmailLoginCode } from "@/lib/emailTwoFactor";
 import { createTrustedDevice, TRUSTED_DEVICE_COOKIE_NAME, TRUSTED_DEVICE_MAX_AGE } from "@/lib/trustedDevices";
 import { logAudit } from "@/lib/db";
 
@@ -36,8 +37,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Compte invalide." }, { status: 401 });
     }
 
+    const submittedCode = String(code || "");
     const secret = decryptTotpSecret(user.totp_secret_encrypted);
-    const valid = verifyTotpCode(secret, String(code || ""));
+    // Either factor clears the check — the authenticator app code and the emailed code are two
+    // ways to fill the same field, not two separate steps.
+    const valid = verifyTotpCode(secret, submittedCode) || verifyEmailLoginCode(username, submittedCode);
     recordLoginAttempt(ip, username, valid);
 
     if (!valid) {

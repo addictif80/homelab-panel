@@ -116,6 +116,7 @@ export type UserRole = "admin" | "viewer";
 export type AppUser = {
   id: number;
   username: string;
+  email: string | null;
   password_hash: string;
   totp_secret_encrypted: string | null;
   totp_enabled: number;
