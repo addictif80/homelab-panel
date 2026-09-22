@@ -15,6 +15,27 @@ export async function ensureRemoteDir(hostId: number, dirPath: string): Promise<
   if (code !== 0) throw new Error(stderr || `Impossible de créer le dossier ${dirPath} sur la destination.`);
 }
 
+/**
+ * rsync needs its own binary on *both* ends — the local one spawns a remote `rsync --server ...`
+ * over the ssh transport, and a destination missing it (common on a minimal/appliance NAS image
+ * like ZimaOS, which doesn't necessarily ship rsync by default) makes that remote command fail
+ * immediately, closing the connection before a single protocol byte is sent. rsync's own error
+ * for that ("connection unexpectedly closed (0 bytes received so far)") reads exactly like a
+ * network/auth problem even once the SSH connection and its key are both actually fine — checked
+ * here, over the panel's own already-proven-working credential, so a missing binary gets a plain
+ * instruction instead of that cryptic protocol error.
+ */
+export async function ensureRsyncAvailable(hostId: number): Promise<void> {
+  const { code } = await runSshCommand(hostId, `command -v rsync`, { timeoutMs: METADATA_TIMEOUT_MS });
+  if (code !== 0) {
+    throw new Error(
+      "rsync n'est pas installé (ou introuvable dans le PATH) sur cette machine — c'est nécessaire des deux côtés " +
+        "d'un transfert de sauvegarde. Installe-le (paquet \"rsync\", ou l'application correspondante si c'est un " +
+        "NAS comme ZimaOS ou Synology) avant de relancer."
+    );
+  }
+}
+
 /** Lists the immediate subdirectories of `dirPath` (one level), or [] if it doesn't exist yet. */
 export async function listRemoteDirs(hostId: number, dirPath: string): Promise<string[]> {
   const { stdout, code } = await runSshCommand(
@@ -50,6 +71,7 @@ export async function rsyncTransfer(opts: {
   const keyPath = await ensurePrivateKeyDeployed(fromHostId);
   await ensurePublicKeyAuthorized(toHostId);
   await ensureRemoteDir(toHostId, destDir);
+  await Promise.all([ensureRsyncAvailable(fromHostId), ensureRsyncAvailable(toHostId)]);
 
   const dest = getHostConnectionInfo(toHostId);
   const destDirSlash = destDir.endsWith("/") ? destDir : `${destDir}/`;
