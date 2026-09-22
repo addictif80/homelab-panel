@@ -107,6 +107,13 @@ export function fakeExec(hostId: number, rawCommand: string): ExecResult {
     return { stdout: fakeDockerInspect(restoredInspectMatch[1]), stderr: "", code: 0 };
   }
 
+  if (rawCommand.includes("command -v rsync")) {
+    // Both the plain availability check and the nested "does the destination reach rsync over
+    // the backup key" check (lib/backup/transfer.ts) need non-empty stdout to read as success —
+    // a fake filesystem has no real rsync to find, but a demo backup shouldn't fail over it.
+    return { stdout: "/usr/bin/rsync", stderr: "", code: 0 };
+  }
+
   if (rawCommand.includes("-type f 2>/dev/null | wc -l")) {
     // A restoration drill's file count check (lib/backup/drill.ts): the scratch directory it
     // restores into always "wins" against the snapshot's own count, so a demo drill reliably

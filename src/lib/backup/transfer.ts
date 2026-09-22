@@ -16,22 +16,30 @@ export async function ensureRemoteDir(hostId: number, dirPath: string): Promise<
 }
 
 /**
- * rsync needs its own binary on *both* ends — the local one spawns a remote `rsync --server ...`
- * over the ssh transport, and a destination missing it (common on a minimal/appliance NAS image
- * like ZimaOS, which doesn't necessarily ship rsync by default) makes that remote command fail
- * immediately, closing the connection before a single protocol byte is sent. rsync's own error
- * for that ("connection unexpectedly closed (0 bytes received so far)") reads exactly like a
- * network/auth problem even once the SSH connection and its key are both actually fine — checked
- * here, over the panel's own already-proven-working credential, so a missing binary gets a plain
- * instruction instead of that cryptic protocol error.
+ * rsync needs its own binary reachable on *both* ends of the exact connection that will actually
+ * be used — the local one spawns a remote `rsync --server ...` over the ssh transport, and if
+ * that fails to even start, the connection closes before a single protocol byte is sent, which
+ * rsync reports as "connection unexpectedly closed (0 bytes received so far)": indistinguishable,
+ * from the log alone, from a network or auth problem even once those are both actually fine.
+ *
+ * This has to go through the *same* nested path the real transfer uses — from the source host,
+ * over the dedicated backup key, to the destination — not a separate check via the panel's own
+ * regular credential for that host. Those can genuinely land in different environments on the
+ * same machine (a `Match`/forced-command block keyed on the authenticating key, a restricted
+ * shell for keys added outside the vendor's own UI, a container-namespaced sshd...), so a check
+ * that passes over one credential doesn't prove anything about a transfer made over the other.
  */
-export async function ensureRsyncAvailable(hostId: number): Promise<void> {
-  const { code } = await runSshCommand(hostId, `command -v rsync`, { timeoutMs: METADATA_TIMEOUT_MS });
-  if (code !== 0) {
+export async function ensureRsyncReachable(fromHostId: number, toHostId: number, keyPath: string): Promise<void> {
+  const dest = getHostConnectionInfo(toHostId);
+  const sshOpts = `-i ${keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -p ${dest.port}`;
+  const command = `ssh ${sshOpts} ${dest.user}@${dest.address} "command -v rsync"`;
+  const { code, stdout, stderr } = await runSshCommand(fromHostId, command, { sudo: true, timeoutMs: METADATA_TIMEOUT_MS });
+  if (code !== 0 || !stdout.trim()) {
     throw new Error(
-      "rsync n'est pas installé (ou introuvable dans le PATH) sur cette machine — c'est nécessaire des deux côtés " +
-        "d'un transfert de sauvegarde. Installe-le (paquet \"rsync\", ou l'application correspondante si c'est un " +
-        "NAS comme ZimaOS ou Synology) avant de relancer."
+      `rsync n'est pas accessible sur la destination via la connexion réellement utilisée pour le transfert ` +
+        `(clé de sauvegarde dédiée) — ${stderr.trim() || "aucune sortie renvoyée"}. Installe rsync sur cette ` +
+        `machine si ce n'est pas déjà fait ; si c'est déjà le cas, le compte SSH utilisé pour les sauvegardes n'y ` +
+        `a peut-être pas accès (PATH restreint, commande forcée sur cette clé...).`
     );
   }
 }
@@ -71,7 +79,7 @@ export async function rsyncTransfer(opts: {
   const keyPath = await ensurePrivateKeyDeployed(fromHostId);
   await ensurePublicKeyAuthorized(toHostId);
   await ensureRemoteDir(toHostId, destDir);
-  await Promise.all([ensureRsyncAvailable(fromHostId), ensureRsyncAvailable(toHostId)]);
+  await ensureRsyncReachable(fromHostId, toHostId, keyPath);
 
   const dest = getHostConnectionInfo(toHostId);
   const destDirSlash = destDir.endsWith("/") ? destDir : `${destDir}/`;
