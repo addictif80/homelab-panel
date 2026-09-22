@@ -53,7 +53,15 @@ export async function rsyncTransfer(opts: {
 
   const dest = getHostConnectionInfo(toHostId);
   const destDirSlash = destDir.endsWith("/") ? destDir : `${destDir}/`;
-  const sshOpts = `ssh -i ${keyPath} -p ${dest.port} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null`;
+  // IdentitiesOnly=yes is the load-bearing flag here, not cosmetic: without it, OpenSSH tries the
+  // account's own default identity files (~/.ssh/id_rsa, id_ed25519...) and any key an ssh-agent
+  // happens to offer *before or alongside* the one explicitly given via -i, even though -i is
+  // set — each rejected attempt prints "Permission denied, please try again.", and enough of them
+  // trip the destination sshd's MaxAuthTries and drop the connection before our actual (valid) key
+  // is ever tried. That reproduces identically on any destination, since it depends only on what
+  // other keys exist on the *source* side, which is exactly the "fails no matter which server"
+  // symptom this was chasing across several destination-side fixes that (rightly) didn't touch it.
+  const sshOpts = `ssh -i ${keyPath} -o IdentitiesOnly=yes -p ${dest.port} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null`;
   const linkFlag = linkDestDir
     ? `--link-dest=${shellQuote(linkDestDir.endsWith("/") ? linkDestDir : `${linkDestDir}/`)} `
     : "";

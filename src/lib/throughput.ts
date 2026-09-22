@@ -42,7 +42,7 @@ async function testPair(sourceId: number, targetId: number): Promise<{ mbps: num
     const { address, port, user } = getHostConnectionInfo(targetId);
     const command = [
       `START=$(date +%s%N)`,
-      `dd if=/dev/zero bs=1M count=${TEST_SIZE_MB} 2>/dev/null | ssh -i ${keyPath} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -p ${port} ${user}@${address} "cat > /dev/null"`,
+      `dd if=/dev/zero bs=1M count=${TEST_SIZE_MB} 2>/dev/null | ssh -i ${keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -p ${port} ${user}@${address} "cat > /dev/null"`,
       `END=$(date +%s%N)`,
       `echo "___THROUGHPUT_NS___$((END-START))"`,
     ].join("\n");
