@@ -14,6 +14,7 @@ type IconName =
   | "docker"
   | "database"
   | "terminal"
+  | "rdp"
   | "files"
   | "clock"
   | "directory"
@@ -51,6 +52,7 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon:
       { href: "/docker", label: "Docker", icon: "docker" },
       { href: "/databases", label: "Bases de données", icon: "database" },
       { href: "/ssh", label: "Terminal SSH", icon: "terminal" },
+      { href: "/rdp", label: "Client RDP", icon: "rdp" },
       { href: "/updates", label: "Mises à jour", icon: "clock" },
       { href: "/files", label: "Explorateur de fichiers", icon: "files" },
     ],
@@ -162,6 +164,13 @@ function NavIcon({ name }: { name: IconName }) {
         <svg {...common}>
           <path d="M4 14.5l4-8 4 5 3-4 5 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
           <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="1.6" />
+        </svg>
+      );
+    case "rdp":
+      return (
+        <svg {...common}>
+          <rect x="3" y="4.5" width="18" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M9 20h6M12 16.5V20" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
         </svg>
       );
     case "clock":

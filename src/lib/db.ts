@@ -130,6 +130,20 @@ export function migrate(db: Database.Database) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    -- A separate table rather than another value in credentials.kind — that column's CHECK
+    -- constraint can't be widened on an existing SQLite install without recreating the table, and
+    -- RDP's shape (one login + a port, not a rotating list of secrets) doesn't fit the
+    -- multiple-credentials-per-host model the credentials table was built for anyway. One row per
+    -- host is also what lets its mere presence answer "does this host have RDP configured"
+    -- without a separate enabled flag that could drift out of sync.
+    CREATE TABLE IF NOT EXISTS rdp_credentials (
+      host_id INTEGER PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
+      port INTEGER NOT NULL DEFAULT 3389,
+      username TEXT NOT NULL,
+      password_encrypted TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS network_links (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       host_a_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
