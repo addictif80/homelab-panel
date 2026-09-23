@@ -206,17 +206,31 @@ async function fetchRspamdHistory(sourceId: string, hostId: number, container: s
       | undefined
   )?.rspamd_password_encrypted;
   const password = passwordEncrypted ? vaultDecrypt(passwordEncrypted) : null;
-  const passwordFlag = password ? `-H ${shellQuote(`Password: ${password}`)} ` : "";
   const url = `http://127.0.0.1:${port}/history?from=0&to=${RSPAMD_HISTORY_ROWS - 1}`;
-  const command = `docker exec ${shellQuote(container)} curl -sS -m 10 ${passwordFlag}${shellQuote(url)}`;
+
+  // rspamd's own Docker images (including Mailcow's, both Alpine-based) ship curl on some
+  // versions and only wget (or neither) on others — tried in order inside the container itself
+  // rather than assumed, with the URL/password passed in as env vars (via `docker exec -e`) so
+  // neither ever has to be embedded in the inner shell script's own quoting.
+  const script =
+    `if command -v curl >/dev/null 2>&1; then curl -sS -m 10 ${password ? '-H "Password: $HLP_PW"' : ""} "$HLP_URL"; ` +
+    `elif command -v wget >/dev/null 2>&1; then wget -q -O- -T 10 ${password ? '--header="Password: $HLP_PW"' : ""} "$HLP_URL"; ` +
+    `else echo "__HLP_NO_HTTP_CLIENT__" 1>&2; exit 127; fi`;
+  const envFlags = [`-e HLP_URL=${shellQuote(url)}`, password ? `-e HLP_PW=${shellQuote(password)}` : ""]
+    .filter(Boolean)
+    .join(" ");
+  const command = `docker exec ${envFlags} ${shellQuote(container)} sh -c ${shellQuote(script)}`;
 
   const { stdout, code, stderr } = await withTimeout(
     runSshCommand(hostId, command, { sudo: true }),
     RSPAMD_FETCH_TIMEOUT_MS,
     "Délai dépassé lors de l'appel à l'API rspamd."
   );
+  if (stderr.includes("__HLP_NO_HTTP_CLIENT__")) {
+    throw new Error("Ni curl ni wget ne sont disponibles dans ce conteneur — impossible d'appeler l'API rspamd depuis l'intérieur.");
+  }
   if (code !== 0) {
-    throw new Error(stderr || "Impossible d'appeler l'API rspamd (curl absent du conteneur, ou mauvais port ?).");
+    throw new Error(stderr || "Impossible d'appeler l'API rspamd (conteneur ou port incorrect ?).");
   }
 
   let parsed: unknown;
