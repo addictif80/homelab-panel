@@ -6,6 +6,7 @@ import SmtpSettingsPanel from "@/components/SmtpSettingsPanel";
 import NotificationChannelsPanel from "@/components/NotificationChannelsPanel";
 import CertificateWatchPanel from "@/components/CertificateWatchPanel";
 import DomainRegistrationPanel from "@/components/DomainRegistrationPanel";
+import TrustedContactPanel from "@/components/TrustedContactPanel";
 import TrustedDevicesPanel from "@/components/TrustedDevicesPanel";
 import OllamaSettingsPanel from "@/components/OllamaSettingsPanel";
 import PortAuditPanel from "@/components/PortAuditPanel";
@@ -38,6 +39,7 @@ export default function SettingsPage() {
         <NotificationScheduleSettingsPanel />
         <CertificateWatchPanel />
         <DomainRegistrationPanel />
+        <TrustedContactPanel />
         <TrustedDevicesPanel />
         <OllamaSettingsPanel />
         <DirectorySettingsPanel />

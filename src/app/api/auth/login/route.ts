@@ -41,6 +41,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Identifiants invalides." }, { status: 401 });
     }
 
+    if (user.locked) {
+      logAudit("login.locked_account", username, ip);
+      return NextResponse.json(
+        {
+          error:
+            "Ce compte a été suspendu suite à l'activation d'un accès d'urgence. Seule la personne de confiance désignée peut le débloquer, depuis Comptes.",
+        },
+        { status: 403 }
+      );
+    }
+
     if (!user.totp_enabled) {
       // The 2FA-required rule (and the 2FA step itself, right below) is dropped only inside a
       // /demo sandbox (see lib/demo/context.ts) — never reachable on a real install, since

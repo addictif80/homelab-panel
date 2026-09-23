@@ -121,12 +121,22 @@ export type AppUser = {
   totp_secret_encrypted: string | null;
   totp_enabled: number;
   role: UserRole;
+  locked: number;
+  is_trusted_contact: number;
 };
 
 export function getUserByUsername(username: string): AppUser | undefined {
   return getDb()
     .prepare(`SELECT * FROM users WHERE username = ?`)
     .get(username) as AppUser | undefined;
+}
+
+/** Checked on every authenticated request (proxy.ts), not just at login — an account can go from
+ * unlocked to locked (emergency access activating) while its session is still valid, and that has
+ * to take effect immediately, not just block the next login attempt. */
+export function isUserLocked(username: string): boolean {
+  const row = getDb().prepare(`SELECT locked FROM users WHERE username = ?`).get(username) as { locked: number } | undefined;
+  return !!row?.locked;
 }
 
 export function getUserRole(username: string): UserRole | null {

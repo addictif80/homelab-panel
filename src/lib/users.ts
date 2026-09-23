@@ -8,6 +8,8 @@ export type UserSummary = {
   email: string | null;
   role: UserRole;
   totpEnabled: boolean;
+  locked: boolean;
+  isTrustedContact: boolean;
   createdAt: string;
 };
 
@@ -17,13 +19,15 @@ type UserRow = {
   email: string | null;
   role: UserRole;
   totp_enabled: number;
+  locked: number;
+  is_trusted_contact: number;
   created_at: string;
 };
 
 export function listUsers(): UserSummary[] {
   return (
     getDb()
-      .prepare(`SELECT id, username, email, role, totp_enabled, created_at FROM users ORDER BY created_at ASC`)
+      .prepare(`SELECT id, username, email, role, totp_enabled, locked, is_trusted_contact, created_at FROM users ORDER BY created_at ASC`)
       .all() as UserRow[]
   ).map((r) => ({
     id: r.id,
@@ -31,8 +35,14 @@ export function listUsers(): UserSummary[] {
     email: r.email,
     role: r.role,
     totpEnabled: !!r.totp_enabled,
+    locked: !!r.locked,
+    isTrustedContact: !!r.is_trusted_contact,
     createdAt: r.created_at,
   }));
+}
+
+export function setUserLocked(id: number, locked: boolean): void {
+  getDb().prepare(`UPDATE users SET locked = ? WHERE id = ?`).run(locked ? 1 : 0, id);
 }
 
 export function setUserEmail(id: number, email: string | null): void {

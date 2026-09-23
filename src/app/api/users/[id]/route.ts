@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken, getUserByUsername, getUserRole, SESSION_COOKIE_NAME, type UserRole } from "@/lib/auth";
-import { deleteUser, setUserRole, setUserEmail, countAdmins, getUserRoleById } from "@/lib/users";
+import { deleteUser, setUserRole, setUserEmail, setUserLocked, countAdmins, getUserRoleById } from "@/lib/users";
 import { logAudit } from "@/lib/db";
 
 async function requireAdmin(req: NextRequest): Promise<string | null> {
@@ -35,7 +35,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { id } = await params;
   const targetId = Number(id);
-  const { role, email } = (await req.json()) as { role?: UserRole; email?: string | null };
+  const { role, email, locked } = (await req.json()) as { role?: UserRole; email?: string | null; locked?: boolean };
 
   if (role !== undefined) {
     if (role !== "admin" && role !== "viewer") {
@@ -55,6 +55,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (email !== undefined) {
     setUserEmail(targetId, email ? email.trim() || null : null);
     logAudit("user.email_change", String(targetId), `par ${admin}`);
+  }
+
+  if (locked !== undefined) {
+    // Unlocking here is deliberately unrestricted by role/identity beyond "is an admin" — the
+    // trusted-contact account created by an emergency-access activation is itself role: "admin",
+    // so this is exactly the mechanism the feature promises ("seule la personne de confiance peut
+    // débloquer"): only whoever is currently a live, unlocked admin can flip this flag back.
+    setUserLocked(targetId, locked);
+    logAudit(locked ? "user.locked" : "user.unlocked", String(targetId), `par ${admin}`);
   }
 
   return NextResponse.json({ ok: true });

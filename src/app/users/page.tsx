@@ -10,6 +10,8 @@ type UserSummary = {
   role: "admin" | "viewer";
   totpEnabled: boolean;
   createdAt: string;
+  locked: boolean;
+  isTrustedContact: boolean;
 };
 
 const EMPTY_FORM = { username: "", password: "", role: "viewer" as "admin" | "viewer", email: "" };
@@ -87,6 +89,22 @@ export default function UsersPage() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur");
+    }
+  }
+
+  async function setLocked(u: UserSummary, locked: boolean) {
+    setError("");
+    try {
+      const res = await fetch(`/api/users/${u.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locked }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -217,6 +235,7 @@ export default function UsersPage() {
                 <th className="px-3 py-2 font-medium">Email (2FA)</th>
                 <th className="px-3 py-2 font-medium">Rôle</th>
                 <th className="px-3 py-2 font-medium">2FA</th>
+                <th className="px-3 py-2 font-medium">Statut</th>
                 <th className="px-3 py-2 font-medium">Créé le</th>
                 <th className="px-3 py-2 font-medium">Actions</th>
               </tr>
@@ -247,14 +266,33 @@ export default function UsersPage() {
                     </select>
                   </td>
                   <td className="px-3 py-2 text-neutral-400">{u.totpEnabled ? "✅" : "⏳ non configurée"}</td>
+                  <td className="px-3 py-2">
+                    {u.locked ? (
+                      <span className="rounded bg-red-950/50 px-1.5 py-0.5 text-xs text-red-400">🔒 Suspendu</span>
+                    ) : u.isTrustedContact ? (
+                      <span className="rounded bg-amber-950/50 px-1.5 py-0.5 text-xs text-amber-400">Contact de confiance</span>
+                    ) : (
+                      <span className="text-xs text-neutral-600">Actif</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-neutral-400">{new Date(`${u.createdAt}Z`).toLocaleDateString()}</td>
                   <td className="px-3 py-2">
-                    <button
-                      onClick={() => removeUser(u)}
-                      className="rounded border border-neutral-700 px-2 py-0.5 text-xs text-red-400 hover:bg-neutral-800"
-                    >
-                      Supprimer
-                    </button>
+                    <div className="flex gap-2">
+                      {u.locked && (
+                        <button
+                          onClick={() => setLocked(u, false)}
+                          className="rounded border border-neutral-700 px-2 py-0.5 text-xs text-emerald-400 hover:bg-neutral-800"
+                        >
+                          Débloquer
+                        </button>
+                      )}
+                      <button
+                        onClick={() => removeUser(u)}
+                        className="rounded border border-neutral-700 px-2 py-0.5 text-xs text-red-400 hover:bg-neutral-800"
+                      >
+                        Supprimer
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

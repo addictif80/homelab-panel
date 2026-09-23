@@ -682,6 +682,17 @@ export function migrate(db: Database.Database) {
     // authenticator app (see lib/emailTwoFactor.ts). Nobody is forced to set one.
     db.exec(`ALTER TABLE users ADD COLUMN email TEXT`);
   }
+  if (!userColumns.some((c) => c.name === "locked")) {
+    // Set on every account except the trusted contact's own the moment an emergency access
+    // request activates (see lib/emergencyAccess.ts) — checked at login. Only an admin account
+    // (the newly-activated trusted contact, in practice) can clear it again, from Comptes.
+    db.exec(`ALTER TABLE users ADD COLUMN locked INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!userColumns.some((c) => c.name === "is_trusted_contact")) {
+    // Marks the account created by a completed emergency access request — lets the UI show it a
+    // simplified "what do I do now" guide instead of the regular panel chrome assuming familiarity.
+    db.exec(`ALTER TABLE users ADD COLUMN is_trusted_contact INTEGER NOT NULL DEFAULT 0`);
+  }
 
   // One-time codes for the email-delivered 2FA alternative — deliberately its own table rather
   // than reusing trusted_devices or login_attempts, since a code here is short-lived (minutes,
@@ -694,6 +705,51 @@ export function migrate(db: Database.Database) {
       code_hash TEXT NOT NULL,
       expires_at TEXT NOT NULL,
       consumed INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Singleton (id=1) — "in case of death" emergency contact. Identity fields are vault-encrypted
+    -- (real PII, no reason to leave it in plaintext at rest); the three answers are hashed like a
+    -- password (bcrypt), never stored or shown in the clear, even to the admin who set them —
+    -- exactly the security-question model any real identity check needs to survive a stolen
+    -- database dump.
+    CREATE TABLE IF NOT EXISTS trusted_contact (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      first_name_encrypted TEXT NOT NULL,
+      last_name_encrypted TEXT NOT NULL,
+      birth_date_encrypted TEXT NOT NULL,
+      email_encrypted TEXT NOT NULL,
+      question1 TEXT NOT NULL,
+      answer1_hash TEXT NOT NULL,
+      question2 TEXT NOT NULL,
+      answer2_hash TEXT NOT NULL,
+      question3 TEXT NOT NULL,
+      answer3_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- One row per successfully-verified trigger of the emergency flow — "successfully verified"
+    -- meaning identity + all three answers matched, not that access has been granted yet. Real
+    -- activation waits until activates_at (see lib/emergencyAccess.ts's scheduler), giving the
+    -- 48h cancellation window a place to point its link at.
+    CREATE TABLE IF NOT EXISTS emergency_access_requests (
+      id TEXT PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','cancelled','completed')),
+      requested_at TEXT NOT NULL DEFAULT (datetime('now')),
+      activates_at TEXT NOT NULL,
+      cancel_token_hash TEXT NOT NULL,
+      new_username TEXT,
+      completed_at TEXT
+    );
+
+    -- Every attempt at the public /emergency-access form, successful or not — the identity+3
+    -- security-question check is the one thing standing between "the account owner really died"
+    -- and "someone found this URL", so it gets the same brute-force bookkeeping as a real login.
+    CREATE TABLE IF NOT EXISTS emergency_access_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ip TEXT NOT NULL,
+      success INTEGER NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);

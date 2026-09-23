@@ -7,10 +7,16 @@ import SelfUpdateBanner from "./SelfUpdateBanner";
 import LockdownBanner from "./LockdownBanner";
 
 const NO_SHELL_PATHS = ["/login", "/setup", "/mission-control"];
+const NO_SHELL_PREFIXES = ["/emergency-access"];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  if (NO_SHELL_PATHS.includes(pathname) || pathname.startsWith("/store") || pathname.startsWith("/board")) {
+  if (
+    NO_SHELL_PATHS.includes(pathname) ||
+    NO_SHELL_PREFIXES.some((p) => pathname.startsWith(p)) ||
+    pathname.startsWith("/store") ||
+    pathname.startsWith("/board")
+  ) {
     return <>{children}</>;
   }
   return (

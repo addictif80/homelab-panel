@@ -28,6 +28,7 @@ import { autoActivateFromBundledKey } from "./src/lib/license";
 import { startLicenseRenewalScheduler } from "./src/lib/licenseRenewalScheduler";
 import { startMailScheduler } from "./src/lib/mail/mailScheduler";
 import { startRiskScoreScheduler } from "./src/lib/security/riskScore";
+import { startEmergencyAccessScheduler } from "./src/lib/emergencyAccess";
 import { startNpmFailoverScheduler } from "./src/lib/npmFailoverScheduler";
 import { startDemoSweeper } from "./src/lib/demo/store";
 import { runWithDemoId, DEMO_COOKIE_NAME } from "./src/lib/demo/context";
@@ -71,6 +72,7 @@ app.prepare().then(() => {
   startLicenseRenewalScheduler();
   startMailScheduler();
   startRiskScoreScheduler();
+  startEmergencyAccessScheduler();
   startNpmFailoverScheduler();
   startDemoSweeper();
 

@@ -38,7 +38,8 @@ type IconName =
   | "incident"
   | "disaster"
   | "wrapped"
-  | "missioncontrol";
+  | "missioncontrol"
+  | "help";
 
 const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon: IconName }[] }[] = [
   {
@@ -108,12 +109,17 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon:
     : []),
 ];
 
+// Shown only to the account created by an emergency-access activation — everyone else already has
+// the full nav above and doesn't need a "what is this and what do I do first" guide.
+const HELP_SECTION = { label: "Aide", items: [{ href: "/help-urgence", label: "Accès d'urgence", icon: "help" as IconName }] };
+
 // The env-gated section above is baked in at build time, but a /demo sandbox running on this same
 // seller instance still needs it hidden per-request — filtered out here rather than in
 // NAV_SECTIONS itself, based on the isDemo flag Sidebar() fetches from /api/auth/me. The actual
 // access control lives server-side in proxy.ts; this only keeps the link from being shown at all.
-function navSectionsFor(isDemo: boolean) {
-  return isDemo ? NAV_SECTIONS.filter((s) => s.label !== "Vendeur") : NAV_SECTIONS;
+function navSectionsFor(isDemo: boolean, isTrustedContact: boolean) {
+  const sections = isDemo ? NAV_SECTIONS.filter((s) => s.label !== "Vendeur") : NAV_SECTIONS;
+  return isTrustedContact ? [HELP_SECTION, ...sections] : sections;
 }
 
 function NavIcon({ name }: { name: IconName }) {
@@ -361,6 +367,14 @@ function NavIcon({ name }: { name: IconName }) {
           />
         </svg>
       );
+    case "help":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M9.5 9.2a2.5 2.5 0 014.8 1c0 1.6-2.3 1.8-2.3 3.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          <circle cx="12" cy="17" r="1" fill="currentColor" />
+        </svg>
+      );
     case "storefront":
       return (
         <svg {...common}>
@@ -391,10 +405,20 @@ function Logo() {
   );
 }
 
-function NavLinks({ pathname, isDemo, onNavigate }: { pathname: string; isDemo: boolean; onNavigate?: () => void }) {
+function NavLinks({
+  pathname,
+  isDemo,
+  isTrustedContact,
+  onNavigate,
+}: {
+  pathname: string;
+  isDemo: boolean;
+  isTrustedContact: boolean;
+  onNavigate?: () => void;
+}) {
   return (
     <nav className="flex-1 space-y-6 overflow-auto">
-      {navSectionsFor(isDemo).map((section) => (
+      {navSectionsFor(isDemo, isTrustedContact).map((section) => (
         <div key={section.label || "root"}>
           {section.label && (
             <p className="mb-1.5 px-2.5 text-[10.5px] font-bold uppercase tracking-wider text-neutral-600">
@@ -463,11 +487,15 @@ export default function Sidebar() {
   const [publicIps, setPublicIps] = useState<PublicIpEntry[]>([]);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isDemo, setIsDemo] = useState(false);
+  const [isTrustedContact, setIsTrustedContact] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/me")
       .then((res) => (res.ok ? res.json() : null))
-      .then((d) => setIsDemo(!!d?.isDemo))
+      .then((d) => {
+        setIsDemo(!!d?.isDemo);
+        setIsTrustedContact(!!d?.isTrustedContact);
+      })
       .catch(() => {});
   }, []);
 
@@ -537,7 +565,7 @@ export default function Sidebar() {
           <Logo />
           <ThemeToggle />
         </div>
-        <NavLinks pathname={pathname} isDemo={isDemo} />
+        <NavLinks pathname={pathname} isDemo={isDemo} isTrustedContact={isTrustedContact} />
         <PublicIps entries={publicIps} />
         <button
           onClick={handleLogout}
@@ -582,7 +610,12 @@ export default function Sidebar() {
               </svg>
             </button>
           </div>
-          <NavLinks pathname={pathname} isDemo={isDemo} onNavigate={() => setMobileOpen(false)} />
+          <NavLinks
+            pathname={pathname}
+            isDemo={isDemo}
+            isTrustedContact={isTrustedContact}
+            onNavigate={() => setMobileOpen(false)}
+          />
           <PublicIps entries={publicIps} />
           <button
             onClick={handleLogout}

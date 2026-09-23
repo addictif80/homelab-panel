@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifySessionToken, createSessionToken, getUserRole, SESSION_COOKIE_NAME, SESSION_MAX_AGE } from "@/lib/auth";
+import { verifySessionToken, createSessionToken, getUserRole, isUserLocked, SESSION_COOKIE_NAME, SESSION_MAX_AGE } from "@/lib/auth";
 import { isMutationBlocked } from "@/lib/license";
 import { isDemoContext } from "@/lib/demo/context";
 
@@ -17,8 +17,8 @@ const PUBLIC_PWA_ASSETS = [
   "/apple-touch-icon.png",
 ];
 const PUBLIC_PATHS = ["/login", "/setup", "/demo", ...PUBLIC_PWA_ASSETS];
-const PUBLIC_PATH_PREFIXES = ["/store", "/board"];
-const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/store/", "/api/download/", "/api/public/"];
+const PUBLIC_PATH_PREFIXES = ["/store", "/board", "/emergency-access"];
+const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/store/", "/api/download/", "/api/public/", "/api/emergency-access/"];
 // Carved out of the otherwise auth-gated /api/seller/ prefix: every buyer's own self-hosted
 // instance calls this one endpoint from the outside to activate, with no session of ours.
 const PUBLIC_API_EXACT = [
@@ -75,6 +75,20 @@ export async function proxy(req: NextRequest) {
     }
     const loginUrl = new URL("/login", req.url);
     return NextResponse.redirect(loginUrl);
+  }
+
+  // An account can be locked (emergency access activating — see lib/emergencyAccess.ts) while its
+  // session is still valid; the lock has to take effect on the very next request, not just block
+  // a future login attempt. Clears the cookie outright rather than leaving a session token that
+  // still looks valid lying around in the browser.
+  if (isUserLocked(username)) {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "Compte suspendu." }, { status: 403 });
+    }
+    const loginUrl = new URL("/login", req.url);
+    const res = NextResponse.redirect(loginUrl);
+    res.cookies.delete(SESSION_COOKIE_NAME);
+    return res;
   }
 
   if (
