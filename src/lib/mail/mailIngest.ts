@@ -5,6 +5,15 @@ import { withTimeout } from "../timeout";
 import { parseMailLogBatch } from "./mailLogParser";
 
 const FETCH_TIMEOUT_MS = 15_000;
+// `docker logs --since` is slow in proportion to the *total* accumulated log size, not the size of
+// what it actually returns — a known limitation of Docker's default json-file driver, which has to
+// scan the whole file from the start to find where "since" begins. A busy, long-running mail
+// container with no log rotation configured can take well past FETCH_TIMEOUT_MS for this reason
+// alone, even though the real delta each poll is a few KB — confirmed on a real install where a
+// postfix container's `--since 5m` took 18s. Docker log fetching gets its own, much more generous
+// budget rather than raising FETCH_TIMEOUT_MS everywhere (the plain-file path via dd/stat has no
+// equivalent reason to ever be slow, and shouldn't wait this long before reporting a real problem).
+const DOCKER_FETCH_TIMEOUT_MS = 60_000;
 // Caps how much a single poll will ever read — a source pointed at a huge, never-rotated log file
 // (or added for the first time against a busy mail server with months of history) would otherwise
 // try to pull the whole thing in one shot. Later lines get read next poll instead; nothing is lost.
@@ -131,7 +140,7 @@ async function fetchNewDockerContent(
 
   const { stdout, code, stderr } = await withTimeout(
     runSshCommand(hostId, command, { sudo: true }),
-    FETCH_TIMEOUT_MS,
+    DOCKER_FETCH_TIMEOUT_MS,
     "Délai dépassé lors de la lecture des logs Docker."
   );
   // A non-zero exit here usually just means the container doesn't exist (renamed/removed) —
