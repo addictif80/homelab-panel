@@ -7,11 +7,23 @@ import { ensurePrivateKeyDeployed, ensurePublicKeyAuthorized } from "./keys";
 // indefinitely instead of surfacing a clean error.
 const METADATA_TIMEOUT_MS = 15_000;
 
-export async function ensureRemoteDir(hostId: number, dirPath: string): Promise<void> {
-  const { code, stderr } = await runSshCommand(hostId, `mkdir -p ${shellQuote(dirPath)}`, {
-    sudo: true,
-    timeoutMs: METADATA_TIMEOUT_MS,
-  });
+/**
+ * Creates `dirPath` on the destination — but, critically, over the *same* nested path the real
+ * transfer uses (source host, dedicated backup key), not the panel's own separate credential for
+ * that host. Those two can be different accounts entirely (here: the panel's own admin login vs.
+ * the backup key's unprivileged user), and a directory created by one is not necessarily even
+ * *visible* to the other — a `mkdir -p` run as root (sudo, via the panel's own credential)
+ * produced a directory mode 700 owned by root, which the backup key's regular non-root user could
+ * then not even traverse into, let alone write to: "No such file or directory" from rsync, not
+ * "Permission denied", because the parent itself was unreadable to it. Same reasoning as
+ * ensureRsyncReachable() below — whichever identity will use a thing has to be the one that
+ * creates it.
+ */
+export async function ensureRemoteDir(fromHostId: number, toHostId: number, dirPath: string, keyPath: string): Promise<void> {
+  const dest = getHostConnectionInfo(toHostId);
+  const sshOpts = `-i ${keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -p ${dest.port}`;
+  const command = `ssh ${sshOpts} ${dest.user}@${dest.address} ${shellQuote(`mkdir -p ${shellQuote(dirPath)}`)}`;
+  const { code, stderr } = await runSshCommand(fromHostId, command, { sudo: true, timeoutMs: METADATA_TIMEOUT_MS });
   if (code !== 0) throw new Error(stderr || `Impossible de créer le dossier ${dirPath} sur la destination.`);
 }
 
@@ -78,7 +90,7 @@ export async function rsyncTransfer(opts: {
 
   const keyPath = await ensurePrivateKeyDeployed(fromHostId);
   await ensurePublicKeyAuthorized(toHostId);
-  await ensureRemoteDir(toHostId, destDir);
+  await ensureRemoteDir(fromHostId, toHostId, destDir, keyPath);
   await ensureRsyncReachable(fromHostId, toHostId, keyPath);
 
   const dest = getHostConnectionInfo(toHostId);
