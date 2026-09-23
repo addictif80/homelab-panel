@@ -34,7 +34,8 @@ type IconName =
   | "users"
   | "settings"
   | "storefront"
-  | "docs";
+  | "docs"
+  | "incident";
 
 const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon: IconName }[] }[] = [
   {
@@ -80,6 +81,7 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon:
     label: "Sécurité",
     items: [
       { href: "/security", label: "Sécurité", icon: "shield" },
+      { href: "/incidents", label: "Incidents", icon: "incident" },
       { href: "/mail-security", label: "Anti-spam mail", icon: "mail" },
       { href: "/backups", label: "Sauvegardes", icon: "backup" },
     ],
@@ -188,6 +190,14 @@ function NavIcon({ name }: { name: IconName }) {
         <svg {...common}>
           <path d="M6 3.5h9l4 4V19a1.3 1.3 0 01-1.3 1.3H6A1.3 1.3 0 014.7 19V4.8A1.3 1.3 0 016 3.5z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
           <path d="M8 10h8M8 13.5h8M8 17h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+      );
+    case "incident":
+      return (
+        <svg {...common}>
+          <path d="M12 3.5l9 16H3l9-16z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+          <path d="M12 10v4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          <circle cx="12" cy="17" r="0.9" fill="currentColor" />
         </svg>
       );
     case "clock":
