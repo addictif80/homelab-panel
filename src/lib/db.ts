@@ -301,6 +301,15 @@ export function migrate(db: Database.Database) {
       ignored_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    -- One row per calendar day (upserted, not appended) — a "score de risque à 30 jours" is a
+    -- trend line, and a trend line needs at most one point per day regardless of how many times
+    -- the scheduler or a manual scan recomputes it that day.
+    CREATE TABLE IF NOT EXISTS risk_score_history (
+      date TEXT PRIMARY KEY,
+      score INTEGER NOT NULL,
+      computed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     -- Tracks IPs blocked from the Security Center as a single infra-wide registry: an IP is
     -- blocked/unblocked everywhere at once (see lib/firewall.ts), so there's no per-host state to
     -- model here, just "is this IP currently on the list".

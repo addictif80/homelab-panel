@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import SecurityLogsPanel from "@/components/SecurityLogsPanel";
 import SecurityGuide from "@/components/SecurityGuide";
+import RiskScoreWidget from "@/components/RiskScoreWidget";
 
 type Severity = "critical" | "warning" | "info" | "good";
 
@@ -301,6 +302,8 @@ export default function SecurityPage() {
       )}
 
       {!results && loading && <div className="text-sm text-neutral-500">Analyse de toutes les machines en cours (SSH)...</div>}
+
+      <RiskScoreWidget />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
         <SecurityLogsPanel />

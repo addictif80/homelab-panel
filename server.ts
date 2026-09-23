@@ -27,6 +27,7 @@ import { startHostPublicIpScheduler } from "./src/lib/hostPublicIpScheduler";
 import { autoActivateFromBundledKey } from "./src/lib/license";
 import { startLicenseRenewalScheduler } from "./src/lib/licenseRenewalScheduler";
 import { startMailScheduler } from "./src/lib/mail/mailScheduler";
+import { startRiskScoreScheduler } from "./src/lib/security/riskScore";
 import { startNpmFailoverScheduler } from "./src/lib/npmFailoverScheduler";
 import { startDemoSweeper } from "./src/lib/demo/store";
 import { runWithDemoId, DEMO_COOKIE_NAME } from "./src/lib/demo/context";
@@ -69,6 +70,7 @@ app.prepare().then(() => {
   autoActivateFromBundledKey().catch(() => {});
   startLicenseRenewalScheduler();
   startMailScheduler();
+  startRiskScoreScheduler();
   startNpmFailoverScheduler();
   startDemoSweeper();
 
