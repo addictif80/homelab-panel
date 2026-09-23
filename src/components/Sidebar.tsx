@@ -33,7 +33,8 @@ type IconName =
   | "audit"
   | "users"
   | "settings"
-  | "storefront";
+  | "storefront"
+  | "docs";
 
 const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon: IconName }[] }[] = [
   {
@@ -87,6 +88,7 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon:
     label: "Système",
     items: [
       { href: "/inventory", label: "Inventaire & topologie", icon: "topology" },
+      { href: "/architecture", label: "Documentation d'architecture", icon: "docs" },
       { href: "/assistant", label: "Assistant IA", icon: "assistant" },
       { href: "/audit", label: "Journal d'audit", icon: "audit" },
       { href: "/users", label: "Comptes", icon: "users" },
@@ -179,6 +181,13 @@ function NavIcon({ name }: { name: IconName }) {
         <svg {...common}>
           <rect x="3" y="4.5" width="18" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
           <path d="M9 20h6M12 16.5V20" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+      );
+    case "docs":
+      return (
+        <svg {...common}>
+          <path d="M6 3.5h9l4 4V19a1.3 1.3 0 01-1.3 1.3H6A1.3 1.3 0 014.7 19V4.8A1.3 1.3 0 016 3.5z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+          <path d="M8 10h8M8 13.5h8M8 17h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
         </svg>
       );
     case "clock":

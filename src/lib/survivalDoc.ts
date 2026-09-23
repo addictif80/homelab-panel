@@ -1,4 +1,5 @@
 import { getDb } from "./db";
+import { listContainers } from "./docker";
 
 type HostRow = {
   id: number;
@@ -18,6 +19,7 @@ type HostRow = {
 
 type LinkRow = { a_name: string; b_name: string; link_type: string };
 type BackupPlanRow = { name: string; source_type: string; schedule: string; retention_count: number; source_host: string; dest_host: string };
+type ServiceLinkRow = { name: string; url: string; description: string };
 
 const KIND_LABELS: Record<string, string> = {
   physical: "Serveur physique",
@@ -34,7 +36,7 @@ const KIND_LABELS: Record<string, string> = {
  * understand and start recovering the infrastructure in an emergency. Safe to print, safe to keep
  * next to the encrypted vault rather than as sensitive as it.
  */
-export function generateSurvivalDoc(): string {
+export async function generateSurvivalDoc(): Promise<string> {
   const db = getDb();
   const hosts = db.prepare(`SELECT * FROM hosts ORDER BY kind, name`).all() as HostRow[];
   const links = db
@@ -54,6 +56,22 @@ export function generateSurvivalDoc(): string {
        ORDER BY p.name`
     )
     .all() as BackupPlanRow[];
+  const serviceLinks = db.prepare(`SELECT name, url, description FROM service_links ORDER BY name`).all() as ServiceLinkRow[];
+
+  // Live, not stored — a container list frozen at some past "generation" would defeat the whole
+  // point of this doc being trustworthy during an actual emergency. Best-effort per host: one
+  // unreachable machine (mid-incident is exactly when that's likely) doesn't blank the whole doc.
+  const dockerHosts = hosts.filter((h) => h.docker_enabled);
+  const containersByHost = new Map<number, Awaited<ReturnType<typeof listContainers>>>();
+  await Promise.all(
+    dockerHosts.map(async (h) => {
+      try {
+        containersByHost.set(h.id, await listContainers(h.id));
+      } catch {
+        // Left unset — rendered below as "injoignable au moment de la génération".
+      }
+    })
+  );
 
   const lines: string[] = [];
   const now = new Date().toISOString().replace("T", " ").slice(0, 19);
@@ -92,6 +110,37 @@ export function generateSurvivalDoc(): string {
     lines.push("");
     for (const l of links) {
       lines.push(`- ${l.a_name} ↔ ${l.b_name} (${l.link_type})`);
+    }
+    lines.push("");
+  }
+
+  if (dockerHosts.length > 0) {
+    lines.push(`## Conteneurs Docker`);
+    lines.push("");
+    for (const h of dockerHosts) {
+      const containers = containersByHost.get(h.id);
+      lines.push(`### ${h.name}`);
+      lines.push("");
+      if (!containers) {
+        lines.push(`_Injoignable au moment de la génération de ce document._`);
+      } else if (containers.length === 0) {
+        lines.push(`_Aucun conteneur._`);
+      } else {
+        lines.push(`| Conteneur | Image | État |`);
+        lines.push(`|---|---|---|`);
+        for (const c of containers) {
+          lines.push(`| ${c.name} | ${c.image} | ${c.status} |`);
+        }
+      }
+      lines.push("");
+    }
+  }
+
+  if (serviceLinks.length > 0) {
+    lines.push(`## Services & applications`);
+    lines.push("");
+    for (const s of serviceLinks) {
+      lines.push(`- **${s.name}** — ${s.url}${s.description ? ` — ${s.description}` : ""}`);
     }
     lines.push("");
   }
