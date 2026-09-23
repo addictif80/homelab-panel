@@ -6,6 +6,7 @@ import { hostDiagnosticsFindings } from "./hostDiagnostics";
 import { secretsExposureFindings } from "./secretsScan";
 import { listIgnoredKeys } from "./ignore";
 import { scanCertificates } from "./certFindings";
+import { scanDomainRegistrations } from "./domainFindings";
 import type { HostScanResult } from "./types";
 
 type HostRow = {
@@ -58,7 +59,7 @@ export async function scanHost(host: HostRow): Promise<HostScanResult> {
 
 export async function scanAllHosts(): Promise<HostScanResult[]> {
   const hosts = getScannableHosts();
-  const [results, certResult] = await Promise.all([
+  const [results, certResult, domainResult] = await Promise.all([
     Promise.all(hosts.map(scanHost)),
     scanCertificates().catch((err) => ({
       hostId: -1,
@@ -68,9 +69,17 @@ export async function scanAllHosts(): Promise<HostScanResult[]> {
       findings: [],
       error: err instanceof Error ? err.message : "Erreur.",
     })),
+    scanDomainRegistrations().catch((err) => ({
+      hostId: -2,
+      hostName: "Noms de domaine surveillés",
+      hostKind: "monitoring",
+      hostOs: null,
+      findings: [],
+      error: err instanceof Error ? err.message : "Erreur.",
+    })),
   ]);
   logAudit("security.scan_all", undefined, `${results.length} machines analysées`);
-  return [...results, certResult];
+  return [...results, certResult, domainResult];
 }
 
 export async function scanSingleHost(hostId: number): Promise<HostScanResult> {
