@@ -36,7 +36,8 @@ type IconName =
   | "storefront"
   | "docs"
   | "incident"
-  | "disaster";
+  | "disaster"
+  | "wrapped";
 
 const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon: IconName }[] }[] = [
   {
@@ -93,6 +94,7 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon:
     items: [
       { href: "/inventory", label: "Inventaire & topologie", icon: "topology" },
       { href: "/architecture", label: "Documentation d'architecture", icon: "docs" },
+      { href: "/wrapped", label: "Récap annuel", icon: "wrapped" },
       { href: "/assistant", label: "Assistant IA", icon: "assistant" },
       { href: "/audit", label: "Journal d'audit", icon: "audit" },
       { href: "/users", label: "Comptes", icon: "users" },
@@ -207,6 +209,15 @@ function NavIcon({ name }: { name: IconName }) {
         <svg {...common}>
           <path d="M12 4c-4 3-7 6.5-7 10.5A7 7 0 0012 21a7 7 0 007-6.5C19 10.5 16 7 12 4z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
           <path d="M12 9.5c-1.5 1.5-2.5 2.8-2.5 4a2.5 2.5 0 005 0c0-1.2-1-2.5-2.5-4z" stroke="currentColor" strokeWidth="1.4" />
+        </svg>
+      );
+    case "wrapped":
+      return (
+        <svg {...common}>
+          <rect x="4" y="3.5" width="16" height="17" rx="2.3" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M8 8h8M8 12h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          <circle cx="9.5" cy="16" r="1.1" fill="currentColor" />
+          <circle cx="13.5" cy="16" r="1.1" fill="currentColor" />
         </svg>
       );
     case "clock":
