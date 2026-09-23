@@ -118,7 +118,7 @@ export function resolveSudoPassword(hostId: number): string | null {
  */
 export function getAutoElevatePassword(hostId: number): string | null {
   const host = getHostRow(hostId);
-  if (!host.needs_sudo) return null;
+  if (!host.needs_sudo || host.ssh_user === "root") return null;
   return resolveSudoPassword(hostId);
 }
 
@@ -133,7 +133,14 @@ export function buildPrivilegedCommand(
   rawCommand: string
 ): { command: string; stdinPassword: string | null } {
   const host = getHostRow(hostId);
-  if (!host.needs_sudo) return { command: rawCommand, stdinPassword: null };
+  // A host whose configured login user is already root needs no elevation, whatever `needs_sudo`
+  // says (it defaults to 1 for every new host — see db.ts — so this is easy to leave on by
+  // mistake for a root-login machine). Wrapping in `sudo -S ... bash -lc` anyway is not just
+  // redundant: it changes the shell environment (login shell, sudo's own stdin/env handling) in
+  // ways that broke a real backup transfer — the outer `rsync -a ... -e ssh ...` command ran fine
+  // executed directly, but failed with a bare "connection unexpectedly closed" once wrapped this
+  // way, even though the exact same command worked when typed by hand in a plain root shell.
+  if (!host.needs_sudo || host.ssh_user === "root") return { command: rawCommand, stdinPassword: null };
 
   const password = resolveSudoPassword(hostId);
   if (!password) {
