@@ -6,7 +6,7 @@ import TrialBanner from "./TrialBanner";
 import SelfUpdateBanner from "./SelfUpdateBanner";
 import LockdownBanner from "./LockdownBanner";
 
-const NO_SHELL_PATHS = ["/login", "/setup"];
+const NO_SHELL_PATHS = ["/login", "/setup", "/mission-control"];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

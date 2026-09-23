@@ -37,7 +37,8 @@ type IconName =
   | "docs"
   | "incident"
   | "disaster"
-  | "wrapped";
+  | "wrapped"
+  | "missioncontrol";
 
 const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon: IconName }[] }[] = [
   {
@@ -45,6 +46,7 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon:
     items: [
       { href: "/", label: "Vue d'ensemble", icon: "grid" },
       { href: "/brain", label: "Vue vivante", icon: "pulse" },
+      { href: "/mission-control", label: "Mission Control", icon: "missioncontrol" },
     ],
   },
   {
@@ -218,6 +220,16 @@ function NavIcon({ name }: { name: IconName }) {
           <path d="M8 8h8M8 12h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
           <circle cx="9.5" cy="16" r="1.1" fill="currentColor" />
           <circle cx="13.5" cy="16" r="1.1" fill="currentColor" />
+        </svg>
+      );
+    case "missioncontrol":
+      return (
+        <svg {...common}>
+          <rect x="3" y="4" width="18" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M7 20h10M12 16v4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          <circle cx="8" cy="10" r="1" fill="currentColor" />
+          <circle cx="12" cy="10" r="1" fill="currentColor" />
+          <circle cx="16" cy="10" r="1" fill="currentColor" />
         </svg>
       );
     case "clock":
