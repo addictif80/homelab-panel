@@ -91,7 +91,17 @@ export async function rsyncTransfer(opts: {
   // is ever tried. That reproduces identically on any destination, since it depends only on what
   // other keys exist on the *source* side, which is exactly the "fails no matter which server"
   // symptom this was chasing across several destination-side fixes that (rightly) didn't touch it.
-  const sshOpts = `ssh -i ${keyPath} -o IdentitiesOnly=yes -p ${dest.port} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null`;
+  // -v on the *inner* ssh (the one rsync spawns to reach the destination) is deliberate, not
+  // debug-only noise left behind by accident: this connection is made by ssh2 (a JS
+  // reimplementation of the SSH client, used for the *outer* command that runs this whole rsync
+  // invocation on the source host) rather than by the system's own OpenSSH client, and a real
+  // transfer failed here with "connection unexpectedly closed" even though the exact same command
+  // succeeded byte-for-byte when run manually via real ssh/rsync — narrowing it to something about
+  // ssh2 itself. -v surfaces the inner connection's own handshake/auth/channel messages on stderr
+  // (which rsync already passes through — see the "Warning: Permanently added..." lines every log
+  // already shows), which a silent failure otherwise gives no way to diagnose without reproducing
+  // it outside the app entirely, which the exact match above already proved not to be equivalent.
+  const sshOpts = `ssh -v -i ${keyPath} -o IdentitiesOnly=yes -p ${dest.port} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null`;
   const linkFlag = linkDestDir
     ? `--link-dest=${shellQuote(linkDestDir.endsWith("/") ? linkDestDir : `${linkDestDir}/`)} `
     : "";
