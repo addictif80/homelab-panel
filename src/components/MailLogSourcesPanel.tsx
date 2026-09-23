@@ -1,8 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
+
+const DirectoryPicker = dynamic(() => import("./DirectoryPicker"), { ssr: false });
 
 type Host = { id: number; name: string };
+type DockerContainer = { id: string; name: string };
 type Source = {
   id: string;
   hostId: number;
@@ -22,6 +26,9 @@ export default function MailLogSourcesPanel() {
   const [scanningAll, setScanningAll] = useState(false);
   const [scanningId, setScanningId] = useState<string | null>(null);
   const [scanResult, setScanResult] = useState<Record<string, string>>({});
+  const [containers, setContainers] = useState<DockerContainer[]>([]);
+  const [containersError, setContainersError] = useState("");
+  const [browsing, setBrowsing] = useState(false);
 
   async function load() {
     const [hostsRes, sourcesRes] = await Promise.all([fetch("/api/hosts"), fetch("/api/settings/mail-sources")]);
@@ -34,6 +41,26 @@ export default function MailLogSourcesPanel() {
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    setSourcePath("");
+    if (!hostId || sourceType !== "docker") {
+      setContainers([]);
+      return;
+    }
+    setContainersError("");
+    fetch(`/api/docker/${hostId}/containers`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error) {
+          setContainersError(d.error);
+          setContainers([]);
+          return;
+        }
+        setContainers(d.containers || []);
+      })
+      .catch(() => setContainersError("Impossible de contacter le panel."));
+  }, [hostId, sourceType]);
 
   async function addSource() {
     if (!hostId || !sourcePath.trim()) return;
@@ -180,14 +207,44 @@ export default function MailLogSourcesPanel() {
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <label className="text-xs text-neutral-500">
-            {sourceType === "file" ? "Chemin du fichier" : "Nom du conteneur"}
+            {sourceType === "file" ? "Chemin du fichier" : "Conteneur"}
           </label>
-          <input
-            value={sourcePath}
-            onChange={(e) => setSourcePath(e.target.value)}
-            placeholder={sourceType === "file" ? "/var/log/mail.log" : "mailcow-postfix-mailcow-1"}
-            className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600"
-          />
+          {sourceType === "docker" ? (
+            <select
+              value={sourcePath}
+              onChange={(e) => setSourcePath(e.target.value)}
+              disabled={!hostId}
+              className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 disabled:opacity-50"
+            >
+              <option value="">— choisir —</option>
+              {containers.map((c) => (
+                <option key={c.id} value={c.name}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="flex gap-1.5">
+              <input
+                value={sourcePath}
+                onChange={(e) => setSourcePath(e.target.value)}
+                placeholder="/var/log/mail.log"
+                className="w-full min-w-0 rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600"
+              />
+              <button
+                type="button"
+                onClick={() => setBrowsing(true)}
+                disabled={!hostId}
+                className="shrink-0 rounded border border-neutral-700 px-2.5 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+              >
+                Parcourir
+              </button>
+            </div>
+          )}
+          {sourceType === "docker" && containersError && <p className="text-xs text-red-400">{containersError}</p>}
+          {sourceType === "docker" && hostId && !containersError && containers.length === 0 && (
+            <p className="text-xs text-neutral-500">Aucun conteneur trouvé sur cette machine.</p>
+          )}
         </div>
         <button
           onClick={addSource}
@@ -197,6 +254,20 @@ export default function MailLogSourcesPanel() {
           Ajouter
         </button>
       </div>
+
+      {browsing && hostId && (
+        <DirectoryPicker
+          hostId={hostId}
+          initialPath={sourcePath || "/var/log"}
+          mode="file"
+          title="Choisir le fichier de log"
+          onSelect={(path) => {
+            setSourcePath(path);
+            setBrowsing(false);
+          }}
+          onClose={() => setBrowsing(false)}
+        />
+      )}
     </section>
   );
 }

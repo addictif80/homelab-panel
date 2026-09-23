@@ -14,19 +14,25 @@ function joinPath(base: string, name: string): string {
   return base === "/" ? `/${name}` : `${base}/${name}`;
 }
 
-/** Folder browser over the same SFTP connection as the File Explorer — lets a backup plan's
- * source/destination path be picked by navigating the real filesystem instead of typed blind.
+/** Folder (or, with `mode="file"`, single-file) browser over the same SFTP connection as the File
+ * Explorer — lets a path be picked by navigating the real filesystem instead of typed blind.
  * Browses as the plain SSH login user (SFTP has no sudo concept), so a directory only readable by
  * root won't show up here even if the backup engine itself can reach it via sudo — a real but
  * secondary limitation, worth it for the common case of browsing normal NAS/data volumes. */
 export default function DirectoryPicker({
   hostId,
   initialPath,
+  mode = "directory",
+  title,
   onSelect,
   onClose,
 }: {
   hostId: number;
   initialPath: string;
+  /** "file" also lists files (clicking one selects it immediately) — for a log file path,
+   * for instance — instead of only navigable directories. */
+  mode?: "directory" | "file";
+  title?: string;
   onSelect: (path: string) => void;
   onClose: () => void;
 }) {
@@ -36,6 +42,7 @@ export default function DirectoryPicker({
   // the input is free to change on every keystroke, only `path` (debounced below) triggers a fetch.
   const [inputValue, setInputValue] = useState(initialPath || "/");
   const [entries, setEntries] = useState<FileEntry[]>([]);
+  const [files, setFiles] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -64,7 +71,9 @@ export default function DirectoryPicker({
       .then((r) => r.json())
       .then((d) => {
         if (d.error) throw new Error(d.error);
-        setEntries((d.entries as FileEntry[]).filter((e) => e.type === "directory").sort((a, b) => a.name.localeCompare(b.name)));
+        const all = d.entries as FileEntry[];
+        setEntries(all.filter((e) => e.type === "directory").sort((a, b) => a.name.localeCompare(b.name)));
+        setFiles(mode === "file" ? all.filter((e) => e.type === "file").sort((a, b) => a.name.localeCompare(b.name)) : []);
       })
       .catch((err) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -72,13 +81,13 @@ export default function DirectoryPicker({
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, [hostId, path]);
+  }, [hostId, path, mode]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="flex max-h-[80vh] w-full max-w-lg flex-col rounded border border-neutral-700 bg-neutral-950 p-4">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-neutral-100">Choisir un dossier</h3>
+          <h3 className="text-sm font-semibold text-neutral-100">{title ?? (mode === "file" ? "Choisir un fichier" : "Choisir un dossier")}</h3>
           <button type="button" onClick={onClose} className="text-neutral-500 hover:text-neutral-300">
             ✕
           </button>
@@ -120,7 +129,21 @@ export default function DirectoryPicker({
                   </button>
                 </li>
               ))}
-              {entries.length === 0 && <li className="p-3 text-xs text-neutral-600">Aucun sous-dossier.</li>}
+              {mode === "file" &&
+                files.map((f) => (
+                  <li key={f.name}>
+                    <button
+                      type="button"
+                      onClick={() => onSelect(joinPath(path, f.name))}
+                      className="w-full px-3 py-1.5 text-left text-sm text-neutral-300 hover:bg-neutral-900"
+                    >
+                      📄 {f.name}
+                    </button>
+                  </li>
+                ))}
+              {entries.length === 0 && files.length === 0 && (
+                <li className="p-3 text-xs text-neutral-600">{mode === "file" ? "Dossier vide." : "Aucun sous-dossier."}</li>
+              )}
             </ul>
           )}
         </div>
