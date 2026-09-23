@@ -19,12 +19,53 @@ export type DatabaseBackupConfig = {
 /** Wraps a dump tool invocation for wherever the database server actually lives: inside a named
  * container (`docker exec`) or directly on the host's own shell — same command either way, just
  * without the docker indirection for a natively installed server. */
-function wrapDbCommand(config: DatabaseBackupConfig, envAssignment: string, innerCommand: string): string {
+function wrapDbCommand(
+  config: Pick<DatabaseBackupConfig, "deployment" | "containerId">,
+  envAssignment: string,
+  innerCommand: string
+): string {
   if (config.deployment === "native") {
     return `${envAssignment} ${innerCommand}`;
   }
   if (!config.containerId) throw new Error("Conteneur de la base de données manquant pour ce plan.");
   return `docker exec -e ${envAssignment} ${shellQuote(config.containerId)} ${innerCommand}`;
+}
+
+export type DbConnectionParams = {
+  deployment?: "docker" | "native";
+  containerId?: string;
+  engine: "mysql" | "postgres";
+  user: string;
+  password: string;
+};
+
+/** Connects with the given credentials and lists every database the server knows about, for the
+ * "Tester la connexion" button in the plan editor — lets someone pick databases to back up by
+ * name from a real list instead of typing them blind and finding out about a typo only when a
+ * scheduled run fails at 3am. Throws with the raw tool error on a bad password/host/engine
+ * mismatch, same as the real dump would. */
+export async function listDatabases(hostId: number, params: DbConnectionParams): Promise<string[]> {
+  const { engine, user, password, deployment, containerId } = params;
+
+  if (engine === "mysql") {
+    const cmd = wrapDbCommand(
+      { deployment, containerId },
+      `MYSQL_PWD=${shellQuote(password)}`,
+      `mysql -u ${shellQuote(user)} -N -e ${shellQuote("SHOW DATABASES;")}`
+    );
+    const { stdout, stderr, code } = await runSshCommand(hostId, cmd, { sudo: true });
+    if (code !== 0) throw new Error(stderr.trim() || "Connexion MySQL/MariaDB impossible.");
+    return stdout.split("\n").map((l) => l.trim()).filter(Boolean).sort();
+  }
+
+  const cmd = wrapDbCommand(
+    { deployment, containerId },
+    `PGPASSWORD=${shellQuote(password)}`,
+    `psql -U ${shellQuote(user)} -Atc ${shellQuote("SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;")}`
+  );
+  const { stdout, stderr, code } = await runSshCommand(hostId, cmd, { sudo: true });
+  if (code !== 0) throw new Error(stderr.trim() || "Connexion PostgreSQL impossible.");
+  return stdout.split("\n").map((l) => l.trim()).filter(Boolean).sort();
 }
 
 export async function dumpDatabase(

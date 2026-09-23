@@ -647,6 +647,49 @@ function CreatePlanForm({
   const [dbNames, setDbNames] = useState(
     existingDbConfig && existingDbConfig.databases !== "all" ? existingDbConfig.databases.join(", ") : ""
   );
+  const [dbTesting, setDbTesting] = useState(false);
+  const [dbTestError, setDbTestError] = useState("");
+  // null = not tested yet (shows the plain text field); once populated, checkboxes replace it —
+  // picking names off a real list beats typing them blind and finding a typo at 3am.
+  const [dbAvailable, setDbAvailable] = useState<string[] | null>(null);
+  const selectedDbs = new Set(
+    dbNames.split(",").map((d) => d.trim()).filter(Boolean)
+  );
+
+  function toggleDb(dbName: string) {
+    const next = new Set(selectedDbs);
+    if (next.has(dbName)) next.delete(dbName);
+    else next.add(dbName);
+    setDbNames([...next].join(", "));
+  }
+
+  async function testDbConnection() {
+    if (!sourceHostId) return;
+    setDbTesting(true);
+    setDbTestError("");
+    try {
+      const res = await fetch("/api/backups/test-database", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hostId: sourceHostId,
+          deployment: dbDeployment,
+          containerId: dbDeployment === "docker" ? dbContainerId : undefined,
+          engine: dbEngine,
+          user: dbUser,
+          password: dbPassword,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setDbAvailable(data.databases);
+      setDbAll(false);
+    } catch (err) {
+      setDbTestError(err instanceof Error ? err.message : "Connexion impossible.");
+    } finally {
+      setDbTesting(false);
+    }
+  }
 
   // proxmox
   const [pveResources, setPveResources] = useState<ProxmoxResource[]>([]);
@@ -951,14 +994,52 @@ function CreatePlanForm({
             <input type="password" value={dbPassword} onChange={(e) => setDbPassword(e.target.value)} className={INPUT_CLASS} />
           </label>
           <label className="col-span-2 flex items-center gap-2 text-sm text-neutral-300">
-            <input type="checkbox" checked={dbAll} onChange={(e) => setDbAll(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={dbAll}
+              onChange={(e) => {
+                setDbAll(e.target.checked);
+                if (e.target.checked) setDbAvailable(null);
+              }}
+            />
             Toutes les bases
           </label>
           {!dbAll && (
-            <label className="col-span-2 block">
-              <span className="mb-1 block text-xs text-neutral-400">Bases (séparées par des virgules)</span>
-              <input value={dbNames} onChange={(e) => setDbNames(e.target.value)} className={INPUT_CLASS} />
-            </label>
+            <div className="col-span-2 space-y-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={testDbConnection}
+                  disabled={dbTesting || !dbUser || !dbPassword || (dbDeployment === "docker" && !dbContainerId)}
+                  className="rounded border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+                >
+                  {dbTesting ? "Connexion..." : "Tester la connexion"}
+                </button>
+                {editingPlan && !dbPassword && (
+                  <span className="text-xs text-neutral-500">Renseigne le mot de passe pour tester.</span>
+                )}
+              </div>
+              {dbTestError && <p className="text-xs text-red-400">{dbTestError}</p>}
+              {dbAvailable ? (
+                dbAvailable.length === 0 ? (
+                  <p className="text-xs text-neutral-500">Aucune base trouvée sur ce serveur.</p>
+                ) : (
+                  <div className="max-h-40 space-y-1 overflow-auto rounded border border-neutral-800 p-2">
+                    {dbAvailable.map((db) => (
+                      <label key={db} className="flex items-center gap-2 text-sm text-neutral-300">
+                        <input type="checkbox" checked={selectedDbs.has(db)} onChange={() => toggleDb(db)} />
+                        {db}
+                      </label>
+                    ))}
+                  </div>
+                )
+              ) : (
+                <label className="block">
+                  <span className="mb-1 block text-xs text-neutral-400">Bases (séparées par des virgules)</span>
+                  <input value={dbNames} onChange={(e) => setDbNames(e.target.value)} className={INPUT_CLASS} />
+                </label>
+              )}
+            </div>
           )}
         </div>
       )}

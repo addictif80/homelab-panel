@@ -107,6 +107,15 @@ export function fakeExec(hostId: number, rawCommand: string): ExecResult {
     return { stdout: fakeDockerInspect(restoredInspectMatch[1]), stderr: "", code: 0 };
   }
 
+  if (rawCommand.includes("SHOW DATABASES")) {
+    // "Tester la connexion" (lib/backup/sources/database.ts) — a plausible fake list so the demo
+    // shows the real UI (checkboxes for real-looking database names) rather than an empty result.
+    return { stdout: "information_schema\nnextcloud\nnpm\nwordpress_prod", stderr: "", code: 0 };
+  }
+  if (rawCommand.includes("SELECT datname FROM pg_database")) {
+    return { stdout: "postgres\nghost\nvaultwarden", stderr: "", code: 0 };
+  }
+
   if (rawCommand.includes("command -v rsync")) {
     // Both the plain availability check and the nested "does the destination reach rsync over
     // the backup key" check (lib/backup/transfer.ts) need non-empty stdout to read as success —
