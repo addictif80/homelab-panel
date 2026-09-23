@@ -19,6 +19,9 @@ export default function MailLogSourcesPanel() {
   const [sourceType, setSourceType] = useState<"file" | "docker">("file");
   const [sourcePath, setSourcePath] = useState("");
   const [saving, setSaving] = useState(false);
+  const [scanningAll, setScanningAll] = useState(false);
+  const [scanningId, setScanningId] = useState<string | null>(null);
+  const [scanResult, setScanResult] = useState<Record<string, string>>({});
 
   async function load() {
     const [hostsRes, sourcesRes] = await Promise.all([fetch("/api/hosts"), fetch("/api/settings/mail-sources")]);
@@ -63,20 +66,54 @@ export default function MailLogSourcesPanel() {
     load();
   }
 
+  async function scanOne(id: string) {
+    setScanningId(id);
+    try {
+      const res = await fetch(`/api/settings/mail-sources/${id}/poll`, { method: "POST" });
+      const data = await res.json();
+      setScanResult((prev) => ({
+        ...prev,
+        [id]: data.lastError ? `Erreur : ${data.lastError}` : `${data.inserted} nouvel${data.inserted === 1 ? "" : "s"} événement${data.inserted === 1 ? "" : "s"} trouvé${data.inserted === 1 ? "" : "s"}.`,
+      }));
+      load();
+    } finally {
+      setScanningId(null);
+    }
+  }
+
+  async function scanAll() {
+    setScanningAll(true);
+    try {
+      await fetch("/api/settings/mail-sources/poll-all", { method: "POST" });
+      load();
+    } finally {
+      setScanningAll(false);
+    }
+  }
+
   function hostName(id: number) {
     return hosts.find((h) => h.id === id)?.name ?? `#${id}`;
   }
 
   return (
     <section className="space-y-3 rounded border border-neutral-800 bg-neutral-900 p-4">
-      <div>
-        <h2 className="text-sm font-semibold text-neutral-100">Anti-spam mail</h2>
-        <p className="mt-1 text-xs text-neutral-500">
-          Sources d&apos;où lire l&apos;activité mail entrante pour le tableau de bord Anti-spam. Fichier de log
-          (Postfix natif, ex: /var/log/mail.log) ou logs d&apos;un conteneur Docker (stack mail dockerisée comme
-          Mailcow) — l&apos;analyse reconnaît les formats Postfix et rspamd, très répandus dans les serveurs mail
-          auto-hébergés.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-neutral-100">Anti-spam mail</h2>
+          <p className="mt-1 text-xs text-neutral-500">
+            Sources d&apos;où lire l&apos;activité mail entrante pour le tableau de bord Anti-spam. Fichier de log
+            (Postfix natif, ex: /var/log/mail.log) ou logs d&apos;un conteneur Docker (stack mail dockerisée comme
+            Mailcow) — l&apos;analyse reconnaît les formats Postfix et rspamd, très répandus dans les serveurs mail
+            auto-hébergés. Lues automatiquement toutes les 2 minutes, ou à la demande ci-dessous.
+          </p>
+        </div>
+        <button
+          onClick={scanAll}
+          disabled={scanningAll || sources.length === 0}
+          className="shrink-0 rounded border border-neutral-700 px-2.5 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+        >
+          {scanningAll ? "Scan en cours..." : "Scanner tout maintenant"}
+        </button>
       </div>
 
       <div className="divide-y divide-neutral-800 rounded border border-neutral-800">
@@ -88,7 +125,15 @@ export default function MailLogSourcesPanel() {
               </p>
               <p className="truncate font-mono text-xs text-neutral-500">{s.sourcePath}</p>
               {s.lastError && <p className="truncate text-xs text-red-400" title={s.lastError}>⚠ {s.lastError}</p>}
+              {scanResult[s.id] && <p className="truncate text-xs text-neutral-500">{scanResult[s.id]}</p>}
             </div>
+            <button
+              onClick={() => scanOne(s.id)}
+              disabled={scanningId === s.id}
+              className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+            >
+              {scanningId === s.id ? "Scan..." : "Scanner maintenant"}
+            </button>
             <label className="flex shrink-0 items-center gap-1.5 text-xs text-neutral-400">
               <input type="checkbox" checked={s.enabled} onChange={(e) => toggle(s.id, e.target.checked)} />
               Actif
