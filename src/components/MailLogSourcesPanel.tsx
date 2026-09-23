@@ -7,10 +7,11 @@ const DirectoryPicker = dynamic(() => import("./DirectoryPicker"), { ssr: false 
 
 type Host = { id: number; name: string };
 type DockerContainer = { id: string; name: string };
+type SourceType = "file" | "docker" | "rspamd_api";
 type Source = {
   id: string;
   hostId: number;
-  sourceType: "file" | "docker";
+  sourceType: SourceType;
   sourcePath: string;
   enabled: boolean;
   lastError: string | null;
@@ -20,8 +21,10 @@ export default function MailLogSourcesPanel() {
   const [hosts, setHosts] = useState<Host[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
   const [hostId, setHostId] = useState<number | "">("");
-  const [sourceType, setSourceType] = useState<"file" | "docker">("file");
+  const [sourceType, setSourceType] = useState<SourceType>("file");
   const [sourcePath, setSourcePath] = useState("");
+  const [rspamdPort, setRspamdPort] = useState("11334");
+  const [rspamdPassword, setRspamdPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [scanningAll, setScanningAll] = useState(false);
   const [scanningId, setScanningId] = useState<string | null>(null);
@@ -44,7 +47,7 @@ export default function MailLogSourcesPanel() {
 
   useEffect(() => {
     setSourcePath("");
-    if (!hostId || sourceType !== "docker") {
+    if (!hostId || (sourceType !== "docker" && sourceType !== "rspamd_api")) {
       setContainers([]);
       return;
     }
@@ -64,14 +67,23 @@ export default function MailLogSourcesPanel() {
 
   async function addSource() {
     if (!hostId || !sourcePath.trim()) return;
+    if (sourceType === "rspamd_api" && !rspamdPort.trim()) return;
     setSaving(true);
     try {
       await fetch("/api/settings/mail-sources", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hostId, sourceType, sourcePath }),
+        body: JSON.stringify({
+          hostId,
+          sourceType,
+          sourcePath,
+          ...(sourceType === "rspamd_api"
+            ? { rspamdPort: Number(rspamdPort), rspamdPassword: rspamdPassword || undefined }
+            : {}),
+        }),
       });
       setSourcePath("");
+      setRspamdPassword("");
       load();
     } finally {
       setSaving(false);
@@ -129,9 +141,9 @@ export default function MailLogSourcesPanel() {
           <h2 className="text-sm font-semibold text-neutral-100">Anti-spam mail</h2>
           <p className="mt-1 text-xs text-neutral-500">
             Sources d&apos;où lire l&apos;activité mail entrante pour le tableau de bord Anti-spam. Fichier de log
-            (Postfix natif, ex: /var/log/mail.log) ou logs d&apos;un conteneur Docker (stack mail dockerisée comme
-            Mailcow) — l&apos;analyse reconnaît les formats Postfix et rspamd, très répandus dans les serveurs mail
-            auto-hébergés. Lues automatiquement toutes les 2 minutes, ou à la demande ci-dessous.
+            (Postfix natif, ex: /var/log/mail.log), logs d&apos;un conteneur Docker (stack mail dockerisée comme
+            Mailcow), ou l&apos;API rspamd (seule source capable d&apos;afficher le sujet des mails). Lues
+            automatiquement toutes les 2 minutes, ou à la demande ci-dessous.
           </p>
         </div>
         <button
@@ -148,7 +160,15 @@ export default function MailLogSourcesPanel() {
           <div key={s.id} className="flex items-center gap-3 p-3 text-sm">
             <div className="min-w-0 flex-1">
               <p className="truncate text-neutral-100">
-                {hostName(s.hostId)} <span className="text-neutral-500">— {s.sourceType === "file" ? "fichier" : "conteneur Docker"}</span>
+                {hostName(s.hostId)}{" "}
+                <span className="text-neutral-500">
+                  —{" "}
+                  {s.sourceType === "file"
+                    ? "fichier"
+                    : s.sourceType === "docker"
+                      ? "conteneur Docker"
+                      : "API rspamd (avec sujets)"}
+                </span>
               </p>
               <p className="truncate font-mono text-xs text-neutral-500">{s.sourcePath}</p>
               {s.lastError && <p className="truncate text-xs text-red-400" title={s.lastError}>⚠ {s.lastError}</p>}
@@ -198,18 +218,19 @@ export default function MailLogSourcesPanel() {
           <label className="text-xs text-neutral-500">Type</label>
           <select
             value={sourceType}
-            onChange={(e) => setSourceType(e.target.value as "file" | "docker")}
+            onChange={(e) => setSourceType(e.target.value as SourceType)}
             className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100"
           >
             <option value="file">Fichier de log</option>
             <option value="docker">Conteneur Docker</option>
+            <option value="rspamd_api">API rspamd (avec sujets)</option>
           </select>
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <label className="text-xs text-neutral-500">
             {sourceType === "file" ? "Chemin du fichier" : "Conteneur"}
           </label>
-          {sourceType === "docker" ? (
+          {sourceType === "docker" || sourceType === "rspamd_api" ? (
             <select
               value={sourcePath}
               onChange={(e) => setSourcePath(e.target.value)}
@@ -241,19 +262,55 @@ export default function MailLogSourcesPanel() {
               </button>
             </div>
           )}
-          {sourceType === "docker" && containersError && <p className="text-xs text-red-400">{containersError}</p>}
-          {sourceType === "docker" && hostId && !containersError && containers.length === 0 && (
-            <p className="text-xs text-neutral-500">Aucun conteneur trouvé sur cette machine.</p>
+          {(sourceType === "docker" || sourceType === "rspamd_api") && containersError && (
+            <p className="text-xs text-red-400">{containersError}</p>
           )}
+          {(sourceType === "docker" || sourceType === "rspamd_api") &&
+            hostId &&
+            !containersError &&
+            containers.length === 0 && <p className="text-xs text-neutral-500">Aucun conteneur trouvé sur cette machine.</p>}
         </div>
+        {sourceType === "rspamd_api" && (
+          <>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-neutral-500">Port contrôleur</label>
+              <input
+                value={rspamdPort}
+                onChange={(e) => setRspamdPort(e.target.value)}
+                placeholder="11334"
+                inputMode="numeric"
+                className="w-24 rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-neutral-500">Mot de passe (si requis)</label>
+              <input
+                type="password"
+                value={rspamdPassword}
+                onChange={(e) => setRspamdPassword(e.target.value)}
+                placeholder="optionnel"
+                className="w-36 rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600"
+              />
+            </div>
+          </>
+        )}
         <button
           onClick={addSource}
-          disabled={saving || !hostId || !sourcePath.trim()}
+          disabled={saving || !hostId || !sourcePath.trim() || (sourceType === "rspamd_api" && !rspamdPort.trim())}
           className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60 disabled:opacity-50"
         >
           Ajouter
         </button>
       </div>
+      {sourceType === "rspamd_api" && (
+        <p className="text-xs text-neutral-500">
+          Interroge l&apos;API contrôleur de rspamd (port 11334 par défaut) via <code>docker exec</code> — c&apos;est la
+          seule source qui peut afficher le sujet des mails : les logs Postfix ne voient jamais le contenu du message,
+          et le format de log par défaut de rspamd n&apos;inclut pas le sujet non plus. Nécessite que le module
+          history_redis de rspamd soit actif (c&apos;est le cas par défaut sur Mailcow) et que curl soit disponible dans
+          le conteneur.
+        </p>
+      )}
 
       {browsing && hostId && (
         <DirectoryPicker

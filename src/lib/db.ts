@@ -568,22 +568,31 @@ export function migrate(db: Database.Database) {
     );
 
     -- Where to read incoming-mail activity from, for the spam log (see lib/mail/mailIngest.ts).
-    -- Either a log file on an SSH-reachable host (a native Postfix/Exim install) or a Docker
-    -- container's own log output (a dockerized mail stack like Mailcow) — deliberately not
-    -- coupled to any one mail server product, since the parser only looks for generic
-    -- Postfix-style syslog lines and a generic rspamd-style summary line, both extremely common
-    -- denominators across self-hosted mail stacks (nearly all of them run Postfix as the MTA).
+    -- Three kinds: a log file on an SSH-reachable host (a native Postfix/Exim install), a Docker
+    -- container's own log output (a dockerized mail stack like Mailcow), or rspamd's own HTTP
+    -- controller API (queried via a "docker exec <container> curl ... /history" call). The first two are
+    -- deliberately not coupled to any one mail server product — the parser only looks for generic
+    -- Postfix-style syslog lines and a generic rspamd-style summary line — but neither can ever
+    -- carry the message subject: Postfix's logs never see message content (envelope/connection
+    -- info only), and rspamd's default per-message log line omits the subject by design (privacy).
+    -- The subject only exists in rspamd's own history, and only when its optional history_redis
+    -- module is active (on by default in Mailcow) — hence the third source type, which is the only
+    -- one that can ever populate mail_events.subject.
     -- cursor is opaque to callers: a byte offset for a file source, or an ISO timestamp (the
-    -- "--since" cutoff for the next docker logs call) for a docker source.
+    -- "--since" cutoff for the next docker logs call) for a docker source; unused for rspamd_api
+    -- (its /history response is small enough to re-fetch whole each poll, deduped like everything
+    -- else via mail_events.dedupe_key).
     CREATE TABLE IF NOT EXISTS mail_log_sources (
       id TEXT PRIMARY KEY,
       host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
-      source_type TEXT NOT NULL CHECK (source_type IN ('file','docker')),
+      source_type TEXT NOT NULL CHECK (source_type IN ('file','docker','rspamd_api')),
       source_path TEXT NOT NULL,
       enabled INTEGER NOT NULL DEFAULT 1,
       cursor TEXT,
       last_error TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      rspamd_port INTEGER,
+      rspamd_password_encrypted TEXT
     );
 
     -- One row per received message the parser could identify. dedupe_key (a hash of the source
@@ -692,6 +701,53 @@ export function migrate(db: Database.Database) {
     // Marks the account created by a completed emergency access request — lets the UI show it a
     // simplified "what do I do now" guide instead of the regular panel chrome assuming familiarity.
     db.exec(`ALTER TABLE users ADD COLUMN is_trusted_contact INTEGER NOT NULL DEFAULT 0`);
+  }
+
+  const mailLogSourceColumns = db.prepare(`PRAGMA table_info(mail_log_sources)`).all() as { name: string }[];
+  if (!mailLogSourceColumns.some((c) => c.name === "rspamd_port")) {
+    db.exec(`ALTER TABLE mail_log_sources ADD COLUMN rspamd_port INTEGER`);
+  }
+  if (!mailLogSourceColumns.some((c) => c.name === "rspamd_password_encrypted")) {
+    db.exec(`ALTER TABLE mail_log_sources ADD COLUMN rspamd_password_encrypted TEXT`);
+  }
+  // The CHECK(source_type IN (...)) above only takes effect on a freshly created table — an
+  // existing install's table object on disk still enforces the old, narrower list and would
+  // reject 'rspamd_api' rows outright. SQLite has no ALTER TABLE for a CHECK constraint, so
+  // widening it means the classic create-copy-drop-rename dance; guarded on sqlite_master's own
+  // stored SQL for the table so it only ever runs once, and a fresh install (already created with
+  // 'rspamd_api' above) never takes this path at all.
+  const mailLogSourceTableSql = (
+    db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'mail_log_sources'`).get() as
+      | { sql: string }
+      | undefined
+  )?.sql;
+  if (mailLogSourceTableSql && !mailLogSourceTableSql.includes("rspamd_api")) {
+    // mail_events.source_id REFERENCES mail_log_sources(id) ON DELETE CASCADE — with FK
+    // enforcement on, DROP TABLE performs an implicit "DELETE FROM" first to fire that cascade,
+    // which would wipe every stored mail_events row as a side effect of this migration. Foreign
+    // keys have to come off for this recreate and back on right after (both required outside any
+    // transaction — SQLite rejects toggling the pragma mid-transaction).
+    db.pragma("foreign_keys = OFF");
+    db.exec(`
+      BEGIN;
+      CREATE TABLE mail_log_sources_new (
+        id TEXT PRIMARY KEY,
+        host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+        source_type TEXT NOT NULL CHECK (source_type IN ('file','docker','rspamd_api')),
+        source_path TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        cursor TEXT,
+        last_error TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        rspamd_port INTEGER,
+        rspamd_password_encrypted TEXT
+      );
+      INSERT INTO mail_log_sources_new SELECT * FROM mail_log_sources;
+      DROP TABLE mail_log_sources;
+      ALTER TABLE mail_log_sources_new RENAME TO mail_log_sources;
+      COMMIT;
+    `);
+    db.pragma("foreign_keys = ON");
   }
 
   // One-time codes for the email-delivered 2FA alternative — deliberately its own table rather

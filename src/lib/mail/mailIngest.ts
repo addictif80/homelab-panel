@@ -2,7 +2,8 @@ import { randomUUID } from "crypto";
 import { getDb } from "../db";
 import { runSshCommand, shellQuote } from "../ssh";
 import { withTimeout } from "../timeout";
-import { parseMailLogBatch } from "./mailLogParser";
+import { vaultEncrypt, vaultDecrypt } from "../crypto";
+import { parseMailLogBatch, parseRspamdHistoryRow, type RspamdHistoryRow } from "./mailLogParser";
 
 const FETCH_TIMEOUT_MS = 15_000;
 // `docker logs --since` is slow in proportion to the *total* accumulated log size, not the size of
@@ -18,25 +19,37 @@ const DOCKER_FETCH_TIMEOUT_MS = 60_000;
 // (or added for the first time against a busy mail server with months of history) would otherwise
 // try to pull the whole thing in one shot. Later lines get read next poll instead; nothing is lost.
 const MAX_FETCH_BYTES = 5_000_000;
+// rspamd's controller keeps a bounded history (200 rows by default in Mailcow's history_redis
+// config) — this just has to be >= that so nothing already in the response is missed. Everything
+// past this cap this poll simply isn't returned by rspamd itself, same "later poll picks it up"
+// gap as the file/docker cursor caps above.
+const RSPAMD_HISTORY_ROWS = 500;
+const RSPAMD_FETCH_TIMEOUT_MS = 15_000;
+
+export type MailSourceType = "file" | "docker" | "rspamd_api";
 
 export type MailLogSource = {
   id: string;
   hostId: number;
-  sourceType: "file" | "docker";
+  sourceType: MailSourceType;
   sourcePath: string;
   enabled: boolean;
   cursor: string | null;
   lastError: string | null;
+  rspamdPort: number | null;
+  hasRspamdPassword: boolean;
 };
 
 type MailLogSourceRow = {
   id: string;
   host_id: number;
-  source_type: "file" | "docker";
+  source_type: MailSourceType;
   source_path: string;
   enabled: number;
   cursor: string | null;
   last_error: string | null;
+  rspamd_port: number | null;
+  rspamd_password_encrypted: string | null;
 };
 
 function rowToSource(row: MailLogSourceRow): MailLogSource {
@@ -48,6 +61,8 @@ function rowToSource(row: MailLogSourceRow): MailLogSource {
     enabled: row.enabled === 1,
     cursor: row.cursor,
     lastError: row.last_error,
+    rspamdPort: row.rspamd_port,
+    hasRspamdPassword: !!row.rspamd_password_encrypted,
   };
 }
 
@@ -57,11 +72,26 @@ export function listMailLogSources(): MailLogSource[] {
   );
 }
 
-export function addMailLogSource(hostId: number, sourceType: "file" | "docker", sourcePath: string): MailLogSource {
+export function addMailLogSource(
+  hostId: number,
+  sourceType: MailSourceType,
+  sourcePath: string,
+  options?: { rspamdPort?: number; rspamdPassword?: string }
+): MailLogSource {
   const id = randomUUID();
   getDb()
-    .prepare(`INSERT INTO mail_log_sources (id, host_id, source_type, source_path) VALUES (?, ?, ?, ?)`)
-    .run(id, hostId, sourceType, sourcePath.trim());
+    .prepare(
+      `INSERT INTO mail_log_sources (id, host_id, source_type, source_path, rspamd_port, rspamd_password_encrypted)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      id,
+      hostId,
+      sourceType,
+      sourcePath.trim(),
+      options?.rspamdPort ?? null,
+      options?.rspamdPassword ? vaultEncrypt(options.rspamdPassword) : null
+    );
   return rowToSource(
     getDb().prepare(`SELECT * FROM mail_log_sources WHERE id = ?`).get(id) as MailLogSourceRow
   );
@@ -161,12 +191,70 @@ async function fetchNewDockerContent(
   return { content: strippedLines.join("\n"), nextCursor: latestTimestamp ?? since };
 }
 
+/**
+ * Calls rspamd's own HTTP controller API (`/history`) for the subject-bearing message history
+ * that neither Postfix's nor rspamd's own log lines can ever carry (see db.ts's comment on
+ * mail_log_sources). Run via `docker exec` into the rspamd container itself rather than a direct
+ * HTTP call from the panel — the controller worker is normally only bound inside the container's
+ * network namespace, and calling it from there also means it's reached via 127.0.0.1, which is
+ * the address rspamd's default `secure_ip` trusts without a password on most installs.
+ */
+async function fetchRspamdHistory(sourceId: string, hostId: number, container: string, port: number): Promise<RspamdHistoryRow[]> {
+  const passwordEncrypted = (
+    getDb().prepare(`SELECT rspamd_password_encrypted FROM mail_log_sources WHERE id = ?`).get(sourceId) as
+      | { rspamd_password_encrypted: string | null }
+      | undefined
+  )?.rspamd_password_encrypted;
+  const password = passwordEncrypted ? vaultDecrypt(passwordEncrypted) : null;
+  const passwordFlag = password ? `-H ${shellQuote(`Password: ${password}`)} ` : "";
+  const url = `http://127.0.0.1:${port}/history?from=0&to=${RSPAMD_HISTORY_ROWS - 1}`;
+  const command = `docker exec ${shellQuote(container)} curl -sS -m 10 ${passwordFlag}${shellQuote(url)}`;
+
+  const { stdout, code, stderr } = await withTimeout(
+    runSshCommand(hostId, command, { sudo: true }),
+    RSPAMD_FETCH_TIMEOUT_MS,
+    "Délai dépassé lors de l'appel à l'API rspamd."
+  );
+  if (code !== 0) {
+    throw new Error(stderr || "Impossible d'appeler l'API rspamd (curl absent du conteneur, ou mauvais port ?).");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    throw new Error("Réponse illisible de l'API rspamd (mot de passe incorrect ?).");
+  }
+  // The Redis-backed history (module history_redis, active by default on Mailcow — the only
+  // shape that ever carries a subject) replies `{rows: [...]}`; rspamd's older in-memory history
+  // (no subject field at all) replies a bare array instead — both are accepted so this source
+  // type still surfaces IP/sender data even without history_redis, it just won't have a subject.
+  const rows = Array.isArray(parsed) ? parsed : (parsed as { rows?: unknown })?.rows;
+  if (!Array.isArray(rows)) {
+    throw new Error("Réponse inattendue de l'API rspamd (champ 'rows' absent).");
+  }
+  return rows as RspamdHistoryRow[];
+}
+
 /** Pulls whatever's new since this source's last poll, parses it, and stores any recognized mail
  * events — best-effort per source, same shape as every other multi-host sweep in this app
  * (blockIpEverywhere, host stats...): one source failing (host unreachable, path deleted) never
  * blocks the others. */
 export async function pollMailLogSource(source: MailLogSource): Promise<number> {
   try {
+    if (source.sourceType === "rspamd_api") {
+      if (!source.rspamdPort) throw new Error("Port de l'API rspamd non configuré.");
+      const rows = await fetchRspamdHistory(source.id, source.hostId, source.sourcePath, source.rspamdPort);
+      const events = rows
+        .map((row) => parseRspamdHistoryRow(source.id, row))
+        .filter((e): e is NonNullable<typeof e> => e !== null);
+      const inserted = storeEvents(source.id, events);
+      // No meaningful cursor here — /history always returns its whole (bounded) window, and
+      // storeEvents' dedupe_key already makes re-inserting the same rows on the next poll a no-op.
+      updateCursor(source.id, "", null);
+      return inserted;
+    }
+
     const { content, nextCursor } =
       source.sourceType === "file"
         ? await fetchNewFileContent(source.hostId, source.sourcePath, source.cursor)

@@ -66,6 +66,39 @@ function parseSyslogTimestamp(ts: string): string {
  * polling cycles won't be joined, which is an accepted gap given how frequently the scheduler
  * polls relative to how quickly Postfix normally logs both lines for the same message.
  */
+export type RspamdHistoryRow = {
+  unix_time?: number;
+  ip?: string;
+  sender_smtp?: string;
+  sender_mime?: string;
+  subject?: string;
+  action?: string;
+  score?: number;
+};
+
+/**
+ * Turns one row of rspamd's own /history API response into an event — the only source that can
+ * ever carry a real subject (see db.ts's comment on mail_log_sources for why the log-line parsers
+ * above never can). `unknown` is what rspamd itself fills a missing field with in this API, same
+ * meaning as this parser's own `null`.
+ */
+export function parseRspamdHistoryRow(sourceId: string, row: RspamdHistoryRow): ParsedMailEvent | null {
+  const clean = (v: string | undefined): string | null => (v && v !== "unknown" ? v : null);
+  const ip = clean(row.ip);
+  const sender = clean(row.sender_smtp) ?? clean(row.sender_mime);
+  const subject = clean(row.subject);
+  if (!ip && !sender) return null;
+
+  const receivedAt = row.unix_time ? new Date(row.unix_time * 1000).toISOString() : new Date().toISOString();
+  return {
+    dedupeKey: dedupeKey([sourceId, "rspamd_api", ip, sender, subject, String(row.unix_time ?? "")]),
+    ip,
+    sender,
+    subject,
+    receivedAt,
+  };
+}
+
 export function parseMailLogBatch(sourceId: string, lines: string[]): ParsedMailEvent[] {
   const events: ParsedMailEvent[] = [];
   const ipByQueueId = new Map<string, string>();
