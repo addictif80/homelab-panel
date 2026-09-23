@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 
 const LiveLogPanel = dynamic(() => import("@/components/LiveLogPanel"), { ssr: false });
+const DirectoryPicker = dynamic(() => import("@/components/DirectoryPicker"), { ssr: false });
 
 type DockerHost = { id: number; name: string };
 type Container = { id: string; name: string; hostId: number };
@@ -37,6 +38,7 @@ export function LogsWidget() {
   const [formLabel, setFormLabel] = useState("");
   const [formCategory, setFormCategory] = useState<LogCategory>("web-access");
   const [error, setError] = useState("");
+  const [browsing, setBrowsing] = useState(false);
 
   const loadSources = useCallback(() => {
     fetch("/api/logs/sources")
@@ -153,12 +155,22 @@ export function LogsWidget() {
           </div>
           <div>
             <label className="mb-1 block text-xs">Fichier dans le conteneur (optionnel — vide = docker logs)</label>
-            <input
-              value={formFilePath}
-              onChange={(e) => setFormFilePath(e.target.value)}
-              placeholder="/data/logs/proxy-host-1_access.log"
-              className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm font-mono"
-            />
+            <div className="flex gap-1.5">
+              <input
+                value={formFilePath}
+                onChange={(e) => setFormFilePath(e.target.value)}
+                placeholder="/data/logs/proxy-host-1_access.log"
+                className="w-full min-w-0 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm font-mono"
+              />
+              <button
+                type="button"
+                onClick={() => setBrowsing(true)}
+                disabled={!formHostId || !formContainerId}
+                className="shrink-0 rounded border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+              >
+                Parcourir
+              </button>
+            </div>
           </div>
           <div>
             <label className="mb-1 block text-xs">Libellé</label>
@@ -174,6 +186,21 @@ export function LogsWidget() {
             Ajouter
           </button>
         </form>
+      )}
+
+      {browsing && formHostId && formContainerId && (
+        <DirectoryPicker
+          hostId={formHostId}
+          containerId={formContainerId}
+          initialPath={formFilePath || "/"}
+          mode="file"
+          title="Choisir le fichier de log dans le conteneur"
+          onSelect={(path) => {
+            setFormFilePath(path);
+            setBrowsing(false);
+          }}
+          onClose={() => setBrowsing(false)}
+        />
       )}
 
       {(["web-access", "web-error", "mail"] as LogCategory[]).map((cat) => {

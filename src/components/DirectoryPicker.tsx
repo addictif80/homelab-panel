@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-type FileEntry = { name: string; type: "file" | "directory" | "symlink" | "other"; size: number; modifiedAt: number };
+type FileEntry = { name: string; type: "file" | "directory" | "symlink" | "other"; size?: number; modifiedAt?: number };
 
 function parentOf(path: string): string {
   const trimmed = path.replace(/\/+$/, "");
@@ -21,6 +21,7 @@ function joinPath(base: string, name: string): string {
  * secondary limitation, worth it for the common case of browsing normal NAS/data volumes. */
 export default function DirectoryPicker({
   hostId,
+  containerId,
   initialPath,
   mode = "directory",
   title,
@@ -28,6 +29,10 @@ export default function DirectoryPicker({
   onClose,
 }: {
   hostId: number;
+  /** Browses *inside* this container's own filesystem (docker exec) instead of the host's, via
+   * /api/docker/[hostId]/containers/[containerId]/files — for a log file that only exists inside
+   * the container, not on a host bind mount the regular SFTP browse could otherwise reach. */
+  containerId?: string;
   initialPath: string;
   /** "file" also lists files (clicking one selects it immediately) — for a log file path,
    * for instance — instead of only navigable directories. */
@@ -67,7 +72,10 @@ export default function DirectoryPicker({
     const controller = new AbortController();
     setLoading(true);
     setError("");
-    fetch(`/api/files/${hostId}?path=${encodeURIComponent(path)}`, { signal: controller.signal })
+    const url = containerId
+      ? `/api/docker/${hostId}/containers/${encodeURIComponent(containerId)}/files?path=${encodeURIComponent(path)}`
+      : `/api/files/${hostId}?path=${encodeURIComponent(path)}`;
+    fetch(url, { signal: controller.signal })
       .then((r) => r.json())
       .then((d) => {
         if (d.error) throw new Error(d.error);
@@ -81,7 +89,7 @@ export default function DirectoryPicker({
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, [hostId, path, mode]);
+  }, [hostId, containerId, path, mode]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">

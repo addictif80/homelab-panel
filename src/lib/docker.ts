@@ -116,6 +116,43 @@ export async function tailContainerFile(
   return stdout;
 }
 
+export type ContainerFileEntry = { name: string; type: "file" | "directory" };
+
+const DIR_MARKER = "__HLP_DIRS__";
+const FILE_MARKER = "__HLP_FILES__";
+
+/** Lists one directory level *inside* a running container's own filesystem — for browsing to a
+ * log file that lives only in the container (not on a host bind mount the SFTP-based file
+ * explorer could otherwise reach). Deliberately avoids `find -printf` (a GNU findutils extension
+ * many minimal images — Alpine/busybox in particular — don't have): `-exec ... basename {} \;` is
+ * plain POSIX find, so this works the same on a Debian-based or an Alpine-based container image. */
+export async function listContainerDirectory(hostId: number, containerId: string, path: string): Promise<ContainerFileEntry[]> {
+  const target = path || "/";
+  const script = [
+    `echo ${DIR_MARKER}`,
+    `find ${shellQuote(target)} -mindepth 1 -maxdepth 1 -type d -exec basename {} \\; 2>/dev/null`,
+    `echo ${FILE_MARKER}`,
+    `find ${shellQuote(target)} -mindepth 1 -maxdepth 1 -type f -exec basename {} \\; 2>/dev/null`,
+  ].join("\n");
+  const { stdout, stderr, code } = await execOnHostClean(
+    hostId,
+    `docker exec ${shellQuote(containerId)} sh -c ${shellQuote(script)}`
+  );
+  if (code !== 0) throw new Error(stderr || "Impossible de parcourir ce dossier dans le conteneur.");
+
+  const dirIdx = stdout.indexOf(DIR_MARKER);
+  const fileIdx = stdout.indexOf(FILE_MARKER);
+  const dirsBlock = dirIdx === -1 ? "" : stdout.slice(dirIdx + DIR_MARKER.length, fileIdx === -1 ? undefined : fileIdx);
+  const filesBlock = fileIdx === -1 ? "" : stdout.slice(fileIdx + FILE_MARKER.length);
+
+  const dirs = dirsBlock.split("\n").map((l) => l.trim()).filter(Boolean).sort();
+  const files = filesBlock.split("\n").map((l) => l.trim()).filter(Boolean).sort();
+  return [
+    ...dirs.map((name) => ({ name, type: "directory" as const })),
+    ...files.map((name) => ({ name, type: "file" as const })),
+  ];
+}
+
 export type ContainerMount = { Type: "bind" | "volume" | string; Name?: string; Source: string; Destination: string };
 
 export type ContainerInspect = {
