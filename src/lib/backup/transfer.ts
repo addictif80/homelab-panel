@@ -99,6 +99,40 @@ export async function rsyncTransfer(opts: {
   const command = `rsync -a --delete --stats ${linkFlag}-e ${shellQuote(sshOpts)} ${shellQuote(sourcePath)} ${shellQuote(`${dest.user}@${dest.address}:${destDirSlash}`)}`;
 
   append(`\n$ copie de ${sourcePath} vers ${dest.user}@${dest.address}:${destDirSlash}\n`);
-  const code = await runSshCommandStreaming(fromHostId, command, append, { sudo: true });
-  if (code !== 0) throw new Error(`Échec du transfert (code ${code}) pour ${sourcePath}.`);
+  // Mirrored locally as well as streamed to the job log, purely so the error thrown below can
+  // pattern-match on it — runSshCommandStreaming only calls `append`, it doesn't return the text.
+  let output = "";
+  const code = await runSshCommandStreaming(
+    fromHostId,
+    command,
+    (chunk) => {
+      output += chunk;
+      append(chunk);
+    },
+    { sudo: true }
+  );
+  if (code !== 0) {
+    // rsync exit code 12 + "connection unexpectedly closed" almost always means the *local* rsync
+    // never got a single protocol byte back — i.e. `ssh ... rsync --server ...` didn't actually
+    // start a real rsync server on the other end, even though ensureRsyncReachable() above just
+    // proved plain command execution over this exact same key/connection works fine. That gap is
+    // the tell: something distinguishes "run any command" from "run rsync --server specifically" —
+    // a `command="..."`-restricted authorized_keys entry, a forced-command/rbash account, or an
+    // account whose shell is locked to something SFTP-only for anything it doesn't recognize. None
+    // of that is visible from rsync's own client-side summary, so spell it out here rather than
+    // leave "code 12" to be re-diagnosed from scratch on every occurrence.
+    if (code === 12 && /unexpectedly closed|error in rsync protocol data stream/i.test(output)) {
+      throw new Error(
+        `Échec du transfert (code ${code}) pour ${sourcePath} : la connexion SSH vers la destination s'est fermée ` +
+          `sans qu'aucune donnée rsync ne soit reçue. rsync est bien accessible sur ce compte (vérifié juste avant), ` +
+          `mais quelque chose empêche précisément \`rsync --server ...\` de démarrer normalement — le plus souvent ` +
+          `une restriction sur la clé (authorized_keys avec un \`command=...\` forcé), un compte limité au SFTP, ou ` +
+          `un shell restreint sur la destination. Pour confirmer, exécute depuis la machine source : ` +
+          `ssh -i <chemin de la clé de sauvegarde> -o IdentitiesOnly=yes -p ${dest.port} ${dest.user}@${dest.address} ` +
+          `"rsync --server -vlogDtprze.iLsfxCIvu . ${destDirSlash}" — si ça se ferme aussi sans rien afficher, ` +
+          `le blocage est confirmé côté compte/destination, pas côté panel.`
+      );
+    }
+    throw new Error(`Échec du transfert (code ${code}) pour ${sourcePath}.`);
+  }
 }
