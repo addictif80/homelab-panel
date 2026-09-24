@@ -56,6 +56,11 @@ export default function JobLog({ jobId, onDone }: { jobId: string; onDone?: (job
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [job?.log]);
 
+  const failureMessage =
+    job?.status === "failed" && job.result && typeof job.result === "object" && "error" in job.result
+      ? String((job.result as { error?: unknown }).error ?? "")
+      : "";
+
   return (
     <div className="space-y-2">
       <p className="text-sm">
@@ -63,6 +68,11 @@ export default function JobLog({ jobId, onDone }: { jobId: string; onDone?: (job
         {job?.status === "success" && <span className="text-emerald-400">{job.label} — terminé avec succès.</span>}
         {job?.status === "failed" && <span className="text-red-400">{job.label} — échec.</span>}
       </p>
+      {failureMessage && (
+        <p className="whitespace-pre-line rounded border border-red-900 bg-red-950/30 px-2 py-1.5 text-xs text-red-300">
+          {failureMessage}
+        </p>
+      )}
       <pre
         ref={logRef}
         className="max-h-64 overflow-y-auto whitespace-pre-wrap rounded border border-neutral-800 bg-neutral-950 p-2 text-[11px] text-neutral-400"

@@ -132,7 +132,9 @@ export default function DatabasesPage() {
       </div>
 
       {error && (
-        <div className="rounded border border-red-900 bg-red-950/30 px-3 py-2 text-sm text-red-300">{error}</div>
+        <div className="whitespace-pre-line rounded border border-red-900 bg-red-950/30 px-3 py-2 text-sm text-red-300">
+          {error}
+        </div>
       )}
 
       {/* Breadcrumb */}
@@ -778,7 +780,7 @@ function TableDetail({
         </button>
       </div>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="whitespace-pre-line text-sm text-red-400">{error}</p>}
 
       {tab === "structure" && (
         <div className="space-y-3">

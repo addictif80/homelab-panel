@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { runSshCommand, shellQuote } from "../ssh";
 import { withTimeout } from "../timeout";
 import { vaultDecrypt } from "../crypto";
-import type { DbConnection } from "./sqlRunner";
+import { explainMysqlError, type DbConnection } from "./sqlRunner";
 
 const DUMP_TIMEOUT_MS = 5 * 60_000;
 
@@ -69,7 +69,7 @@ export async function dumpDatabaseToBase64(conn: DbConnection, database: string)
     DUMP_TIMEOUT_MS,
     "Délai dépassé lors de l'export."
   );
-  if (code !== 0) throw new Error(stderr.trim() || "Échec de l'export de la base.");
+  if (code !== 0) throw new Error(conn.engine === "mysql" ? explainMysqlError(stderr) : stderr.trim() || "Échec de l'export de la base.");
   return { base64: stdout.trim(), filename: `${database}-${new Date().toISOString().slice(0, 10)}.sql.gz` };
 }
 
@@ -107,5 +107,5 @@ export async function restoreDatabaseFromBase64(
     DUMP_TIMEOUT_MS,
     "Délai dépassé lors de la restauration."
   );
-  if (code !== 0) throw new Error(stderr.trim() || "Échec de la restauration.");
+  if (code !== 0) throw new Error(conn.engine === "mysql" ? explainMysqlError(stderr) : stderr.trim() || "Échec de la restauration.");
 }

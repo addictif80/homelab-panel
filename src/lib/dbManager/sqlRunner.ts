@@ -110,6 +110,36 @@ function buildCommandPrefix(conn: DbConnection, password: string, database?: str
     : `PGPASSWORD=${shellQuote(password)} ${args}`;
 }
 
+/**
+ * Rewrites the one MySQL/MariaDB CLI error this panel has seen customers hit repeatedly into
+ * something actionable: an "Access denied ... 'localhost'" refusal, no matter what password was
+ * given, almost always means the account's `'user'@'localhost'` grant row uses the `unix_socket`
+ * (a.k.a. `auth_socket`) plugin — the default the official MariaDB image gives `root` — which never
+ * checks a password at all and rejects one outright if supplied. Forcing TCP client-side (see
+ * --protocol=TCP above) can't fix this: the *server* still matches a loopback connection back to
+ * this same 'localhost' grant row and its socket-only plugin. The real fix has to happen on the
+ * database itself (a dedicated password-auth user, or reconfiguring the account) — this only makes
+ * the bash-error-shaped dead end explain that instead of leaving someone to guess why a correct
+ * password keeps failing.
+ */
+export function explainMysqlError(stderr: string): string {
+  const trimmed = stderr.trim();
+  const match = /Access denied for user '([^']*)'@'localhost'/.exec(trimmed);
+  if (!match) return trimmed || "Échec de la requête.";
+  const [, username] = match;
+  return (
+    `Le compte "${username}" semble n'accepter que les connexions locales par socket ` +
+    `(le plugin unix_socket, souvent la config par défaut de "root" sur l'image officielle MariaDB) ` +
+    `— il refuse tout mot de passe, y compris le bon, d'où ce message même si tes identifiants sont corrects. ` +
+    `Connecte-toi en local sur le conteneur pour créer un compte dédié avec un vrai mot de passe :\n` +
+    `docker exec -it <conteneur> mysql -uroot\n` +
+    `CREATE USER 'panel'@'%' IDENTIFIED BY 'un_mot_de_passe_solide';\n` +
+    `GRANT ALL PRIVILEGES ON *.* TO 'panel'@'%'; FLUSH PRIVILEGES;\n\n` +
+    `Puis utilise ce compte ("panel") dans la connexion du panel plutôt que "${username}".\n\n` +
+    `Erreur d'origine : ${trimmed}`
+  );
+}
+
 export type QueryResult = { columns: string[]; rows: (string | null)[][]; rowCount: number };
 
 const QUERY_TIMEOUT_MS = 30_000;
@@ -134,7 +164,7 @@ export async function runSql(conn: DbConnection, sql: string, database?: string)
     QUERY_TIMEOUT_MS,
     "Délai dépassé lors de l'exécution de la requête."
   );
-  if (code !== 0) throw new Error(stderr.trim() || "Échec de la requête.");
+  if (code !== 0) throw new Error(conn.engine === "mysql" ? explainMysqlError(stderr) : stderr.trim() || "Échec de la requête.");
 
   const lines = stdout.split("\n").filter((l, i, arr) => !(i === arr.length - 1 && l === ""));
   if (lines.length === 0) return { columns: [], rows: [], rowCount: 0 };
