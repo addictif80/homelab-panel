@@ -17,13 +17,20 @@ export type HostStats = {
   error: string | null;
 };
 
-// Plain-text markers, one per line, so parsing in TS stays simple and doesn't need
-// shell-side JSON assembly (which would mean juggling nested quotes over SSH).
+// `df -kP /` alone only sees the root filesystem — badly wrong on a NAS (Synology's `/` is a tiny
+// flash system partition; the real storage lives on `/volume1`) or any machine where the bulk of
+// the disk is a separate mount (a dedicated /data or /home partition, say), both of which reported
+// a near-empty few-GB "total" here despite having terabytes of real storage. This instead sums
+// every real mounted filesystem: `-x` isn't used (BusyBox df, common on NAS/router firmware,
+// doesn't support it), so pseudo-filesystems are filtered by their device name (tmpfs, overlay,
+// udev...) and by mount-point prefix (/proc, /sys, /run, /snap...) instead, staying portable
+// across GNU and BusyBox df alike. Deduped by device (source column) so a bind mount of the same
+// partition at two paths isn't counted twice.
 const STATS_COMMAND = [
   'echo "CORES:$(nproc)"',
   'echo "MEMTOTAL:$(awk \'/MemTotal/{print $2}\' /proc/meminfo)"',
   'echo "MEMAVAIL:$(awk \'/MemAvailable/{print $2}\' /proc/meminfo)"',
-  'echo "DISK:$(df -kP / | tail -1 | awk \'{print $2, $3}\')"',
+  'echo "DISK:$(df -kP 2>/dev/null | awk \'NR>1 && $1 !~ /^(tmpfs|devtmpfs|overlay|shm|udev|none|proc|sysfs|cgroup|cgroup2)$/ && $6 !~ /^\\/(dev|proc|sys|run|snap|boot\\/efi)($|\\/)/ && !seen[$1]++ {t+=$2; u+=$3} END {print t+0, u+0}\')"',
   'echo "CPULINE:$(top -bn1 | grep -i \'Cpu(s)\')"',
 ].join("; ");
 
