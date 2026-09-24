@@ -55,6 +55,15 @@ export function getDbConnection(id: string): DbConnection {
  * that happens to read "NULL" is indistinguishable) rather than something worth a native driver for. */
 const PG_NULL_MARKER = "¤HLP_NULL¤";
 
+/** Recent MariaDB packaging (and its official Docker images from 10.11/11.x on) dropped the
+ * `mysql` compatibility symlink some distros used to ship alongside `mariadb` — a host or
+ * container with only the MariaDB client actually installed then has no `mysql` binary at all,
+ * which previously surfaced as a bare "mysql: command not found" instead of a usable connection
+ * test. Tries both names at the point of use rather than assuming one. */
+const MYSQL_BIN_DETECT =
+  'BIN=$(command -v mysql 2>/dev/null || command -v mariadb 2>/dev/null); ' +
+  '[ -n "$BIN" ] || { echo "Client mysql/mariadb introuvable — installe-le avec : apt-get install -y mariadb-client (ou mysql-client)." >&2; exit 127; }';
+
 /** Wraps the mysql/psql CLI invocation for a connection, through `docker exec` first when the
  * database runs in a container rather than natively on the host. The password never appears as a
  * CLI argument (visible to any other user on the box via `ps`) — it's exported as an env var
@@ -62,7 +71,6 @@ const PG_NULL_MARKER = "¤HLP_NULL¤";
 function buildCommandPrefix(conn: DbConnection, password: string, database?: string): string {
   if (conn.engine === "mysql") {
     const args = [
-      "mysql",
       `-h ${shellQuote(conn.dbHost)}`,
       `-P ${conn.dbPort}`,
       `-u ${shellQuote(conn.username)}`,
@@ -71,9 +79,11 @@ function buildCommandPrefix(conn: DbConnection, password: string, database?: str
     ]
       .filter(Boolean)
       .join(" ");
-    return conn.containerId
-      ? `docker exec -e MYSQL_PWD=${shellQuote(password)} -i ${shellQuote(conn.containerId)} ${args}`
-      : `MYSQL_PWD=${shellQuote(password)} ${args}`;
+    if (conn.containerId) {
+      const script = `${MYSQL_BIN_DETECT}; exec "$BIN" ${args}`;
+      return `docker exec -e MYSQL_PWD=${shellQuote(password)} -i ${shellQuote(conn.containerId)} sh -c ${shellQuote(script)}`;
+    }
+    return `${MYSQL_BIN_DETECT}; MYSQL_PWD=${shellQuote(password)} "$BIN" ${args}`;
   }
 
   const args = [

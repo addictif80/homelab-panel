@@ -6,12 +6,28 @@ import type { DbConnection } from "./sqlRunner";
 
 const DUMP_TIMEOUT_MS = 5 * 60_000;
 
+// Same reasoning as sqlRunner.ts's MYSQL_BIN_DETECT: recent MariaDB packaging/images can lack the
+// `mysql`/`mysqldump` compatibility names entirely, only shipping `mariadb`/`mariadb-dump`.
+function binDetect(candidates: [string, string], notFoundMessage: string): string {
+  return (
+    `BIN=$(command -v ${candidates[0]} 2>/dev/null || command -v ${candidates[1]} 2>/dev/null); ` +
+    `[ -n "$BIN" ] || { echo ${shellQuote(notFoundMessage)} >&2; exit 127; }`
+  );
+}
+
 function dumpCommand(conn: DbConnection, password: string, database: string): string {
   if (conn.engine === "mysql") {
-    const cmd = `mysqldump -h ${shellQuote(conn.dbHost)} -P ${conn.dbPort} -u ${shellQuote(conn.username)} ${shellQuote(database)}`;
-    return conn.containerId
-      ? `docker exec -e MYSQL_PWD=${shellQuote(password)} ${shellQuote(conn.containerId)} ${cmd}`
-      : `MYSQL_PWD=${shellQuote(password)} ${cmd}`;
+    const args = `-h ${shellQuote(conn.dbHost)} -P ${conn.dbPort} -u ${shellQuote(conn.username)} ${shellQuote(database)}`;
+    const detect = binDetect(["mysqldump", "mariadb-dump"], "Client mysqldump/mariadb-dump introuvable — installe mariadb-client.");
+    if (conn.containerId) {
+      const script = `${detect}; exec "$BIN" ${args}`;
+      return `docker exec -e MYSQL_PWD=${shellQuote(password)} ${shellQuote(conn.containerId)} sh -c ${shellQuote(script)}`;
+    }
+    // Parenthesized into a subshell group so this is safe to use as one stage of a pipe on
+    // either side (`( A; B; C ) | next` or `prev | ( A; B; C )`) — without the parens, `;`
+    // sequencing and `|` piping only bind to the single statement adjacent to the pipe operator,
+    // silently dropping the detection step or the piped data depending on which side this lands on.
+    return `(${detect}; MYSQL_PWD=${shellQuote(password)} "$BIN" ${args})`;
   }
   const cmd = `pg_dump -h ${shellQuote(conn.dbHost)} -p ${conn.dbPort} -U ${shellQuote(conn.username)} -d ${shellQuote(database)}`;
   return conn.containerId
@@ -21,10 +37,13 @@ function dumpCommand(conn: DbConnection, password: string, database: string): st
 
 function restoreCommand(conn: DbConnection, password: string, database: string): string {
   if (conn.engine === "mysql") {
-    const cmd = `mysql -h ${shellQuote(conn.dbHost)} -P ${conn.dbPort} -u ${shellQuote(conn.username)} ${shellQuote(database)}`;
-    return conn.containerId
-      ? `docker exec -i -e MYSQL_PWD=${shellQuote(password)} ${shellQuote(conn.containerId)} ${cmd}`
-      : `MYSQL_PWD=${shellQuote(password)} ${cmd}`;
+    const args = `-h ${shellQuote(conn.dbHost)} -P ${conn.dbPort} -u ${shellQuote(conn.username)} ${shellQuote(database)}`;
+    const detect = binDetect(["mysql", "mariadb"], "Client mysql/mariadb introuvable — installe mariadb-client.");
+    if (conn.containerId) {
+      const script = `${detect}; exec "$BIN" ${args}`;
+      return `docker exec -i -e MYSQL_PWD=${shellQuote(password)} ${shellQuote(conn.containerId)} sh -c ${shellQuote(script)}`;
+    }
+    return `(${detect}; MYSQL_PWD=${shellQuote(password)} "$BIN" ${args})`;
   }
   const cmd = `psql -h ${shellQuote(conn.dbHost)} -p ${conn.dbPort} -U ${shellQuote(conn.username)} -d ${shellQuote(database)}`;
   return conn.containerId
