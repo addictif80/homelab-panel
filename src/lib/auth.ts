@@ -1,4 +1,4 @@
-import { SignJWT, jwtVerify } from "jose";
+import { SignJWT, jwtVerify, decodeJwt } from "jose";
 import bcrypt from "bcryptjs";
 import type { NextRequest } from "next/server";
 import { getDb, getSetting, setSetting } from "./db";
@@ -52,6 +52,22 @@ export async function createSessionToken(username: string): Promise<string> {
     .setIssuedAt()
     .setExpirationTime(`${SESSION_TTL_SECONDS}s`)
     .sign(getSessionSecret());
+}
+
+/**
+ * Cheap, unverified read of a token's own `iat`/`exp` claims — used only to decide whether the
+ * sliding session in proxy.ts is due for a refresh, right after verifySessionToken has already
+ * cryptographically verified this exact same token, so re-parsing it without checking the
+ * signature again here doesn't skip any real check. Kept separate from verifySessionToken (rather
+ * than having it return this too) so its signature — and its many call sites — stay untouched.
+ */
+export function getSessionTokenAge(token: string): { iat: number; exp: number } | null {
+  try {
+    const { iat, exp } = decodeJwt(token);
+    return typeof iat === "number" && typeof exp === "number" ? { iat, exp } : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function verifySessionToken(token: string): Promise<string | null> {

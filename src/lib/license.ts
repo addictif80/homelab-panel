@@ -189,7 +189,27 @@ export type LicenseStatus = {
   validUntil?: string | null;
 };
 
+// getLicenseStatus() is on the hot path of every non-GET API request (see proxy.ts's
+// isMutationBlocked() gate) — including, in the SSH terminal's no-websocket polling fallback,
+// every single keystroke's own HTTP round trip. Once activated it re-parses the certificate's PEM
+// public key and runs an Ed25519 signature verification on every call, which is cheap once but
+// adds up to real, felt typing lag when it runs per keystroke on modest homelab hardware. A short
+// TTL cache keeps that work off the hot path; a license state change (activation, trial running
+// out) becomes visible within this window, which is imperceptible for anything that isn't a
+// keystroke.
+const LICENSE_STATUS_CACHE_MS = 2000;
+let licenseStatusCache: { value: LicenseStatus; expiresAt: number } | null = null;
+
 export function getLicenseStatus(): LicenseStatus {
+  if (licenseStatusCache && licenseStatusCache.expiresAt > Date.now()) {
+    return licenseStatusCache.value;
+  }
+  const value = computeLicenseStatus();
+  licenseStatusCache = { value, expiresAt: Date.now() + LICENSE_STATUS_CACHE_MS };
+  return value;
+}
+
+function computeLicenseStatus(): LicenseStatus {
   if (isSellerInstance()) {
     return { activated: true, isSellerInstance: true, trialDays: 0, daysRemaining: Infinity, expired: false };
   }
@@ -272,6 +292,7 @@ export async function activateWithKey(key: string): Promise<{ ok: true } | { ok:
       `UPDATE license SET status = 'activated', activation_key = ?, activated_at = datetime('now'), certificate_json = ? WHERE id = 1`
     )
     .run(trimmed, JSON.stringify(data.certificate));
+  licenseStatusCache = null;
   return { ok: true };
 }
 
@@ -310,6 +331,7 @@ export async function refreshLicenseCertificate(): Promise<void> {
     const data = (await res.json()) as { valid?: boolean; revoked?: boolean; certificate?: Certificate };
     if (res.ok && data.valid && data.certificate) {
       getDb().prepare(`UPDATE license SET certificate_json = ? WHERE id = 1`).run(JSON.stringify(data.certificate));
+      licenseStatusCache = null;
     } else if (data.revoked) {
       // This exact key was revoked — by definition not by this install if it's still the one
       // holding the now-superseded key (the legitimate owner's revoke flow already swapped its
@@ -319,6 +341,7 @@ export async function refreshLicenseCertificate(): Promise<void> {
       getDb()
         .prepare(`UPDATE license SET status = 'trial', activation_key = NULL, activated_at = NULL, certificate_json = NULL WHERE id = 1`)
         .run();
+      licenseStatusCache = null;
     }
   } catch {
     // See doc comment — intentionally silent.
@@ -358,6 +381,7 @@ export async function revokeAndReplaceLicense(): Promise<{ ok: true; newKey: str
         `UPDATE license SET activation_key = ?, activated_at = datetime('now'), certificate_json = ? WHERE id = 1`
       )
       .run(data.newKey, JSON.stringify(data.certificate));
+    licenseStatusCache = null;
     return { ok: true, newKey: data.newKey };
   } catch {
     return { ok: false, error: "Impossible de contacter le serveur de licence — vérifie la connexion Internet." };
@@ -397,6 +421,7 @@ export async function syncTrialStart(): Promise<void> {
     if (Number.isFinite(serverMs) && serverMs < localMs) {
       const sqliteDatetime = new Date(serverMs).toISOString().slice(0, 19).replace("T", " ");
       getDb().prepare(`UPDATE license SET trial_started_at = ? WHERE id = 1`).run(sqliteDatetime);
+      licenseStatusCache = null;
     }
   } catch {
     // Best-effort — see doc comment.

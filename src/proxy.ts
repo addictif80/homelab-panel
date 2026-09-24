@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifySessionToken, createSessionToken, getUserRole, isUserLocked, SESSION_COOKIE_NAME, SESSION_MAX_AGE } from "@/lib/auth";
+import {
+  verifySessionToken,
+  createSessionToken,
+  getSessionTokenAge,
+  getUserRole,
+  isUserLocked,
+  SESSION_COOKIE_NAME,
+  SESSION_MAX_AGE,
+} from "@/lib/auth";
 import { isMutationBlocked } from "@/lib/license";
 import { isDemoContext } from "@/lib/demo/context";
 
@@ -112,20 +120,27 @@ export async function proxy(req: NextRequest) {
   const res = NextResponse.next();
   res.headers.set("x-panel-user", username);
 
-  // Sliding session: every authenticated request pushes the expiry back out, so someone actively
-  // using the panel is never logged out mid-session — only real inactivity for the full TTL ends
-  // it. Re-signing on every request is cheap (HS256, no DB hit) and avoids a stale cookie being
-  // the difference between "still logged in" and a confusing failure somewhere else (e.g. the SSH
-  // terminal's websocket upgrade, which checks this same cookie directly and has no login redirect
-  // of its own).
-  const freshToken = await createSessionToken(username);
-  res.cookies.set(SESSION_COOKIE_NAME, freshToken, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    maxAge: SESSION_MAX_AGE,
-    path: "/",
-  });
+  // Sliding session: re-signs the cookie so someone actively using the panel is never logged out
+  // mid-session — only real inactivity for the full TTL ends it. Re-signing (and the Set-Cookie
+  // this forces on every response) is only actually needed once the token is meaningfully closer
+  // to expiry than to fresh — doing it on literally every request adds a JWT sign plus a DB read
+  // for the session epoch to the hot path of every mutation, and the SSH terminal's no-websocket
+  // polling fallback turns every single keystroke into its own request through this same
+  // middleware, where that used to be felt as typing lag. Refreshing at the halfway point still
+  // keeps a continuously active session alive indefinitely, well before the still-valid old token
+  // could expire.
+  const age = getSessionTokenAge(token!);
+  const needsRefresh = !age || age.exp - Math.floor(Date.now() / 1000) < (age.exp - age.iat) / 2;
+  if (needsRefresh) {
+    const freshToken = await createSessionToken(username);
+    res.cookies.set(SESSION_COOKIE_NAME, freshToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      maxAge: SESSION_MAX_AGE,
+      path: "/",
+    });
+  }
 
   return res;
 }
