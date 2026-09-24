@@ -673,6 +673,15 @@ export function migrate(db: Database.Database) {
       layout TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- Accès rapide widget shortcuts — one per user, never shared. items is a JSON array of
+    -- {label, href, color}. NULL/no row means "never customized" — the client falls back to
+    -- DEFAULT_QUICK_ACCESS_ITEMS (lib/quickAccessCatalog.ts).
+    CREATE TABLE IF NOT EXISTS user_quick_access (
+      username TEXT PRIMARY KEY,
+      items TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Trial clock starts the instant the database is first created — not on some later "first

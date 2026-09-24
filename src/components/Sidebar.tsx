@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import ThemeToggle from "./ThemeToggle";
 
-type IconName =
+export type IconName =
   | "grid"
   | "pulse"
   | "server-rack"
@@ -44,7 +44,10 @@ type IconName =
   | "jobs"
   | "browser";
 
-const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon: IconName }[] }[] = [
+// Exported so the "Accès rapide" dashboard widget can offer the same set of destinations in its
+// shortcut picker, rather than hand-maintaining a second list that inevitably drifts out of sync
+// with the nav (a page added here but forgotten there, or vice versa).
+export const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon: IconName }[] }[] = [
   {
     label: "",
     items: [
@@ -128,7 +131,7 @@ function navSectionsFor(isDemo: boolean, isTrustedContact: boolean) {
   return isTrustedContact ? [HELP_SECTION, ...sections] : sections;
 }
 
-function NavIcon({ name }: { name: IconName }) {
+export function NavIcon({ name }: { name: IconName }) {
   const common = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none" } as const;
   switch (name) {
     case "grid":
