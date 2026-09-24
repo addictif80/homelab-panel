@@ -17,6 +17,8 @@ export type Replication = {
   dbUser: string | null;
   hasDbPassword: boolean;
   replUser: string | null;
+  proxyHostId: number | null;
+  targetPort: number | null;
   enabled: boolean;
   status: ReplicationStatus;
   statusDetail: string | null;
@@ -46,6 +48,8 @@ type ReplicationRow = {
   db_password_encrypted: string | null;
   repl_user: string | null;
   repl_password_encrypted: string | null;
+  proxy_host_id: number | null;
+  target_port: number | null;
   enabled: number;
   status: ReplicationStatus;
   status_detail: string | null;
@@ -67,6 +71,8 @@ function rowToReplication(row: ReplicationRow): Replication {
     dbUser: row.db_user,
     hasDbPassword: !!row.db_password_encrypted,
     replUser: row.repl_user,
+    proxyHostId: row.proxy_host_id,
+    targetPort: row.target_port,
     enabled: row.enabled === 1,
     status: row.status,
     statusDetail: row.status_detail,
@@ -108,14 +114,20 @@ export type CreateReplicationInput = {
   dbPort?: number;
   dbUser?: string;
   dbPassword?: string;
+  /** NPM proxy host (lib/npm.ts) this replication backs — when set, a successful setup run wires
+   * the target host straight into that proxy host's failover config automatically. */
+  proxyHostId?: number;
+  /** Port the app listens on at the target, if different from the proxy host's own forward port
+   * (the common case — same app, same port — needs nothing here). */
+  targetPort?: number;
 };
 
 export function createReplication(input: CreateReplicationInput): Replication {
   const id = randomUUID();
   getDb()
     .prepare(
-      `INSERT INTO ha_replications (id, name, kind, source_host_id, target_host_id, source_path, target_path, db_port, db_user, db_password_encrypted)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO ha_replications (id, name, kind, source_host_id, target_host_id, source_path, target_path, db_port, db_user, db_password_encrypted, proxy_host_id, target_port)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -127,7 +139,9 @@ export function createReplication(input: CreateReplicationInput): Replication {
       input.targetPath.trim(),
       input.dbPort ?? null,
       input.dbUser?.trim() || null,
-      input.dbPassword ? vaultEncrypt(input.dbPassword) : null
+      input.dbPassword ? vaultEncrypt(input.dbPassword) : null,
+      input.proxyHostId ?? null,
+      input.targetPort ?? null
     );
   return getReplication(id)!;
 }
@@ -138,6 +152,12 @@ export function deleteReplication(id: string): void {
 
 export function setReplicationEnabled(id: string, enabled: boolean): void {
   getDb().prepare(`UPDATE ha_replications SET enabled = ? WHERE id = ?`).run(enabled ? 1 : 0, id);
+}
+
+export function setReplicationFailoverLink(id: string, proxyHostId: number | null, targetPort: number | null): void {
+  getDb()
+    .prepare(`UPDATE ha_replications SET proxy_host_id = ?, target_port = ? WHERE id = ?`)
+    .run(proxyHostId, targetPort, id);
 }
 
 /** A short, random, narrowly-scoped credential this panel generates itself for the dedicated

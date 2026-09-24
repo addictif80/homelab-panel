@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 type Host = { id: number; name: string };
+type ProxyHost = { id: number; domainNames: string[]; forwardPort: number };
 type Kind = "folder" | "mysql" | "postgres" | "sqlite";
 type Replication = {
   id: string;
@@ -14,6 +15,8 @@ type Replication = {
   targetPath: string;
   dbPort: number | null;
   dbUser: string | null;
+  proxyHostId: number | null;
+  targetPort: number | null;
   enabled: boolean;
   status: "unknown" | "setting_up" | "in_sync" | "lagging" | "error" | "stopped";
   statusDetail: string | null;
@@ -56,10 +59,13 @@ const EMPTY_FORM = {
   dbPort: "",
   dbUser: "",
   dbPassword: "",
+  proxyHostId: "" as number | "",
+  targetPort: "",
 };
 
 export default function HaPage() {
   const [hosts, setHosts] = useState<Host[]>([]);
+  const [proxyHosts, setProxyHosts] = useState<ProxyHost[]>([]);
   const [replications, setReplications] = useState<Replication[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -69,11 +75,19 @@ export default function HaPage() {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [hostsRes, replRes] = await Promise.all([fetch("/api/hosts"), fetch("/api/ha/replications")]);
+    const [hostsRes, replRes, proxyRes] = await Promise.all([
+      fetch("/api/hosts"),
+      fetch("/api/ha/replications"),
+      fetch("/api/npm/hosts").catch(() => null),
+    ]);
     const hostsData = await hostsRes.json();
     const replData = await replRes.json();
     setHosts(hostsData.hosts ?? hostsData ?? []);
     setReplications(replData.replications ?? []);
+    if (proxyRes?.ok) {
+      const proxyData = await proxyRes.json();
+      setProxyHosts(proxyData.hosts ?? []);
+    }
   }, []);
 
   useEffect(() => {
@@ -92,6 +106,12 @@ export default function HaPage() {
     return hosts.find((h) => h.id === id)?.name ?? `#${id}`;
   }
 
+  function proxyHostLabel(id: number | null) {
+    if (!id) return null;
+    const p = proxyHosts.find((h) => h.id === id);
+    return p ? p.domainNames.join(", ") : `#${id}`;
+  }
+
   const isDbKind = form.kind === "mysql" || form.kind === "postgres";
 
   async function createReplication(e: React.FormEvent) {
@@ -107,6 +127,8 @@ export default function HaPage() {
           sourceHostId: form.sourceHostId || undefined,
           targetHostId: form.targetHostId || undefined,
           dbPort: form.dbPort ? Number(form.dbPort) : undefined,
+          proxyHostId: form.proxyHostId || undefined,
+          targetPort: form.targetPort ? Number(form.targetPort) : undefined,
         }),
       });
       const data = await res.json();
@@ -155,6 +177,21 @@ export default function HaPage() {
     }
   }
 
+  async function rewireFailover(id: string) {
+    setBusyId(id);
+    setError("");
+    try {
+      const res = await fetch(`/api/ha/replications/${id}/wire-failover`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function toggleEnabled(r: Replication) {
     await fetch(`/api/ha/replications/${r.id}`, {
       method: "PATCH",
@@ -178,11 +215,12 @@ export default function HaPage() {
           <h1 className="text-2xl font-semibold text-neutral-100">Haute disponibilité</h1>
           <p className="mt-1 max-w-3xl text-sm text-neutral-400">
             Réplique en continu un dossier ou une base de données d&apos;une machine source vers une machine cible.
-            Une fois configurée, branche la machine cible comme serveur de secours dans le{" "}
+            Associe une redirection NPM à la création pour que la bascule vers la machine cible (via son adresse
+            Tailscale) se branche automatiquement dans le{" "}
             <a href="/proxy" className="text-blue-400 hover:underline">
               failover du reverse proxy
             </a>{" "}
-            (accessible via Tailscale) pour que la bascule soit automatique si la source devient injoignable.
+            dès que la configuration réussit — plus besoin de le faire à la main.
           </p>
         </div>
         <button
@@ -325,6 +363,43 @@ export default function HaPage() {
               )}
             </div>
           )}
+
+          <div className="space-y-2 rounded border border-neutral-800 p-3">
+            <p className="text-xs text-neutral-500">
+              Optionnel — associe cette réplication à une redirection du reverse proxy : une fois configurée avec
+              succès, la machine cible est automatiquement branchée comme serveur de secours dans le failover NPM déjà
+              existant pour cette redirection (bascule automatique si la source tombe).
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs text-neutral-400">Redirection NPM à protéger</label>
+                <select
+                  value={form.proxyHostId}
+                  onChange={(e) => setForm({ ...form, proxyHostId: e.target.value ? Number(e.target.value) : "" })}
+                  className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                >
+                  <option value="">Aucune</option>
+                  {proxyHosts.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.domainNames.join(", ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-neutral-400">Port sur la machine cible (si différent)</label>
+                <input
+                  value={form.targetPort}
+                  onChange={(e) => setForm({ ...form, targetPort: e.target.value })}
+                  placeholder="identique à la redirection"
+                  inputMode="numeric"
+                  disabled={!form.proxyHostId}
+                  className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600 disabled:opacity-50"
+                />
+              </div>
+            </div>
+          </div>
+
           <button
             type="submit"
             disabled={saving}
@@ -347,6 +422,12 @@ export default function HaPage() {
                   {hostName(r.sourceHostId)} → {hostName(r.targetHostId)} · <span className="font-mono">{r.sourcePath}</span> →{" "}
                   <span className="font-mono">{r.targetPath}</span>
                 </p>
+                {r.proxyHostId && (
+                  <p className="mt-0.5 text-xs text-neutral-600">
+                    Failover NPM : <span className="text-neutral-400">{proxyHostLabel(r.proxyHostId)}</span>
+                    {r.targetPort ? ` (port ${r.targetPort})` : ""}
+                  </p>
+                )}
               </div>
               <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${STATUS_STYLES[r.status]}`}>{STATUS_LABELS[r.status]}</span>
             </div>
@@ -395,6 +476,15 @@ export default function HaPage() {
               >
                 {r.kind === "sqlite" ? "Synchroniser maintenant" : "Vérifier maintenant"}
               </button>
+              {r.proxyHostId && (
+                <button
+                  onClick={() => rewireFailover(r.id)}
+                  disabled={busyId === r.id}
+                  className="rounded border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+                >
+                  Rebrancher le failover
+                </button>
+              )}
               <label className="flex items-center gap-1.5 text-xs text-neutral-400">
                 <input type="checkbox" checked={r.enabled} onChange={() => toggleEnabled(r)} />
                 Actif

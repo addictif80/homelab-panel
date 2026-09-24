@@ -833,6 +833,14 @@ export function migrate(db: Database.Database) {
     -- replication role and take the initial consistent copy. repl_user/repl_password_encrypted are
     -- that dedicated, narrower-scoped role this panel generates and configures on both engines,
     -- which is what actually carries the ongoing replication stream afterwards.
+    -- proxy_host_id, when set, is an NPM proxy host id (lib/npm.ts) this replication is the backing
+    -- data for — once a setup run finishes successfully, its own target host address (Tailscale
+    -- preferred, since B is deliberately not exposed publicly) is pushed straight into that proxy
+    -- host's existing failover config (lib/npmFailover.ts) as the backup server, on target_port
+    -- (defaulting to the proxy host's own forward port when left null, for the common case where
+    -- the same app listens on the same port on both machines) — closing the loop the user asked
+    -- for between "replication is healthy" and "failover actually points at it" without a manual
+    -- trip through the reverse-proxy page for every replication.
     CREATE TABLE IF NOT EXISTS ha_replications (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -846,6 +854,8 @@ export function migrate(db: Database.Database) {
       db_password_encrypted TEXT,
       repl_user TEXT,
       repl_password_encrypted TEXT,
+      proxy_host_id INTEGER,
+      target_port INTEGER,
       enabled INTEGER NOT NULL DEFAULT 1,
       status TEXT NOT NULL DEFAULT 'unknown' CHECK (status IN ('unknown','setting_up','in_sync','lagging','error','stopped')),
       status_detail TEXT,
@@ -854,6 +864,14 @@ export function migrate(db: Database.Database) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  const haReplicationColumns = db.prepare(`PRAGMA table_info(ha_replications)`).all() as { name: string }[];
+  if (!haReplicationColumns.some((c) => c.name === "proxy_host_id")) {
+    db.exec(`ALTER TABLE ha_replications ADD COLUMN proxy_host_id INTEGER`);
+  }
+  if (!haReplicationColumns.some((c) => c.name === "target_port")) {
+    db.exec(`ALTER TABLE ha_replications ADD COLUMN target_port INTEGER`);
+  }
 
   const hostColumns = db.prepare(`PRAGMA table_info(hosts)`).all() as { name: string }[];
   if (!hostColumns.some((c) => c.name === "needs_sudo")) {

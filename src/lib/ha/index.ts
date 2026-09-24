@@ -9,8 +9,10 @@ import { setupFolderReplication, checkFolderReplicationStatus, teardownFolderRep
 import { setupSqliteReplication, runSqliteSync } from "./sqliteReplication";
 import { setupMysqlReplication, checkMysqlReplicationStatus } from "./mysqlReplication";
 import { setupPostgresReplication, checkPostgresReplicationStatus } from "./postgresReplication";
+import { wireFailoverForReplication } from "./failoverWiring";
 
 export * from "./replication";
+export { wireFailoverForReplication } from "./failoverWiring";
 
 /** Only 'postgres' setup is destructive to the target today (it wipes and rebuilds the target's
  * data directory from scratch — see postgresReplication.ts's own doc comment for why that's
@@ -31,6 +33,26 @@ export async function runReplicationSetup(id: string): Promise<void> {
   } catch (err) {
     updateReplicationStatus(id, "error", err instanceof Error ? err.message : "Erreur inconnue lors de la configuration.");
     throw err;
+  }
+
+  // The replication itself succeeded (its own status is already "in_sync") — wiring the failover
+  // is a best-effort extra step on top, not something that should undo or mask that success if it
+  // fails (a misconfigured NPM host shouldn't make a healthy replication look broken).
+  if (r.proxyHostId) {
+    try {
+      await wireFailoverForReplication(r);
+      const after = getReplication(id);
+      updateReplicationStatus(id, "in_sync", `${after?.statusDetail ?? ""} Failover NPM branché sur la machine cible.`.trim());
+    } catch (err) {
+      const after = getReplication(id);
+      updateReplicationStatus(
+        id,
+        "in_sync",
+        `${after?.statusDetail ?? ""} ⚠ Échec du branchement automatique du failover : ${
+          err instanceof Error ? err.message : "erreur inconnue"
+        }`.trim()
+      );
+    }
   }
 }
 

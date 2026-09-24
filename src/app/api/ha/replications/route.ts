@@ -17,6 +17,8 @@ export async function POST(req: NextRequest) {
     dbPort?: number;
     dbUser?: string;
     dbPassword?: string;
+    proxyHostId?: number;
+    targetPort?: number;
   };
 
   if (!body.name?.trim() || !body.kind || !body.sourceHostId || !body.targetHostId || !body.sourcePath?.trim() || !body.targetPath?.trim()) {
@@ -45,6 +47,8 @@ export async function POST(req: NextRequest) {
     dbPort: body.dbPort,
     dbUser: body.dbUser,
     dbPassword: body.dbPassword,
+    proxyHostId: body.proxyHostId,
+    targetPort: body.targetPort,
   });
   logAudit("ha.replication_created", replication.id, `${body.kind} ${body.sourceHostId}->${body.targetHostId}`);
   return NextResponse.json({ replication });
