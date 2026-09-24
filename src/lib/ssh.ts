@@ -33,6 +33,12 @@ export function resolveHostAddress(host: HostRow): string | null {
   return host.tailscale_ip || host.lan_ip || host.public_ip || null;
 }
 
+/** Every address configured for a host, in the same preference order as resolveHostAddress, but
+ * kept as a list instead of collapsing to just the first one — see connectSsh below for why. */
+function candidateAddresses(host: HostRow): string[] {
+  return Array.from(new Set([host.tailscale_ip, host.lan_ip, host.public_ip].filter((a): a is string => !!a)));
+}
+
 export type HostConnectionInfo = { address: string; port: number; user: string };
 
 /** Address/port/user for a host, for building remote targets (e.g. `user@host` for rsync)
@@ -45,13 +51,16 @@ export function getHostConnectionInfo(hostId: number): HostConnectionInfo {
   return { address, port: host.ssh_port || 22, user: host.ssh_user || "root" };
 }
 
-/** Builds an ssh2 ConnectConfig for a host, using its most recent SSH credential from the vault. */
-export function buildSshConfig(hostId: number): ConnectConfig {
+/** Builds an ssh2 ConnectConfig for a host, using its most recent SSH credential from the vault.
+ * `addressOverride` lets connectSsh below try each of a host's configured addresses in turn while
+ * reusing the exact same credential-resolution logic — callers that just want "the" address as
+ * before (resolveHostAddress's own preference order) can leave it out. */
+export function buildSshConfig(hostId: number, addressOverride?: string): ConnectConfig {
   const db = getDb();
   const host = db.prepare(`SELECT * FROM hosts WHERE id = ?`).get(hostId) as HostRow | undefined;
   if (!host) throw new Error("Machine introuvable.");
 
-  const address = resolveHostAddress(host);
+  const address = addressOverride ?? resolveHostAddress(host);
   if (!address) throw new Error("Aucune adresse IP renseignée pour cette machine.");
 
   const cred = db
@@ -161,6 +170,52 @@ export function buildPrivilegedCommand(
   };
 }
 
+/** Matches ssh2's own wording for a handful of transient failures — a brand new connection
+ * attempt refused or dropped before the handshake even completes, typically a NAS-grade sshd
+ * (ZimaOS's very lightweight one in particular) momentarily out of free connection slots. Shared
+ * by connectSsh's own address fallback below and by callers (lib/sftp.ts, lib/sshChannel.ts) that
+ * layer their own retry-with-backoff on top of it for user-initiated actions. */
+export function isTransientHandshakeError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /connection lost before handshake|econnreset|timed out while waiting for handshake/i.test(message);
+}
+
+function connectToAddress(hostId: number, address: string): Promise<SshClient> {
+  const config = buildSshConfig(hostId, address);
+  const conn = new SshClient();
+  return new Promise<SshClient>((resolve, reject) => {
+    conn.once("ready", () => resolve(conn));
+    conn.once("error", reject);
+    conn.connect(config);
+  });
+}
+
+/**
+ * Establishes a ready SSH connection to a host, falling back through every address configured for
+ * it (Tailscale, then LAN, then public) instead of committing to just the one resolveHostAddress
+ * happens to prefer. Before this, a host whose Tailscale link was down but still reachable on the
+ * LAN (or vice versa) failed outright on every single feature that talks to it — Docker actions,
+ * updates, backups, log streaming, the terminal, the file explorer — with "Timed out while waiting
+ * for handshake", since nothing ever tried the other addresses on file for that host. This is the
+ * one place that decision is made now; every caller below (and lib/sftp.ts, lib/sshChannel.ts,
+ * lib/updates.ts, server/logs-ws.ts) goes through it instead of calling `new SshClient()` itself.
+ */
+export async function connectSsh(hostId: number): Promise<SshClient> {
+  const host = getHostRow(hostId);
+  const addresses = candidateAddresses(host);
+  if (addresses.length === 0) throw new Error("Aucune adresse IP renseignée pour cette machine.");
+
+  let lastErr: Error | null = null;
+  for (const address of addresses) {
+    try {
+      return await connectToAddress(hostId, address);
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+  throw lastErr ?? new Error("Connexion SSH impossible.");
+}
+
 export type SshExecResult = { stdout: string; stderr: string; code: number };
 
 /** Ends a connection and, if it hasn't torn down within a beat, forces the socket closed —
@@ -205,19 +260,18 @@ export function runSshCommand(
     return Promise.resolve(fakeExec(hostId, rawCommand));
   }
 
-  const config = buildSshConfig(hostId);
   const { command, stdinPassword } = opts.sudo
     ? buildPrivilegedCommand(hostId, rawCommand)
     : { command: rawCommand, stdinPassword: null as string | null };
-  const conn = new SshClient();
 
   return new Promise((resolve, reject) => {
     let settled = false;
+    let conn: SshClient | null = null;
     const timer = opts.timeoutMs
       ? setTimeout(() => {
           if (settled) return;
           settled = true;
-          forceClose(conn);
+          if (conn) forceClose(conn);
           reject(new Error("Délai dépassé — la connexion SSH a été fermée."));
         }, opts.timeoutMs)
       : null;
@@ -228,26 +282,34 @@ export function runSshCommand(
       fn();
     };
 
-    conn.on("ready", () => {
-      conn.exec(command, (err, stream) => {
-        if (err) {
-          conn.end();
-          settle(() => reject(err));
+    connectSsh(hostId)
+      .then((readyConn) => {
+        conn = readyConn;
+        // The overall timeout above may have already fired while address fallback was still in
+        // progress (trying a second/third address takes real time) — don't start exec'ing on a
+        // connection nothing is waiting for anymore, just close it.
+        if (settled) {
+          forceClose(readyConn);
           return;
         }
-        if (stdinPassword) stream.write(`${stdinPassword}\n`);
-        let stdout = "";
-        let stderr = "";
-        stream.on("data", (d: Buffer) => (stdout += d.toString("utf8")));
-        stream.stderr.on("data", (d: Buffer) => (stderr += d.toString("utf8")));
-        stream.on("close", (code: number) => {
-          conn.end();
-          settle(() => resolve({ stdout, stderr, code }));
+        readyConn.exec(command, (err, stream) => {
+          if (err) {
+            readyConn.end();
+            settle(() => reject(err));
+            return;
+          }
+          if (stdinPassword) stream.write(`${stdinPassword}\n`);
+          let stdout = "";
+          let stderr = "";
+          stream.on("data", (d: Buffer) => (stdout += d.toString("utf8")));
+          stream.stderr.on("data", (d: Buffer) => (stderr += d.toString("utf8")));
+          stream.on("close", (code: number) => {
+            readyConn.end();
+            settle(() => resolve({ stdout, stderr, code }));
+          });
         });
-      });
-    });
-    conn.on("error", (err) => settle(() => reject(err)));
-    conn.connect(config);
+      })
+      .catch((err) => settle(() => reject(err)));
   });
 }
 
@@ -269,19 +331,18 @@ export function runSshCommandStreaming(
     return Promise.resolve(result.code);
   }
 
-  const config = buildSshConfig(hostId);
   const { command, stdinPassword } = opts.sudo
     ? buildPrivilegedCommand(hostId, rawCommand)
     : { command: rawCommand, stdinPassword: null as string | null };
-  const conn = new SshClient();
 
   return new Promise((resolve, reject) => {
     let settled = false;
+    let conn: SshClient | null = null;
     const timer = opts.timeoutMs
       ? setTimeout(() => {
           if (settled) return;
           settled = true;
-          forceClose(conn);
+          if (conn) forceClose(conn);
           reject(new Error("Délai dépassé — la connexion SSH a été fermée."));
         }, opts.timeoutMs)
       : null;
@@ -292,23 +353,28 @@ export function runSshCommandStreaming(
       fn();
     };
 
-    conn.on("ready", () => {
-      conn.exec(command, (err, stream) => {
-        if (err) {
-          conn.end();
-          settle(() => reject(err));
+    connectSsh(hostId)
+      .then((readyConn) => {
+        conn = readyConn;
+        if (settled) {
+          forceClose(readyConn);
           return;
         }
-        if (stdinPassword) stream.write(`${stdinPassword}\n`);
-        stream.on("data", (d: Buffer) => onChunk(d.toString("utf8")));
-        stream.stderr.on("data", (d: Buffer) => onChunk(d.toString("utf8")));
-        stream.on("close", (code: number) => {
-          conn.end();
-          settle(() => resolve(code));
+        readyConn.exec(command, (err, stream) => {
+          if (err) {
+            readyConn.end();
+            settle(() => reject(err));
+            return;
+          }
+          if (stdinPassword) stream.write(`${stdinPassword}\n`);
+          stream.on("data", (d: Buffer) => onChunk(d.toString("utf8")));
+          stream.stderr.on("data", (d: Buffer) => onChunk(d.toString("utf8")));
+          stream.on("close", (code: number) => {
+            readyConn.end();
+            settle(() => resolve(code));
+          });
         });
-      });
-    });
-    conn.on("error", (err) => settle(() => reject(err)));
-    conn.connect(config);
+      })
+      .catch((err) => settle(() => reject(err)));
   });
 }

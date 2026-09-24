@@ -1,5 +1,5 @@
 import { Client as SshClient } from "ssh2";
-import { buildSshConfig, buildPrivilegedCommand, getAutoElevatePassword, shellQuote } from "./ssh";
+import { connectSsh, buildPrivilegedCommand, getAutoElevatePassword, isTransientHandshakeError, shellQuote } from "./ssh";
 
 /**
  * The actual "connect, optionally exec into a Docker container or a Proxmox LXC, allocate a PTY,
@@ -32,10 +32,8 @@ export function openSshChannel(
   initialSize: { cols: number; rows: number } | null,
   callbacks: SshChannelCallbacks
 ): SshChannelHandle {
-  let config: ReturnType<typeof buildSshConfig>;
   let execCommand: { command: string; stdinPassword: string | null } | null = null;
   try {
-    config = buildSshConfig(hostId);
     if (execTarget?.kind === "docker") {
       const dockerCmd = `docker exec -it ${shellQuote(execTarget.id)} sh -c 'exec bash || exec sh'`;
       execCommand = buildPrivilegedCommand(hostId, dockerCmd);
@@ -54,7 +52,7 @@ export function openSshChannel(
     return { write: () => {}, resize: () => {}, close: () => {} };
   }
 
-  let conn = new SshClient();
+  let conn: SshClient | null = null;
 
   // See ssh-ws.ts's original comment: the caller's initial size (and any input) can race ahead of
   // the SSH handshake + shell allocation, so both are buffered here and flushed once the channel
@@ -64,7 +62,7 @@ export function openSshChannel(
   const pendingInput: string[] = [];
   let closed = false;
 
-  const wireChannel = (newStream: import("ssh2").ClientChannel) => {
+  const wireChannel = (c: SshClient, newStream: import("ssh2").ClientChannel) => {
     stream = newStream;
     if (pendingResize) newStream.setWindow(pendingResize.rows, pendingResize.cols, 0, 0);
     for (const data of pendingInput.splice(0)) newStream.write(data);
@@ -73,14 +71,15 @@ export function openSshChannel(
     newStream.stderr.on("data", (data: Buffer) => callbacks.onData(data.toString("utf8")));
     newStream.on("close", () => {
       callbacks.onClose();
-      conn.end();
+      c.end();
     });
   };
 
-  const onReady = () => {
+  const onReady = (c: SshClient) => {
+    conn = c;
     // Past this point the connection is real and staying up for the whole session — any further
     // 'error' (a mid-session drop) goes straight to the caller, not through the connect-retry path.
-    conn.on("error", (err) => callbacks.onError(err.message));
+    c.on("error", (err) => callbacks.onError(err.message));
 
     const ptyOptions = {
       term: "xterm-256color",
@@ -88,25 +87,25 @@ export function openSshChannel(
     };
 
     if (execCommand) {
-      conn.exec(execCommand.command, { pty: ptyOptions }, (err, newStream) => {
+      c.exec(execCommand.command, { pty: ptyOptions }, (err, newStream) => {
         if (err) {
           callbacks.onError(err.message);
-          conn.end();
+          c.end();
           return;
         }
         if (execCommand!.stdinPassword) newStream.write(`${execCommand!.stdinPassword}\n`);
-        wireChannel(newStream);
+        wireChannel(c, newStream);
       });
       return;
     }
 
-    conn.shell(ptyOptions, (err, newStream) => {
+    c.shell(ptyOptions, (err, newStream) => {
       if (err) {
         callbacks.onError(err.message);
-        conn.end();
+        c.end();
         return;
       }
-      wireChannel(newStream);
+      wireChannel(c, newStream);
 
       const sudoPassword = getAutoElevatePassword(hostId);
       if (sudoPassword) {
@@ -121,25 +120,32 @@ export function openSshChannel(
   // handshake" / ECONNRESET — under momentary load, with no shell/exec requested yet at that
   // point. Retrying the connect itself a few times with backoff clears the overwhelming majority
   // of these instead of failing a terminal open outright (same retry budget as the SFTP browser
-  // in lib/sftp.ts, for the same class of host).
+  // in lib/sftp.ts, for the same class of host). connectSsh itself additionally falls back through
+  // every address configured for the host, so a Tailscale-down-but-LAN-reachable host no longer
+  // fails outright either — see ssh.ts.
   const CONNECT_RETRY_DELAYS_MS = [800, 2000, 4000, 6000];
 
   function attemptConnect(remaining: number[]) {
-    conn.once("ready", onReady);
-    conn.once("error", (err) => {
-      if (closed) return;
-      if (remaining.length > 0 && /connection lost before handshake|econnreset|timed out while waiting for handshake/i.test(err.message)) {
-        const [delay, ...rest] = remaining;
-        setTimeout(() => {
-          if (closed) return;
-          conn = new SshClient();
-          attemptConnect(rest);
-        }, delay);
-        return;
-      }
-      callbacks.onError(err.message);
-    });
-    conn.connect(config);
+    connectSsh(hostId)
+      .then((readyConn) => {
+        if (closed) {
+          readyConn.end();
+          return;
+        }
+        onReady(readyConn);
+      })
+      .catch((err) => {
+        if (closed) return;
+        if (remaining.length > 0 && isTransientHandshakeError(err)) {
+          const [delay, ...rest] = remaining;
+          setTimeout(() => {
+            if (closed) return;
+            attemptConnect(rest);
+          }, delay);
+          return;
+        }
+        callbacks.onError(err instanceof Error ? err.message : "Erreur de connexion SSH.");
+      });
   }
 
   attemptConnect(CONNECT_RETRY_DELAYS_MS);
@@ -156,7 +162,7 @@ export function openSshChannel(
     close: () => {
       closed = true;
       stream?.close();
-      conn.end();
+      conn?.end();
     },
   };
 }

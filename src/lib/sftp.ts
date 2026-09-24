@@ -1,5 +1,5 @@
 import { Client as SshClient, type SFTPWrapper } from "ssh2";
-import { buildSshConfig } from "./ssh";
+import { connectSsh, isTransientHandshakeError } from "./ssh";
 import { isDemoContext } from "./demo/context";
 
 export type FileEntry = {
@@ -10,36 +10,27 @@ export type FileEntry = {
 };
 
 function connectOnce<T>(hostId: number, fn: (sftp: SFTPWrapper, conn: SshClient) => Promise<T>): Promise<T> {
-  const config = buildSshConfig(hostId);
-  const conn = new SshClient();
-
-  return new Promise<T>((resolve, reject) => {
-    conn.on("ready", () => {
-      conn.sftp((err, sftp) => {
-        if (err) {
-          conn.end();
-          reject(err);
-          return;
-        }
-        fn(sftp, conn)
-          .then((result) => {
+  return connectSsh(hostId).then(
+    (conn) =>
+      new Promise<T>((resolve, reject) => {
+        conn.sftp((err, sftp) => {
+          if (err) {
             conn.end();
-            resolve(result);
-          })
-          .catch((e) => {
-            conn.end();
-            reject(e);
-          });
-      });
-    });
-    conn.on("error", reject);
-    conn.connect(config);
-  });
-}
-
-function isTransientHandshakeError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return /connection lost before handshake|econnreset|timed out while waiting for handshake/i.test(message);
+            reject(err);
+            return;
+          }
+          fn(sftp, conn)
+            .then((result) => {
+              conn.end();
+              resolve(result);
+            })
+            .catch((e) => {
+              conn.end();
+              reject(e);
+            });
+        });
+      })
+  );
 }
 
 /** SFTP browses as the plain SSH login user with no sudo elevation (SFTP has no such concept) —
@@ -169,15 +160,12 @@ export function makeDirectory(hostId: number, path: string): Promise<void> {
 
 /** Opens an SSH+SFTP session and hands back the raw handles — caller owns closing `conn`. */
 export function openSftp(hostId: number): Promise<{ conn: SshClient; sftp: SFTPWrapper }> {
-  const config = buildSshConfig(hostId);
-  const conn = new SshClient();
-  return new Promise((resolve, reject) => {
-    conn.on("ready", () => {
-      conn.sftp((err, sftp) => (err ? reject(err) : resolve({ conn, sftp })));
-    });
-    conn.on("error", reject);
-    conn.connect(config);
-  });
+  return connectSsh(hostId).then(
+    (conn) =>
+      new Promise((resolve, reject) => {
+        conn.sftp((err, sftp) => (err ? reject(err) : resolve({ conn, sftp })));
+      })
+  );
 }
 
 export function statPath(sftp: SFTPWrapper, path: string): Promise<{ isDirectory: boolean; size: number }> {

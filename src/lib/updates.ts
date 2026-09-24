@@ -1,6 +1,5 @@
 import { randomUUID } from "crypto";
-import { Client as SshClient } from "ssh2";
-import { buildSshConfig, buildPrivilegedCommand } from "./ssh";
+import { connectSsh, buildPrivilegedCommand } from "./ssh";
 import { getDb } from "./db";
 
 export type UpdateMethod = "apt" | "opkg" | "dsm";
@@ -157,11 +156,9 @@ function runJobInBackground(
     onFinished?.(status);
   };
 
-  let config;
   let command: string;
   let stdinPassword: string | null;
   try {
-    config = buildSshConfig(hostId);
     ({ command, stdinPassword } = buildPrivilegedCommand(hostId, rawCommand));
   } catch (err) {
     appendJobLog(jobId, `Erreur: ${err instanceof Error ? err.message : "inconnue"}\n`);
@@ -169,30 +166,26 @@ function runJobInBackground(
     return;
   }
 
-  const conn = new SshClient();
-
-  conn.on("ready", () => {
-    conn.exec(command, (err, stream) => {
-      if (err) {
-        appendJobLog(jobId, `Erreur: ${err.message}\n`);
-        finish("failed", null);
-        conn.end();
-        return;
-      }
-      if (stdinPassword) stream.write(`${stdinPassword}\n`);
-      stream.on("data", (data: Buffer) => appendJobLog(jobId, data.toString("utf8")));
-      stream.stderr.on("data", (data: Buffer) => appendJobLog(jobId, data.toString("utf8")));
-      stream.on("close", (code: number) => {
-        finish(code === 0 ? "success" : "failed", code);
-        conn.end();
+  connectSsh(hostId)
+    .then((conn) => {
+      conn.exec(command, (err, stream) => {
+        if (err) {
+          appendJobLog(jobId, `Erreur: ${err.message}\n`);
+          finish("failed", null);
+          conn.end();
+          return;
+        }
+        if (stdinPassword) stream.write(`${stdinPassword}\n`);
+        stream.on("data", (data: Buffer) => appendJobLog(jobId, data.toString("utf8")));
+        stream.stderr.on("data", (data: Buffer) => appendJobLog(jobId, data.toString("utf8")));
+        stream.on("close", (code: number) => {
+          finish(code === 0 ? "success" : "failed", code);
+          conn.end();
+        });
       });
+    })
+    .catch((err) => {
+      appendJobLog(jobId, `Erreur: ${err instanceof Error ? err.message : "inconnue"}\n`);
+      finish("failed", null);
     });
-  });
-
-  conn.on("error", (err) => {
-    appendJobLog(jobId, `Erreur: ${err.message}\n`);
-    finish("failed", null);
-  });
-
-  conn.connect(config);
 }

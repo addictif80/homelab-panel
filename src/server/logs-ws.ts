@@ -1,9 +1,8 @@
 import type { IncomingMessage } from "http";
 import type { Duplex } from "stream";
 import { WebSocketServer, WebSocket } from "ws";
-import { Client as SshClient } from "ssh2";
 import { parse } from "url";
-import { buildSshConfig, buildPrivilegedCommand, shellQuote } from "@/lib/ssh";
+import { connectSsh, buildPrivilegedCommand, shellQuote } from "@/lib/ssh";
 import { getLogSource } from "@/lib/logSources";
 import { analyzeLogLines } from "@/lib/logAnalysis";
 import { getDetectionThresholds } from "@/lib/logAnalysisSettings";
@@ -67,11 +66,9 @@ function handleLogSession(ws: WebSocket, sourceId: string) {
     ? `docker exec ${shellQuote(source.containerId)} tail -n 50 -f ${shellQuote(source.filePath)}`
     : `docker logs -f --tail 50 ${shellQuote(source.containerId)}`;
 
-  let config;
   let command: string;
   let stdinPassword: string | null;
   try {
-    config = buildSshConfig(source.hostId);
     ({ command, stdinPassword } = buildPrivilegedCommand(source.hostId, tailCmd));
   } catch (err) {
     send({ type: "error", message: err instanceof Error ? err.message : "Erreur de configuration." });
@@ -79,44 +76,55 @@ function handleLogSession(ws: WebSocket, sourceId: string) {
     return;
   }
 
-  const conn = new SshClient();
   let buffer: string[] = [];
+  // The WebSocket can close before connectSsh's address fallback even finishes (multiple
+  // addresses each take their own attempt) — tracked here so a connection that only becomes
+  // ready after the client is already gone gets torn down immediately instead of left running.
+  let wsClosed = false;
+  ws.on("close", () => {
+    wsClosed = true;
+  });
 
-  conn.on("ready", () => {
-    conn.exec(command, (err, stream) => {
-      if (err) {
-        send({ type: "error", message: err.message });
+  connectSsh(source.hostId)
+    .then((conn) => {
+      if (wsClosed) {
         conn.end();
         return;
       }
-      if (stdinPassword) stream.write(`${stdinPassword}\n`);
-
-      const handleChunk = (chunk: Buffer) => {
-        const newLines = chunk.toString("utf8").split(/\r?\n/).filter((l) => l.length > 0);
-        if (newLines.length === 0) return;
-
-        buffer = [...buffer, ...newLines].slice(-MAX_BUFFER_LINES);
-        send({ type: "lines", lines: newLines });
-        send({ type: "suggestions", suggestions: analyzeLogLines(buffer, getDetectionThresholds()) });
-      };
-
-      stream.on("data", handleChunk);
-      stream.stderr.on("data", handleChunk);
-      stream.on("close", () => {
-        send({ type: "closed" });
-        conn.end();
+      conn.on("error", (err) => {
+        send({ type: "error", message: err.message });
       });
+      conn.exec(command, (err, stream) => {
+        if (err) {
+          send({ type: "error", message: err.message });
+          conn.end();
+          return;
+        }
+        if (stdinPassword) stream.write(`${stdinPassword}\n`);
 
-      ws.on("close", () => {
-        stream.close();
-        conn.end();
+        const handleChunk = (chunk: Buffer) => {
+          const newLines = chunk.toString("utf8").split(/\r?\n/).filter((l) => l.length > 0);
+          if (newLines.length === 0) return;
+
+          buffer = [...buffer, ...newLines].slice(-MAX_BUFFER_LINES);
+          send({ type: "lines", lines: newLines });
+          send({ type: "suggestions", suggestions: analyzeLogLines(buffer, getDetectionThresholds()) });
+        };
+
+        stream.on("data", handleChunk);
+        stream.stderr.on("data", handleChunk);
+        stream.on("close", () => {
+          send({ type: "closed" });
+          conn.end();
+        });
+
+        ws.on("close", () => {
+          stream.close();
+          conn.end();
+        });
       });
+    })
+    .catch((err) => {
+      send({ type: "error", message: err instanceof Error ? err.message : "Erreur de connexion SSH." });
     });
-  });
-
-  conn.on("error", (err) => {
-    send({ type: "error", message: err.message });
-  });
-
-  conn.connect(config);
 }
