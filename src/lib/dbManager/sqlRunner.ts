@@ -71,6 +71,14 @@ const MYSQL_BIN_DETECT =
 function buildCommandPrefix(conn: DbConnection, password: string, database?: string): string {
   if (conn.engine === "mysql") {
     const args = [
+      // Without this, the mysql/mariadb client silently switches to a local Unix socket whenever
+      // the host looks like "localhost" (a long-standing client quirk, independent of the port
+      // given) — which then authenticates as 'root'@'localhost' instead of going over TCP to
+      // dbPort at all. On the official MariaDB image, that socket-side root account often has
+      // different grants/plugin than the TCP-side 'root'@'%' the panel actually configured,
+      // surfacing as a confusing "Access denied ... using password: YES" even with the right
+      // password. Forcing TCP makes the connection always go where dbHost:dbPort actually points.
+      "--protocol=TCP",
       `-h ${shellQuote(conn.dbHost)}`,
       `-P ${conn.dbPort}`,
       `-u ${shellQuote(conn.username)}`,

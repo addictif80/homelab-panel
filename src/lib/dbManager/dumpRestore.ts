@@ -17,7 +17,9 @@ function binDetect(candidates: [string, string], notFoundMessage: string): strin
 
 function dumpCommand(conn: DbConnection, password: string, database: string): string {
   if (conn.engine === "mysql") {
-    const args = `-h ${shellQuote(conn.dbHost)} -P ${conn.dbPort} -u ${shellQuote(conn.username)} ${shellQuote(database)}`;
+    // --protocol=TCP: see sqlRunner.ts's identical flag for why — without it, a host that looks
+    // like "localhost" silently switches to a Unix socket instead of dbHost:dbPort.
+    const args = `--protocol=TCP -h ${shellQuote(conn.dbHost)} -P ${conn.dbPort} -u ${shellQuote(conn.username)} ${shellQuote(database)}`;
     const detect = binDetect(["mysqldump", "mariadb-dump"], "Client mysqldump/mariadb-dump introuvable — installe mariadb-client.");
     if (conn.containerId) {
       const script = `${detect}; exec "$BIN" ${args}`;
@@ -37,7 +39,7 @@ function dumpCommand(conn: DbConnection, password: string, database: string): st
 
 function restoreCommand(conn: DbConnection, password: string, database: string): string {
   if (conn.engine === "mysql") {
-    const args = `-h ${shellQuote(conn.dbHost)} -P ${conn.dbPort} -u ${shellQuote(conn.username)} ${shellQuote(database)}`;
+    const args = `--protocol=TCP -h ${shellQuote(conn.dbHost)} -P ${conn.dbPort} -u ${shellQuote(conn.username)} ${shellQuote(database)}`;
     const detect = binDetect(["mysql", "mariadb"], "Client mysql/mariadb introuvable — installe mariadb-client.");
     if (conn.containerId) {
       const script = `${detect}; exec "$BIN" ${args}`;
