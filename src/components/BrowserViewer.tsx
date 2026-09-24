@@ -41,6 +41,13 @@ export default function BrowserViewer({
   const [frameUrl, setFrameUrl] = useState<string | null>(null);
   const [addressBar, setAddressBar] = useState(initialUrl);
   const sessionIdRef = useRef<string | null>(null);
+  // Input requests are plain independent fetch() calls (no WebSocket to guarantee ordering), so a
+  // mousedown fired right after a mousemove can otherwise reach the server first — the click lands
+  // wherever the mouse was before that last move instead of where the user actually clicked. This
+  // chain forces each input request to only start once the previous one has been sent and
+  // answered, so the server always applies them in the order the user produced them.
+  const inputChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const lastMouseMoveRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -128,14 +135,28 @@ export default function BrowserViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialUrl]);
 
+  // Focuses the viewer the moment the first frame is ready, so typing works right away instead of
+  // requiring a throwaway click first — but only if focus is still sitting on the page body (never
+  // steals it away from the address bar or anything else the user is already interacting with).
+  useEffect(() => {
+    if (!connecting && imgRef.current && document.activeElement === document.body) {
+      imgRef.current.focus();
+    }
+  }, [connecting]);
+
   function sendInput(input: object) {
     const sessionId = sessionIdRef.current;
     if (!sessionId) return;
-    fetch(`/api/browser/sessions/${sessionId}/input`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    }).catch(() => {});
+    // Chained rather than fired independently — see inputChainRef's comment above. Each request
+    // waits for the previous one to be answered before going out, so the server never processes a
+    // click before the mouse-move that positioned it.
+    inputChainRef.current = inputChainRef.current.then(() =>
+      fetch(`/api/browser/sessions/${sessionId}/input`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      }).catch(() => {})
+    );
   }
 
   function navigate(nav: object) {
@@ -215,13 +236,27 @@ export default function BrowserViewer({
             src={frameUrl}
             alt="Page distante"
             draggable={false}
-            className="max-h-full max-w-full select-none"
+            className="max-h-full max-w-full select-none outline-none"
             onMouseMove={(e) => {
+              // Throttled — mousemove otherwise fires on every pixel, and each one now waits in
+              // line (see inputChainRef) behind whatever was queued before it, so an unthrottled
+              // flood would delay the click that follows it by however long that backlog takes to
+              // drain.
+              const now = performance.now();
+              if (now - lastMouseMoveRef.current < 35) return;
+              lastMouseMoveRef.current = now;
               const { x, y } = toRemoteCoords(e);
               sendInput({ type: "mousemove", x, y });
             }}
             onMouseDown={(e) => {
               e.preventDefault();
+              // preventDefault() above also suppresses the browser's default click-to-focus
+              // behavior for this element — without an explicit focus() call here, the image would
+              // never actually hold keyboard focus, and every keydown/keyup below would silently go
+              // nowhere (this was the "can't type anything" bug).
+              e.currentTarget.focus();
+              const { x, y } = toRemoteCoords(e);
+              sendInput({ type: "mousemove", x, y });
               const button = e.button === 2 ? "right" : e.button === 1 ? "middle" : "left";
               sendInput({ type: "mousedown", button });
             }}
