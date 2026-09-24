@@ -235,8 +235,10 @@ export default function ServicesPage() {
             {!screenshotCaptureAvailable && (
               <>
                 {" "}
-                Capture d&apos;écran indisponible : aucun navigateur Chromium détecté sur ce serveur (installe{" "}
-                <code>chromium</code> ou <code>google-chrome</code>, ou renseigne <code>CHROMIUM_PATH</code>).
+                Capture d&apos;écran indisponible : aucun Chromium utilisable détecté sur ce serveur (sur Ubuntu,{" "}
+                <code>apt install chromium</code> installe la version snap, qui ne se lance pas correctement en
+                headless — installe plutôt <code>google-chrome-stable</code> en .deb, ou renseigne{" "}
+                <code>CHROMIUM_PATH</code>).
               </>
             )}
           </p>

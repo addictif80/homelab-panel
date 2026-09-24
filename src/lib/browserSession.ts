@@ -44,8 +44,13 @@ const MAX_SESSIONS_PER_USER = 4;
 export function checkBrowserDependencies(): string | null {
   if (findChromiumExecutable()) return null;
   return (
-    "Le navigateur intégré a besoin de Chromium sur la machine qui héberge le panel. " +
-    "Installe-le avec : sudo apt-get install -y --no-install-recommends chromium"
+    "Le navigateur intégré a besoin d'un vrai Chromium sur la machine qui héberge le panel. " +
+    "Sur Ubuntu, évite `sudo apt install chromium` — ce paquet ne fait qu'installer la version " +
+    "snap, dont le confinement empêche souvent un lancement headless (surtout dans un conteneur " +
+    "Docker ou LXC, où snapd ne tourne parfois même pas). Installe plutôt Google Chrome en .deb : " +
+    "wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && " +
+    "sudo apt install -y ./google-chrome-stable_current_amd64.deb " +
+    "— ou, sur Debian (pas Ubuntu), `sudo apt install -y chromium` installe un vrai paquet natif."
   );
 }
 

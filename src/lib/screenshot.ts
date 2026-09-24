@@ -1,4 +1,4 @@
-import { existsSync } from "fs";
+import { existsSync, realpathSync } from "fs";
 
 /**
  * Server-side screenshot capture for service links (/services, /board, and the seller's public
@@ -18,7 +18,6 @@ const CANDIDATE_PATHS = [
   "/usr/bin/chromium-browser",
   "/usr/bin/google-chrome",
   "/usr/bin/google-chrome-stable",
-  "/snap/bin/chromium",
   // Playwright's own bundled Chromium, when present (e.g. a dev/CI environment that already has
   // it) — harmless to check for, and saves an install step there.
   "/opt/pw-browsers/chromium",
@@ -26,12 +25,33 @@ const CANDIDATE_PATHS = [
 
 let cachedExecutablePath: string | null | undefined;
 
+/**
+ * On Ubuntu, `apt install chromium` (and `chromium-browser`) hasn't installed a real package in
+ * years — it's a transitional stub whose binary is a wrapper script that launches the *snap*
+ * build instead, and `/usr/bin/chromium` itself is usually a symlink straight into `/snap/bin/`.
+ * That snap runs under its own AppArmor confinement and mount namespace, which routinely refuses
+ * to launch headless the way puppeteer needs it to — most reliably inside a Docker container or an
+ * LXC guest, where snapd frequently isn't even running at all (this bit the RDP/screenshot features
+ * before: a path that *exists* on disk but can't actually be spawned this way). Trusting
+ * `existsSync` alone on a snap-shadowed path reports success and then fails later with an opaque
+ * Chromium launch error — so a candidate that resolves into `/snap/` is treated as not found here,
+ * pushing callers toward the install instructions for a real .deb instead (see
+ * checkBrowserDependencies in lib/browserSession.ts).
+ */
+function isSnapShadowed(path: string): boolean {
+  try {
+    return realpathSync(path).includes("/snap/");
+  } catch {
+    return false;
+  }
+}
+
 /** Exported for reuse by anything else that drives a local Chromium via puppeteer-core (the
  * embedded interactive browser in lib/browserSession.ts, notably) — one place to look for a
  * usable binary instead of duplicating this candidate-path list. */
 export function findChromiumExecutable(): string | null {
   if (cachedExecutablePath !== undefined) return cachedExecutablePath;
-  cachedExecutablePath = CANDIDATE_PATHS.find((p) => existsSync(p)) ?? null;
+  cachedExecutablePath = CANDIDATE_PATHS.find((p) => existsSync(p) && !isSnapShadowed(p)) ?? null;
   return cachedExecutablePath;
 }
 
