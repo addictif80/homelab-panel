@@ -41,7 +41,8 @@ type IconName =
   | "missioncontrol"
   | "help"
   | "ha"
-  | "jobs";
+  | "jobs"
+  | "browser";
 
 const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon: IconName }[] }[] = [
   {
@@ -62,6 +63,7 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon:
       { href: "/databases", label: "Bases de données", icon: "database" },
       { href: "/ssh", label: "Terminal SSH", icon: "terminal" },
       { href: "/rdp", label: "Client RDP", icon: "rdp" },
+      { href: "/browser", label: "Navigateur intégré", icon: "browser" },
       { href: "/updates", label: "Mises à jour", icon: "clock" },
       { href: "/files", label: "Explorateur de fichiers", icon: "files" },
     ],
@@ -393,6 +395,15 @@ function NavIcon({ name }: { name: IconName }) {
         <svg {...common}>
           <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
           <path d="M12 7.5V12l3.2 1.9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case "browser":
+      return (
+        <svg {...common}>
+          <rect x="3.5" y="4.5" width="17" height="15" rx="1.6" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M3.5 8.5h17" stroke="currentColor" strokeWidth="1.6" />
+          <circle cx="6.2" cy="6.5" r="0.6" fill="currentColor" />
+          <circle cx="8" cy="6.5" r="0.6" fill="currentColor" />
         </svg>
       );
     case "storefront":

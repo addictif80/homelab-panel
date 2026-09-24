@@ -26,7 +26,10 @@ const CANDIDATE_PATHS = [
 
 let cachedExecutablePath: string | null | undefined;
 
-function findChromiumExecutable(): string | null {
+/** Exported for reuse by anything else that drives a local Chromium via puppeteer-core (the
+ * embedded interactive browser in lib/browserSession.ts, notably) — one place to look for a
+ * usable binary instead of duplicating this candidate-path list. */
+export function findChromiumExecutable(): string | null {
   if (cachedExecutablePath !== undefined) return cachedExecutablePath;
   cachedExecutablePath = CANDIDATE_PATHS.find((p) => existsSync(p)) ?? null;
   return cachedExecutablePath;
