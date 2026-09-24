@@ -102,14 +102,22 @@ export default function BackupsPage() {
     const res = await fetch("/api/backups");
     const data = await res.json();
     setPlans(data.plans);
+    return data.plans as BackupPlan[];
   }, []);
 
   useEffect(() => {
     fetch("/api/hosts")
       .then((r) => r.json())
       .then((d) => setHosts(d.hosts));
-    loadPlans();
-  }, [loadPlans]);
+    loadPlans().then((loaded) => {
+      const running = loaded?.find((p) => p.latestRun?.status === "running");
+      if (running?.latestRun) {
+        setActiveRunId(running.latestRun.id);
+        setActiveRun(running.latestRun);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!activeRunId) return;

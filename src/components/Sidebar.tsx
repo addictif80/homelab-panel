@@ -40,7 +40,8 @@ type IconName =
   | "wrapped"
   | "missioncontrol"
   | "help"
-  | "ha";
+  | "ha"
+  | "jobs";
 
 const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon: IconName }[] }[] = [
   {
@@ -101,6 +102,7 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon:
       { href: "/architecture", label: "Documentation d'architecture", icon: "docs" },
       { href: "/wrapped", label: "Récap annuel", icon: "wrapped" },
       { href: "/assistant", label: "Assistant IA", icon: "assistant" },
+      { href: "/jobs", label: "Activité en cours", icon: "jobs" },
       { href: "/audit", label: "Journal d'audit", icon: "audit" },
       { href: "/users", label: "Comptes", icon: "users" },
       { href: "/settings", label: "Réglages", icon: "settings" },
@@ -386,6 +388,13 @@ function NavIcon({ name }: { name: IconName }) {
           <path d="M15.5 9.5l1.5-1.7 1.5 1.7M8.5 14.5l-1.5 1.7-1.5-1.7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       );
+    case "jobs":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M12 7.5V12l3.2 1.9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
     case "storefront":
       return (
         <svg {...common}>
@@ -420,11 +429,13 @@ function NavLinks({
   pathname,
   isDemo,
   isTrustedContact,
+  runningJobsCount,
   onNavigate,
 }: {
   pathname: string;
   isDemo: boolean;
   isTrustedContact: boolean;
+  runningJobsCount: number;
   onNavigate?: () => void;
 }) {
   return (
@@ -461,6 +472,11 @@ function NavLinks({
                     <NavIcon name={item.icon} />
                   </span>
                   {item.label}
+                  {item.href === "/jobs" && runningJobsCount > 0 && (
+                    <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1 text-[10.5px] font-bold text-white">
+                      {runningJobsCount}
+                    </span>
+                  )}
                 </Link>
               );
             })}
@@ -499,6 +515,7 @@ export default function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isDemo, setIsDemo] = useState(false);
   const [isTrustedContact, setIsTrustedContact] = useState(false);
+  const [runningJobsCount, setRunningJobsCount] = useState(0);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -508,6 +525,20 @@ export default function Sidebar() {
         setIsTrustedContact(!!d?.isTrustedContact);
       })
       .catch(() => {});
+  }, []);
+
+  // Polled from every page (not just /jobs) so a heavy action started from another device, or
+  // before the tab was closed, still shows up as "still going" no matter where you land next.
+  useEffect(() => {
+    function loadRunningCount() {
+      fetch("/api/jobs?running=1")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((d) => setRunningJobsCount(d?.jobs?.length ?? 0))
+        .catch(() => {});
+    }
+    loadRunningCount();
+    const timer = setInterval(loadRunningCount, 10_000);
+    return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -576,7 +607,7 @@ export default function Sidebar() {
           <Logo />
           <ThemeToggle />
         </div>
-        <NavLinks pathname={pathname} isDemo={isDemo} isTrustedContact={isTrustedContact} />
+        <NavLinks pathname={pathname} isDemo={isDemo} isTrustedContact={isTrustedContact} runningJobsCount={runningJobsCount} />
         <PublicIps entries={publicIps} />
         <button
           onClick={handleLogout}
@@ -625,6 +656,7 @@ export default function Sidebar() {
             pathname={pathname}
             isDemo={isDemo}
             isTrustedContact={isTrustedContact}
+            runningJobsCount={runningJobsCount}
             onNavigate={() => setMobileOpen(false)}
           />
           <PublicIps entries={publicIps} />

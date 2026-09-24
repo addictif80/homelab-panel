@@ -5,6 +5,7 @@ import Link from "next/link";
 import SecurityLogsPanel from "@/components/SecurityLogsPanel";
 import SecurityGuide from "@/components/SecurityGuide";
 import RiskScoreWidget from "@/components/RiskScoreWidget";
+import JobLog from "@/components/JobLog";
 
 type Severity = "critical" | "warning" | "info" | "good";
 
@@ -107,6 +108,7 @@ export default function SecurityPage() {
   const [guideHost, setGuideHost] = useState<HostScanResult | null>(null);
   const [ownerWarning, setOwnerWarning] = useState<string | null>(null);
   const [checkingOwner, setCheckingOwner] = useState(false);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   function toggleHostExpanded(hostId: number) {
     setExpandedHosts((prev) => {
@@ -154,8 +156,7 @@ export default function SecurityPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Échec du déblocage.");
-      setStatusMsg(data.message);
-      await refreshBlockedIps();
+      if (data.jobId) setActiveJobId(data.jobId);
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : "Erreur.");
     } finally {
@@ -284,6 +285,29 @@ export default function SecurityPage() {
           {loading ? "Analyse en cours..." : "Relancer l'analyse"}
         </button>
       </div>
+
+      {activeJobId && (
+        <div className="rounded border border-neutral-800 bg-neutral-900 p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs text-neutral-500">
+              Suivi en temps réel — reste visible dans{" "}
+              <a href="/jobs" className="text-blue-400 hover:underline">
+                Activité en cours
+              </a>{" "}
+              même si tu quittes cette page.
+            </p>
+            <button onClick={() => setActiveJobId(null)} className="text-xs text-neutral-500 hover:text-neutral-300">
+              Fermer
+            </button>
+          </div>
+          <JobLog
+            jobId={activeJobId}
+            onDone={() => {
+              refreshBlockedIps();
+            }}
+          />
+        </div>
+      )}
 
       {error && <div className="rounded border border-red-900 bg-red-950/30 p-3 text-sm text-red-300">{error}</div>}
       {statusMsg && (

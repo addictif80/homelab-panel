@@ -35,7 +35,10 @@ export type SenderBlockResult = { hostId: number; hostName: string; ok: boolean;
  * this map, the entry is still recorded (harmless) but the result says so, so the block doesn't
  * silently appear to have worked when it hasn't actually taken effect yet.
  */
-export async function blockSenderEverywhere(email: string): Promise<SenderBlockResult[]> {
+export async function blockSenderEverywhere(
+  email: string,
+  onHostResult?: (result: SenderBlockResult) => void
+): Promise<SenderBlockResult[]> {
   const hosts = getDb().prepare(`SELECT id, name FROM hosts ORDER BY kind, name`).all() as {
     id: number;
     name: string;
@@ -43,24 +46,30 @@ export async function blockSenderEverywhere(email: string): Promise<SenderBlockR
 
   const results = await Promise.all(
     hosts.map(async (host) => {
+      let result: SenderBlockResult;
       try {
         const message = await applyBlockSender(host.id, email);
-        return { hostId: host.id, hostName: host.name, ok: true, message };
+        result = { hostId: host.id, hostName: host.name, ok: true, message };
       } catch (err) {
-        return {
+        result = {
           hostId: host.id,
           hostName: host.name,
           ok: false,
           message: err instanceof Error ? err.message : "Erreur inconnue.",
         };
       }
+      onHostResult?.(result);
+      return result;
     })
   );
   recordBlockedSender(email);
   return results;
 }
 
-export async function unblockSenderEverywhere(email: string): Promise<SenderBlockResult[]> {
+export async function unblockSenderEverywhere(
+  email: string,
+  onHostResult?: (result: SenderBlockResult) => void
+): Promise<SenderBlockResult[]> {
   const hosts = getDb().prepare(`SELECT id, name FROM hosts ORDER BY kind, name`).all() as {
     id: number;
     name: string;
@@ -68,17 +77,20 @@ export async function unblockSenderEverywhere(email: string): Promise<SenderBloc
 
   const results = await Promise.all(
     hosts.map(async (host) => {
+      let result: SenderBlockResult;
       try {
         const message = await applyUnblockSender(host.id, email);
-        return { hostId: host.id, hostName: host.name, ok: true, message };
+        result = { hostId: host.id, hostName: host.name, ok: true, message };
       } catch (err) {
-        return {
+        result = {
           hostId: host.id,
           hostName: host.name,
           ok: false,
           message: err instanceof Error ? err.message : "Erreur inconnue.",
         };
       }
+      onHostResult?.(result);
+      return result;
     })
   );
   forgetBlockedSender(email);

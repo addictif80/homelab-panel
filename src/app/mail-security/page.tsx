@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import JobLog from "@/components/JobLog";
 
 type MailEvent = {
   id: number;
@@ -21,6 +22,7 @@ export default function MailSecurityPage() {
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [blockedSenders, setBlockedSenders] = useState<BlockedSender[]>([]);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   const load = useCallback(async (q: string, recipient: string) => {
     setLoading(true);
@@ -64,8 +66,7 @@ export default function MailSecurityPage() {
         body: JSON.stringify({ ip: event.ipAddress, email: event.senderEmail }),
       });
       const data = await res.json();
-      alert(data.message || data.error || "Terminé.");
-      loadBlockedSenders();
+      if (data.jobId) setActiveJobId(data.jobId);
     } finally {
       setBusyId(null);
     }
@@ -79,12 +80,33 @@ export default function MailSecurityPage() {
       body: JSON.stringify({ email }),
     });
     const data = await res.json();
-    alert(data.message || data.error || "Terminé.");
-    loadBlockedSenders();
+    if (data.jobId) setActiveJobId(data.jobId);
   }
 
   return (
     <div className="space-y-6">
+      {activeJobId && (
+        <div className="rounded border border-neutral-800 bg-neutral-900 p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs text-neutral-500">
+              Suivi en temps réel — reste visible dans{" "}
+              <a href="/jobs" className="text-blue-400 hover:underline">
+                Activité en cours
+              </a>{" "}
+              même si tu quittes cette page.
+            </p>
+            <button onClick={() => setActiveJobId(null)} className="text-xs text-neutral-500 hover:text-neutral-300">
+              Fermer
+            </button>
+          </div>
+          <JobLog
+            jobId={activeJobId}
+            onDone={() => {
+              loadBlockedSenders();
+            }}
+          />
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold text-neutral-100">Anti-spam mail</h1>

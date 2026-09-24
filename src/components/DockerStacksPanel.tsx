@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import JobLog from "@/components/JobLog";
 
 type Host = { id: number; name: string; docker_enabled: number };
 type Stack = { id: string; hostId: number; name: string; composeContent: string; updatedAt: string };
@@ -22,8 +23,8 @@ export default function DockerStacksPanel() {
   const [compose, setCompose] = useState(EXAMPLE_COMPOSE);
   const [deploying, setDeploying] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [log, setLog] = useState("");
   const [error, setError] = useState("");
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   function loadStacks(forHosts: Host[]) {
     Promise.all(forHosts.map((h) => fetch(`/api/docker/${h.id}/stacks`).then((r) => r.json())))
@@ -45,7 +46,6 @@ export default function DockerStacksPanel() {
     if (!hostId || !name.trim() || !compose.trim()) return;
     setDeploying(true);
     setError("");
-    setLog("");
     try {
       const res = await fetch(`/api/docker/${hostId}/stacks`, {
         method: "POST",
@@ -53,12 +53,11 @@ export default function DockerStacksPanel() {
         body: JSON.stringify({ name, composeContent: compose }),
       });
       const data = await res.json();
-      setLog(data.log || "");
       if (!res.ok) throw new Error(data.error);
+      if (data.jobId) setActiveJobId(data.jobId);
       setName("");
       setCompose(EXAMPLE_COMPOSE);
       setShowForm(false);
-      loadStacks(dockerHosts);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur.");
     } finally {
@@ -73,13 +72,13 @@ export default function DockerStacksPanel() {
       if (kind === "delete") {
         if (!confirm(`Supprimer la stack "${stack.name}" (arrête et retire ses conteneurs) ?`)) return;
         await fetch(`/api/docker/${stack.hostId}/stacks/${stack.id}`, { method: "DELETE" });
+        loadStacks(dockerHosts);
       } else {
         const res = await fetch(`/api/docker/${stack.hostId}/stacks/${stack.id}/${kind}`, { method: "POST" });
         const data = await res.json();
-        setLog(data.log || "");
         if (!res.ok) throw new Error(data.error);
+        if (data.jobId) setActiveJobId(data.jobId);
       }
-      loadStacks(dockerHosts);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur.");
     } finally {
@@ -146,7 +145,16 @@ export default function DockerStacksPanel() {
       )}
 
       {error && <p className="text-sm text-red-400">{error}</p>}
-      {log && <pre className="max-h-40 overflow-y-auto rounded border border-neutral-800 bg-neutral-950 p-2 text-[11px] text-neutral-400">{log}</pre>}
+      {activeJobId && (
+        <div className="rounded border border-neutral-800 bg-neutral-950 p-2">
+          <JobLog
+            jobId={activeJobId}
+            onDone={() => {
+              loadStacks(dockerHosts);
+            }}
+          />
+        </div>
+      )}
 
       <div className="space-y-2">
         {stacks.map((s) => (

@@ -879,6 +879,32 @@ export function migrate(db: Database.Database) {
       last_synced_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- Generic long-running-action tracker (lib/jobs.ts) — the same insert-running /
+    -- append-to-log / finish shape that update_jobs, migration_jobs, copy_jobs, backup_runs and
+    -- restore_drills each hand-rolled separately, factored out once so every *new* background
+    -- action (IP/sender blocking fan-out, Docker stack redeploy, DB dump/restore...) gets live,
+    -- reload-and-device-independent progress for free instead of reinventing this per feature —
+    -- the actual gap that made those older ones feel like "nothing happened after I clicked":
+    -- their DB rows update live, but the page only ever polls the id it just got back from
+    -- starting the action itself, so a reload (or opening the panel from another device) shows a
+    -- static "in progress" label at best. kind is deliberately a free string, not a CHECK'd
+    -- enum — new job kinds are meant to be added without a migration. host_id is nullable since
+    -- some jobs (e.g. IP blocking) fan out across every host at once, not just one.
+    CREATE TABLE IF NOT EXISTS background_jobs (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      label TEXT NOT NULL,
+      host_id INTEGER REFERENCES hosts(id) ON DELETE SET NULL,
+      status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','success','failed')),
+      log TEXT NOT NULL DEFAULT '',
+      result_json TEXT,
+      started_at TEXT NOT NULL DEFAULT (datetime('now')),
+      finished_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_background_jobs_kind ON background_jobs(kind, started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_background_jobs_status ON background_jobs(status, started_at DESC);
   `);
 
   const haReplicationColumns = db.prepare(`PRAGMA table_info(ha_replications)`).all() as { name: string }[];

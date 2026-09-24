@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import JobLog from "@/components/JobLog";
 
 type Engine = "mysql" | "postgres";
 type Host = { id: number; name: string };
@@ -500,6 +501,7 @@ function DumpButton({ connId, dbName }: { connId: string; dbName: string }) {
 
 function RestoreButton({ connId, dbName }: { connId: string; dbName: string }) {
   const [busy, setBusy] = useState(false);
+  const [jobId, setJobId] = useState<string | null>(null);
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -510,12 +512,15 @@ function RestoreButton({ connId, dbName }: { connId: string; dbName: string }) {
       const buffer = await file.arrayBuffer();
       const base64 = btoa(new Uint8Array(buffer).reduce((s, b) => s + String.fromCharCode(b), ""));
       const isGzip = file.name.endsWith(".gz");
-      await api(`/api/db-manager/connections/${connId}/databases/${encodeURIComponent(dbName)}/restore`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ base64, isGzip }),
-      });
-      alert("Restauration terminée.");
+      const data = await api<{ jobId: string }>(
+        `/api/db-manager/connections/${connId}/databases/${encodeURIComponent(dbName)}/restore`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ base64, isGzip }),
+        }
+      );
+      setJobId(data.jobId);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Erreur lors de la restauration.");
     } finally {
@@ -523,10 +528,17 @@ function RestoreButton({ connId, dbName }: { connId: string; dbName: string }) {
     }
   }
   return (
-    <label className="cursor-pointer rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800">
-      {busy ? "Restauration..." : "Restaurer"}
-      <input type="file" accept=".sql,.gz" onChange={onFile} disabled={busy} className="hidden" />
-    </label>
+    <div className="inline-block">
+      <label className="cursor-pointer rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800">
+        {busy ? "Envoi..." : "Restaurer"}
+        <input type="file" accept=".sql,.gz" onChange={onFile} disabled={busy} className="hidden" />
+      </label>
+      {jobId && (
+        <div className="mt-2 w-72 rounded border border-neutral-800 bg-neutral-950 p-2">
+          <JobLog jobId={jobId} onDone={() => setJobId(null)} />
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -114,7 +114,10 @@ export type BlockEverywhereResult = { hostId: number; hostName: string; ok: bool
  * Best-effort per host: a host with no SSH access configured (a Freebox/pfSense-managed router,
  * a machine mid-setup, ...) just reports its own failure rather than aborting the whole batch.
  */
-export async function blockIpEverywhere(ip: string): Promise<BlockEverywhereResult[]> {
+export async function blockIpEverywhere(
+  ip: string,
+  onHostResult?: (result: BlockEverywhereResult) => void
+): Promise<BlockEverywhereResult[]> {
   await assertBlockable(ip);
   const hosts = getDb().prepare(`SELECT id, name FROM hosts ORDER BY kind, name`).all() as {
     id: number;
@@ -123,17 +126,23 @@ export async function blockIpEverywhere(ip: string): Promise<BlockEverywhereResu
 
   const results = await Promise.all(
     hosts.map(async (host) => {
+      let result: BlockEverywhereResult;
       try {
         const { message } = await blockIp(host.id, ip);
-        return { hostId: host.id, hostName: host.name, ok: true, message };
+        result = { hostId: host.id, hostName: host.name, ok: true, message };
       } catch (err) {
-        return {
+        result = {
           hostId: host.id,
           hostName: host.name,
           ok: false,
           message: err instanceof Error ? err.message : "Erreur inconnue.",
         };
       }
+      // Fired as each host settles, not after Promise.all resolves — this is what lets a caller
+      // stream real-time per-host progress instead of only learning the outcome once every host
+      // (including the slowest one, up to BLOCK_TIMEOUT_MS) has finished.
+      onHostResult?.(result);
+      return result;
     })
   );
   return results;
@@ -146,7 +155,10 @@ export async function blockIpEverywhere(ip: string): Promise<BlockEverywhereResu
  * the rule was never applied (it had no SSH access, or the IP was only ever blocked on some
  * hosts) just reports nothing to do rather than failing the batch.
  */
-export async function unblockIpEverywhere(ip: string): Promise<BlockEverywhereResult[]> {
+export async function unblockIpEverywhere(
+  ip: string,
+  onHostResult?: (result: BlockEverywhereResult) => void
+): Promise<BlockEverywhereResult[]> {
   const hosts = getDb().prepare(`SELECT id, name FROM hosts ORDER BY kind, name`).all() as {
     id: number;
     name: string;
@@ -154,17 +166,20 @@ export async function unblockIpEverywhere(ip: string): Promise<BlockEverywhereRe
 
   const results = await Promise.all(
     hosts.map(async (host) => {
+      let result: BlockEverywhereResult;
       try {
         const { message } = await unblockIp(host.id, ip);
-        return { hostId: host.id, hostName: host.name, ok: true, message };
+        result = { hostId: host.id, hostName: host.name, ok: true, message };
       } catch (err) {
-        return {
+        result = {
           hostId: host.id,
           hostName: host.name,
           ok: false,
           message: err instanceof Error ? err.message : "Erreur inconnue.",
         };
       }
+      onHostResult?.(result);
+      return result;
     })
   );
   forgetBlockedIp(ip);

@@ -1,13 +1,18 @@
 import { NextResponse } from "next/server";
-import { redeployStack } from "@/lib/dockerStacks";
+import { redeployStack, getStack } from "@/lib/dockerStacks";
+import { startJob, appendJobLog, finishJob } from "@/lib/jobs";
 
-export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const log: string[] = [];
-  try {
-    await redeployStack(id, (t) => log.push(t));
-    return NextResponse.json({ ok: true, log: log.join("") });
-  } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Erreur.", log: log.join("") }, { status: 502 });
-  }
+export async function POST(_req: Request, { params }: { params: Promise<{ hostId: string; id: string }> }) {
+  const { hostId, id } = await params;
+  const stack = getStack(id);
+  const jobId = startJob("docker-stack-redeploy", `Redéploiement ${stack?.name ?? id}`, Number(hostId));
+
+  redeployStack(id, (t) => appendJobLog(jobId, t))
+    .then(() => finishJob(jobId, "success"))
+    .catch((err) => {
+      appendJobLog(jobId, `\nErreur : ${err instanceof Error ? err.message : "Erreur."}\n`);
+      finishJob(jobId, "failed");
+    });
+
+  return NextResponse.json({ jobId });
 }

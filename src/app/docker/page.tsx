@@ -6,6 +6,7 @@ import Link from "next/link";
 import AppTemplatesPanel, { type AppTemplate } from "@/components/AppTemplatesPanel";
 import DockerStacksPanel from "@/components/DockerStacksPanel";
 import MigrationJobLog from "@/components/MigrationJobLog";
+import JobLog from "@/components/JobLog";
 import ProvisionModal, { type ProvisionSuggestion } from "@/components/ProvisionModal";
 
 const Terminal = dynamic(() => import("@/components/Terminal"), { ssr: false });
@@ -33,7 +34,7 @@ export default function DockerPage() {
   const [pending, setPending] = useState<string | null>(null);
   const [logsFor, setLogsFor] = useState<Container | null>(null);
   const [logs, setLogs] = useState("");
-  const [recreateLog, setRecreateLog] = useState<string[] | null>(null);
+  const [recreateJobId, setRecreateJobId] = useState<string | null>(null);
   const [terminalFor, setTerminalFor] = useState<Container | null>(null);
   const [showRunForm, setShowRunForm] = useState(false);
   const [runHostId, setRunHostId] = useState<number | null>(null);
@@ -118,15 +119,13 @@ export default function DockerPage() {
   async function recreate(c: Container) {
     if (!confirm(`Mettre à jour l'image et recréer ${c.name} sur ${c.hostName} ?`)) return;
     setPending(`${c.id}-recreate`);
-    setRecreateLog(["Démarrage..."]);
     try {
       const res = await fetch(`/api/docker/${c.hostId}/containers/${c.id}/recreate`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setRecreateLog(data.log);
-      load();
+      if (data.jobId) setRecreateJobId(data.jobId);
     } catch (err) {
-      setRecreateLog((l) => [...(l ?? []), `Erreur: ${err instanceof Error ? err.message : "inconnue"}`]);
+      setError(err instanceof Error ? err.message : "Erreur.");
     } finally {
       setPending(null);
     }
@@ -599,19 +598,15 @@ export default function DockerPage() {
         </div>
       )}
 
-      {recreateLog && (
+      {recreateJobId && (
         <div className="fixed bottom-4 right-4 max-w-md rounded border border-neutral-700 bg-neutral-900 p-3 text-xs">
           <div className="mb-1 flex items-center justify-between">
             <span className="font-medium">Recréation</span>
-            <button onClick={() => setRecreateLog(null)} className="text-neutral-500 hover:text-neutral-300">
+            <button onClick={() => setRecreateJobId(null)} className="text-neutral-500 hover:text-neutral-300">
               ✕
             </button>
           </div>
-          {recreateLog.map((l, i) => (
-            <div key={i} className="text-neutral-400">
-              {l}
-            </div>
-          ))}
+          <JobLog jobId={recreateJobId} onDone={load} />
         </div>
       )}
 

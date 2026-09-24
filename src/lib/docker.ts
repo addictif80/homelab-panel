@@ -204,27 +204,35 @@ export function buildRunArgs(info: ContainerInspect, name: string, image: string
 }
 
 /** Pulls the latest image and recreates the container with the same run configuration. */
-export async function pullAndRecreate(hostId: number, containerId: string): Promise<string[]> {
+export async function pullAndRecreate(
+  hostId: number,
+  containerId: string,
+  append?: (text: string) => void
+): Promise<string[]> {
   const log: string[] = [];
+  const emit = (text: string) => {
+    log.push(text);
+    append?.(`${text}\n`);
+  };
 
   const info = await inspectContainer(hostId, containerId);
   const image = info.Config.Image;
   const name = info.Name.replace(/^\//, "");
 
-  log.push(`Pull de l'image ${image}...`);
+  emit(`Pull de l'image ${image}...`);
   const pullRes = await execOnHost(hostId, `docker pull ${shellQuote(image)}`);
-  log.push(pullRes.stdout.trim());
+  emit(pullRes.stdout.trim());
   if (pullRes.code !== 0) throw new Error(pullRes.stderr || "Échec du pull.");
 
-  log.push(`Suppression du conteneur ${name}...`);
+  emit(`Suppression du conteneur ${name}...`);
   const rmRes = await execOnHost(hostId, `docker rm -f ${shellQuote(containerId)}`);
   if (rmRes.code !== 0) throw new Error(rmRes.stderr || "Échec de la suppression.");
 
   const runCmd = `docker ${buildRunArgs(info, name, image).join(" ")}`;
-  log.push(`Recréation: ${runCmd}`);
+  emit(`Recréation: ${runCmd}`);
   const runRes = await execOnHost(hostId, runCmd);
   if (runRes.code !== 0) throw new Error(runRes.stderr || "Échec de la recréation.");
-  log.push("Conteneur recréé avec succès.");
+  emit("Conteneur recréé avec succès.");
 
   return log;
 }
