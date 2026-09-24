@@ -45,9 +45,15 @@ export async function runSqliteSync(r: Replication): Promise<void> {
   const sshOpts = `-i ${keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -p ${dest.port}`;
   const tmpPath = `/tmp/hlp-sqlite-sync-${r.id}.db`;
 
+  // --chown/--chmod, when set, override the ownership/permissions the freshly-created temp copy
+  // would otherwise land with on B (whatever the dedicated backup SSH account's own umask produces)
+  // — the same reasoning as folderReplication.ts's identical flags, so the app on B can actually
+  // read (and, if it writes to its own database file, write) the copy after a failover.
+  const chownFlag = r.targetOwner ? ` --chown=${shellQuote(r.targetOwner)}` : "";
+  const chmodFlag = r.targetMode ? ` --chmod=${shellQuote(r.targetMode)}` : "";
   const command = [
     `sqlite3 ${shellQuote(r.sourcePath)} ${shellQuote(`.backup '${tmpPath}'`)}`,
-    `rsync -az -e ${shellQuote(`ssh ${sshOpts}`)} ${shellQuote(tmpPath)} ${shellQuote(`${dest.user}@${dest.address}:${r.targetPath}`)}`,
+    `rsync -az${chownFlag}${chmodFlag} -e ${shellQuote(`ssh ${sshOpts}`)} ${shellQuote(tmpPath)} ${shellQuote(`${dest.user}@${dest.address}:${r.targetPath}`)}`,
     `rm -f ${shellQuote(tmpPath)}`,
   ].join(" && ");
 

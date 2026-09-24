@@ -17,6 +17,9 @@ type Replication = {
   dbUser: string | null;
   proxyHostId: number | null;
   targetPort: number | null;
+  targetOwner: string | null;
+  targetMode: string | null;
+  appDbUser: string | null;
   enabled: boolean;
   status: "unknown" | "setting_up" | "in_sync" | "lagging" | "error" | "stopped";
   statusDetail: string | null;
@@ -61,6 +64,10 @@ const EMPTY_FORM = {
   dbPassword: "",
   proxyHostId: "" as number | "",
   targetPort: "",
+  targetOwner: "",
+  targetMode: "",
+  appDbUser: "",
+  appDbPassword: "",
 };
 
 export default function HaPage() {
@@ -318,6 +325,34 @@ export default function HaPage() {
               />
             </div>
           </div>
+          {(form.kind === "folder" || form.kind === "sqlite") && (
+            <div className="space-y-2 rounded border border-neutral-800 p-3">
+              <p className="text-xs text-neutral-500">
+                Optionnel — sans ça, les fichiers arrivent sur la machine cible appartenant au compte SSH dédié à la
+                réplication, pas forcément au compte qui fait tourner le serveur web là-bas.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs text-neutral-400">Propriétaire sur la cible (user:groupe)</label>
+                  <input
+                    value={form.targetOwner}
+                    onChange={(e) => setForm({ ...form, targetOwner: e.target.value })}
+                    placeholder="www-data:www-data"
+                    className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-neutral-400">Droits sur la cible</label>
+                  <input
+                    value={form.targetMode}
+                    onChange={(e) => setForm({ ...form, targetMode: e.target.value })}
+                    placeholder="D755,F644"
+                    className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
           {isDbKind && (
             <div className="space-y-3 rounded border border-neutral-800 p-3">
               <p className="text-xs text-neutral-500">
@@ -355,10 +390,41 @@ export default function HaPage() {
                   />
                 </div>
               </div>
+              {form.kind === "mysql" && (
+                <div className="grid grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
+                  <div className="col-span-2">
+                    <p className="text-xs text-neutral-500">
+                      Optionnel — identifiant de connexion de l&apos;application elle-même (différent de l&apos;admin
+                      ci-dessus). mysqldump ne copie que les données de la base, jamais les comptes MySQL : sans ça,
+                      l&apos;application n&apos;aurait tout simplement pas de compte pour se connecter sur la machine
+                      cible après une bascule.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-neutral-400">Utilisateur applicatif</label>
+                    <input
+                      value={form.appDbUser}
+                      onChange={(e) => setForm({ ...form, appDbUser: e.target.value })}
+                      className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-neutral-400">Mot de passe applicatif</label>
+                    <input
+                      type="password"
+                      value={form.appDbPassword}
+                      onChange={(e) => setForm({ ...form, appDbPassword: e.target.value })}
+                      className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                    />
+                  </div>
+                </div>
+              )}
               {form.kind === "postgres" && (
                 <p className="text-xs text-amber-400">
                   ⚠ La configuration effacera le contenu actuel de la base de données sur la machine cible avant de la
-                  reconstruire depuis la source (nécessaire pour la réplication PostgreSQL).
+                  reconstruire depuis la source (nécessaire pour la réplication PostgreSQL). Les comptes applicatifs
+                  sont automatiquement répliqués avec le reste (pg_basebackup clone tout le serveur, comptes inclus) —
+                  rien à configurer ici.
                 </p>
               )}
             </div>

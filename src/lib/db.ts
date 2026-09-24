@@ -841,6 +841,18 @@ export function migrate(db: Database.Database) {
     -- the same app listens on the same port on both machines) — closing the loop the user asked
     -- for between "replication is healthy" and "failover actually points at it" without a manual
     -- trip through the reverse-proxy page for every replication.
+    -- target_owner/target_mode ('folder'/'sqlite' only) are passed straight to rsync's own
+    -- --chown/--chmod on every transfer, so files land on B already owned by (and permissioned for)
+    -- whatever account runs the web server there — plain rsync -a only preserves the *source's*
+    -- numeric uid/gid, which is meaningless once the receiving side runs the transfer as its own
+    -- unprivileged, backup-dedicated SSH account rather than root. app_db_user/
+    -- app_db_password_encrypted ('mysql' only) are the *application's own* login, separate from
+    -- db_user/db_password_encrypted (the setup-time admin credential) and from repl_user (the
+    -- internal replication-stream role) — mysqldump/mysql only move the named database's own
+    -- schema/data, never the grants table, so without this the app's real login simply wouldn't
+    -- exist on B at all. PostgreSQL needs no equivalent column: pg_basebackup clones the *entire*
+    -- cluster, roles included (they're global state, not per-database), so the app's existing role
+    -- and password are already present on B once the base backup finishes.
     CREATE TABLE IF NOT EXISTS ha_replications (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -856,6 +868,10 @@ export function migrate(db: Database.Database) {
       repl_password_encrypted TEXT,
       proxy_host_id INTEGER,
       target_port INTEGER,
+      target_owner TEXT,
+      target_mode TEXT,
+      app_db_user TEXT,
+      app_db_password_encrypted TEXT,
       enabled INTEGER NOT NULL DEFAULT 1,
       status TEXT NOT NULL DEFAULT 'unknown' CHECK (status IN ('unknown','setting_up','in_sync','lagging','error','stopped')),
       status_detail TEXT,
@@ -871,6 +887,12 @@ export function migrate(db: Database.Database) {
   }
   if (!haReplicationColumns.some((c) => c.name === "target_port")) {
     db.exec(`ALTER TABLE ha_replications ADD COLUMN target_port INTEGER`);
+  }
+  if (!haReplicationColumns.some((c) => c.name === "target_owner")) {
+    db.exec(`ALTER TABLE ha_replications ADD COLUMN target_owner TEXT`);
+    db.exec(`ALTER TABLE ha_replications ADD COLUMN target_mode TEXT`);
+    db.exec(`ALTER TABLE ha_replications ADD COLUMN app_db_user TEXT`);
+    db.exec(`ALTER TABLE ha_replications ADD COLUMN app_db_password_encrypted TEXT`);
   }
 
   const hostColumns = db.prepare(`PRAGMA table_info(hosts)`).all() as { name: string }[];

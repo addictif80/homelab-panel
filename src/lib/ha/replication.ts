@@ -19,6 +19,10 @@ export type Replication = {
   replUser: string | null;
   proxyHostId: number | null;
   targetPort: number | null;
+  targetOwner: string | null;
+  targetMode: string | null;
+  appDbUser: string | null;
+  hasAppDbPassword: boolean;
   enabled: boolean;
   status: ReplicationStatus;
   statusDetail: string | null;
@@ -33,6 +37,7 @@ export type Replication = {
 export type ReplicationSecrets = {
   dbPassword: string | null;
   replPassword: string | null;
+  appDbPassword: string | null;
 };
 
 type ReplicationRow = {
@@ -50,6 +55,10 @@ type ReplicationRow = {
   repl_password_encrypted: string | null;
   proxy_host_id: number | null;
   target_port: number | null;
+  target_owner: string | null;
+  target_mode: string | null;
+  app_db_user: string | null;
+  app_db_password_encrypted: string | null;
   enabled: number;
   status: ReplicationStatus;
   status_detail: string | null;
@@ -73,6 +82,10 @@ function rowToReplication(row: ReplicationRow): Replication {
     replUser: row.repl_user,
     proxyHostId: row.proxy_host_id,
     targetPort: row.target_port,
+    targetOwner: row.target_owner,
+    targetMode: row.target_mode,
+    appDbUser: row.app_db_user,
+    hasAppDbPassword: !!row.app_db_password_encrypted,
     enabled: row.enabled === 1,
     status: row.status,
     statusDetail: row.status_detail,
@@ -96,11 +109,14 @@ export function getReplication(id: string): Replication | null {
 /** The decrypted secrets for one replication — for internal use by the setup/status scripts only. */
 export function getReplicationSecrets(id: string): ReplicationSecrets {
   const row = getDb()
-    .prepare(`SELECT db_password_encrypted, repl_password_encrypted FROM ha_replications WHERE id = ?`)
-    .get(id) as { db_password_encrypted: string | null; repl_password_encrypted: string | null } | undefined;
+    .prepare(`SELECT db_password_encrypted, repl_password_encrypted, app_db_password_encrypted FROM ha_replications WHERE id = ?`)
+    .get(id) as
+    | { db_password_encrypted: string | null; repl_password_encrypted: string | null; app_db_password_encrypted: string | null }
+    | undefined;
   return {
     dbPassword: row?.db_password_encrypted ? vaultDecrypt(row.db_password_encrypted) : null,
     replPassword: row?.repl_password_encrypted ? vaultDecrypt(row.repl_password_encrypted) : null,
+    appDbPassword: row?.app_db_password_encrypted ? vaultDecrypt(row.app_db_password_encrypted) : null,
   };
 }
 
@@ -120,14 +136,26 @@ export type CreateReplicationInput = {
   /** Port the app listens on at the target, if different from the proxy host's own forward port
    * (the common case — same app, same port — needs nothing here). */
   targetPort?: number;
+  /** 'folder'/'sqlite' only — passed to rsync's --chown so files land on B already owned by
+   * whatever account runs the web server there (e.g. "www-data:www-data"), not by the dedicated
+   * SSH account that actually performs the transfer. */
+  targetOwner?: string;
+  /** 'folder'/'sqlite' only — passed to rsync's --chmod (e.g. "D755,F644"). */
+  targetMode?: string;
+  /** 'mysql' only — the application's own database login, created/updated on the target with the
+   * same password so it can connect there after a failover (separate from dbUser/dbPassword, the
+   * admin credential used only during setup). PostgreSQL needs no equivalent: pg_basebackup
+   * clones roles along with everything else. */
+  appDbUser?: string;
+  appDbPassword?: string;
 };
 
 export function createReplication(input: CreateReplicationInput): Replication {
   const id = randomUUID();
   getDb()
     .prepare(
-      `INSERT INTO ha_replications (id, name, kind, source_host_id, target_host_id, source_path, target_path, db_port, db_user, db_password_encrypted, proxy_host_id, target_port)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO ha_replications (id, name, kind, source_host_id, target_host_id, source_path, target_path, db_port, db_user, db_password_encrypted, proxy_host_id, target_port, target_owner, target_mode, app_db_user, app_db_password_encrypted)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -141,7 +169,11 @@ export function createReplication(input: CreateReplicationInput): Replication {
       input.dbUser?.trim() || null,
       input.dbPassword ? vaultEncrypt(input.dbPassword) : null,
       input.proxyHostId ?? null,
-      input.targetPort ?? null
+      input.targetPort ?? null,
+      input.targetOwner?.trim() || null,
+      input.targetMode?.trim() || null,
+      input.appDbUser?.trim() || null,
+      input.appDbPassword ? vaultEncrypt(input.appDbPassword) : null
     );
   return getReplication(id)!;
 }

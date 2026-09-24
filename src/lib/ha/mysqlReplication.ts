@@ -122,6 +122,25 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   await runSshCommand(r.targetHostId, `rm -f ${shellQuote(targetDumpPath)}`);
   if (restoreCode !== 0) throw new Error(restoreErr || "Échec de la restauration sur la machine cible.");
 
+  if (r.appDbUser && secrets.appDbPassword) {
+    updateReplicationStatus(r.id, "setting_up", "Création de l'identifiant applicatif sur la machine cible…");
+    // mysqldump --databases only ever moves the named database's own schema/data, never the grants
+    // table (that lives in the separate `mysql` system database) — without this, the application's
+    // real login simply wouldn't exist on B at all, only the internal replication role above.
+    // Idempotent (CREATE USER IF NOT EXISTS + an unconditional ALTER for the password) so
+    // reconfiguring an existing replication updates the password instead of erroring on a rerun.
+    const appUserSql =
+      `CREATE USER IF NOT EXISTS ${shellQuote(r.appDbUser)}@'%' IDENTIFIED BY ${shellQuote(secrets.appDbPassword)}; ` +
+      `ALTER USER ${shellQuote(r.appDbUser)}@'%' IDENTIFIED BY ${shellQuote(secrets.appDbPassword)}; ` +
+      `GRANT ALL PRIVILEGES ON ${shellQuote(r.sourcePath)}.* TO ${shellQuote(r.appDbUser)}@'%'; FLUSH PRIVILEGES;`;
+    const { code: appUserCode, stderr: appUserErr } = await runSshCommand(
+      r.targetHostId,
+      `echo ${shellQuote(appUserSql)} | ${mysqlCommand("127.0.0.1", port, r.dbUser, secrets.dbPassword)}`,
+      { timeoutMs: SETUP_TIMEOUT_MS }
+    );
+    if (appUserCode !== 0) throw new Error(appUserErr || "Impossible de créer l'identifiant applicatif sur la machine cible.");
+  }
+
   updateReplicationStatus(r.id, "setting_up", "Démarrage de la réplication…");
   const source = getHostConnectionInfo(r.sourceHostId);
   const changeMasterSql =

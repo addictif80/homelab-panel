@@ -19,6 +19,10 @@ export async function POST(req: NextRequest) {
     dbPassword?: string;
     proxyHostId?: number;
     targetPort?: number;
+    targetOwner?: string;
+    targetMode?: string;
+    appDbUser?: string;
+    appDbPassword?: string;
   };
 
   if (!body.name?.trim() || !body.kind || !body.sourceHostId || !body.targetHostId || !body.sourcePath?.trim() || !body.targetPath?.trim()) {
@@ -49,6 +53,10 @@ export async function POST(req: NextRequest) {
     dbPassword: body.dbPassword,
     proxyHostId: body.proxyHostId,
     targetPort: body.targetPort,
+    targetOwner: body.targetOwner,
+    targetMode: body.targetMode,
+    appDbUser: body.appDbUser,
+    appDbPassword: body.appDbPassword,
   });
   logAudit("ha.replication_created", replication.id, `${body.kind} ${body.sourceHostId}->${body.targetHostId}`);
   return NextResponse.json({ replication });
