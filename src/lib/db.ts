@@ -605,6 +605,7 @@ export function migrate(db: Database.Database) {
       ip_address TEXT,
       sender_email TEXT,
       subject TEXT,
+      recipient TEXT,
       received_at TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -701,6 +702,13 @@ export function migrate(db: Database.Database) {
     // Marks the account created by a completed emergency access request — lets the UI show it a
     // simplified "what do I do now" guide instead of the regular panel chrome assuming familiarity.
     db.exec(`ALTER TABLE users ADD COLUMN is_trusted_contact INTEGER NOT NULL DEFAULT 0`);
+  }
+
+  const mailEventColumns = db.prepare(`PRAGMA table_info(mail_events)`).all() as { name: string }[];
+  if (!mailEventColumns.some((c) => c.name === "recipient")) {
+    // Same source restriction as subject (see mail_log_sources' comment above): only rspamd's own
+    // log line (rcpts:/mime_rcpts:) or its /history API ever carries it — Postfix's logs never do.
+    db.exec(`ALTER TABLE mail_events ADD COLUMN recipient TEXT`);
   }
 
   const mailLogSourceColumns = db.prepare(`PRAGMA table_info(mail_log_sources)`).all() as { name: string }[];

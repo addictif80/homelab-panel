@@ -7,6 +7,7 @@ type MailEvent = {
   ipAddress: string | null;
   senderEmail: string | null;
   subject: string | null;
+  recipient: string | null;
   receivedAt: string;
 };
 
@@ -15,17 +16,23 @@ type BlockedSender = { email: string; blockedAt: string };
 export default function MailSecurityPage() {
   const [events, setEvents] = useState<MailEvent[]>([]);
   const [search, setSearch] = useState("");
+  const [recipientFilter, setRecipientFilter] = useState("");
+  const [recipients, setRecipients] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [blockedSenders, setBlockedSenders] = useState<BlockedSender[]>([]);
 
-  const load = useCallback(async (q: string) => {
+  const load = useCallback(async (q: string, recipient: string) => {
     setLoading(true);
     try {
-      const params = q ? `?q=${encodeURIComponent(q)}` : "";
-      const res = await fetch(`/api/security/mail-log${params}`);
+      const params = new URLSearchParams();
+      if (q) params.set("q", q);
+      if (recipient) params.set("recipient", recipient);
+      const qs = params.toString();
+      const res = await fetch(`/api/security/mail-log${qs ? `?${qs}` : ""}`);
       const data = await res.json();
       setEvents(data.events ?? []);
+      setRecipients(data.recipients ?? []);
     } finally {
       setLoading(false);
     }
@@ -38,8 +45,8 @@ export default function MailSecurityPage() {
   }, []);
 
   useEffect(() => {
-    load(search);
-  }, [load, search]);
+    load(search, recipientFilter);
+  }, [load, search, recipientFilter]);
 
   useEffect(() => {
     loadBlockedSenders();
@@ -82,17 +89,32 @@ export default function MailSecurityPage() {
         <div>
           <h1 className="text-lg font-semibold text-neutral-100">Anti-spam mail</h1>
           <p className="mt-1 text-sm text-neutral-400">
-            Historique des mails reçus (IP, expéditeur, sujet) — configurez les sources dans Réglages. Bloquer une
-            ligne bannit l&apos;IP (pare-feu, sur toutes les machines) et l&apos;adresse d&apos;expédition (liste
-            Postfix) simultanément.
+            Historique des mails reçus (IP, expéditeur, destinataire, sujet) — configurez les sources dans Réglages.
+            Bloquer une ligne bannit l&apos;IP (pare-feu, sur toutes les machines) et l&apos;adresse d&apos;expédition
+            (liste Postfix) simultanément. Destinataire et sujet ne sont disponibles qu&apos;avec une source de type
+            API rspamd (voir Réglages).
           </p>
         </div>
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Rechercher IP, expéditeur, sujet..."
-          className="w-64 rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600"
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={recipientFilter}
+            onChange={(e) => setRecipientFilter(e.target.value)}
+            className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100"
+          >
+            <option value="">Tous les destinataires</option>
+            {recipients.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Rechercher IP, expéditeur, sujet..."
+            className="w-64 rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600"
+          />
+        </div>
       </div>
 
       <div className="overflow-x-auto rounded border border-neutral-800">
@@ -102,6 +124,7 @@ export default function MailSecurityPage() {
               <th className="px-3 py-2 font-medium">Date &amp; heure</th>
               <th className="px-3 py-2 font-medium">Adresse IP</th>
               <th className="px-3 py-2 font-medium">Expéditeur</th>
+              <th className="px-3 py-2 font-medium">Destinataire</th>
               <th className="px-3 py-2 font-medium">Sujet</th>
               <th className="px-3 py-2 font-medium"></th>
             </tr>
@@ -114,6 +137,9 @@ export default function MailSecurityPage() {
                 </td>
                 <td className="px-3 py-2 font-mono text-xs text-neutral-200">{e.ipAddress || "—"}</td>
                 <td className="px-3 py-2 text-neutral-300">{e.senderEmail || "—"}</td>
+                <td className="max-w-xs truncate px-3 py-2 text-neutral-300" title={e.recipient || ""}>
+                  {e.recipient || "—"}
+                </td>
                 <td className="max-w-md truncate px-3 py-2 text-neutral-500" title={e.subject || ""}>
                   {e.subject || "—"}
                 </td>
@@ -130,7 +156,7 @@ export default function MailSecurityPage() {
             ))}
             {events.length === 0 && !loading && (
               <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-neutral-600">
+                <td colSpan={6} className="px-3 py-6 text-center text-neutral-600">
                   Aucun mail détecté pour l&apos;instant — vérifiez qu&apos;une source de logs est configurée dans
                   Réglages &gt; Anti-spam mail.
                 </td>

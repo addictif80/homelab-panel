@@ -114,13 +114,13 @@ function updateCursor(id: string, cursor: string | null, lastError: string | nul
 function storeEvents(sourceId: string, events: ReturnType<typeof parseMailLogBatch>): number {
   if (events.length === 0) return 0;
   const insert = getDb().prepare(
-    `INSERT OR IGNORE INTO mail_events (source_id, dedupe_key, ip_address, sender_email, subject, received_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
+    `INSERT OR IGNORE INTO mail_events (source_id, dedupe_key, ip_address, sender_email, subject, recipient, received_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
   );
   const insertMany = getDb().transaction((rows: typeof events) => {
     let inserted = 0;
     for (const e of rows) {
-      const result = insert.run(sourceId, e.dedupeKey, e.ip, e.sender, e.subject, e.receivedAt);
+      const result = insert.run(sourceId, e.dedupeKey, e.ip, e.sender, e.subject, e.recipient, e.receivedAt);
       if (result.changes > 0) inserted++;
     }
     return inserted;
@@ -295,6 +295,7 @@ export type MailEvent = {
   ipAddress: string | null;
   senderEmail: string | null;
   subject: string | null;
+  recipient: string | null;
   receivedAt: string;
 };
 
@@ -304,18 +305,32 @@ type MailEventRow = {
   ip_address: string | null;
   sender_email: string | null;
   subject: string | null;
+  recipient: string | null;
   received_at: string;
 };
 
-export function listMailEvents(limit = 200, search?: string): MailEvent[] {
-  const rows = search
-    ? (getDb()
-        .prepare(
-          `SELECT * FROM mail_events WHERE ip_address LIKE ? OR sender_email LIKE ? OR subject LIKE ?
-           ORDER BY received_at DESC LIMIT ?`
-        )
-        .all(`%${search}%`, `%${search}%`, `%${search}%`, limit) as MailEventRow[])
-    : (getDb().prepare(`SELECT * FROM mail_events ORDER BY received_at DESC LIMIT ?`).all(limit) as MailEventRow[]);
+/**
+ * `search` is a free-text match across IP/sender/subject/recipient; `recipient` is a separate
+ * exact-match filter (fed by the dropdown of already-seen recipients, listDistinctRecipients
+ * below) — the two can be combined, e.g. narrow to one mailbox and then search its own history.
+ */
+export function listMailEvents(limit = 200, search?: string, recipient?: string): MailEvent[] {
+  const conditions: string[] = [];
+  const params: (string | number)[] = [];
+  if (search) {
+    conditions.push("(ip_address LIKE ? OR sender_email LIKE ? OR subject LIKE ? OR recipient LIKE ?)");
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+  }
+  if (recipient) {
+    // Stored recipients can be a comma-joined list for a multi-recipient message — LIKE rather
+    // than an exact match so filtering by one address still finds those.
+    conditions.push("recipient LIKE ?");
+    params.push(`%${recipient}%`);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const rows = getDb()
+    .prepare(`SELECT * FROM mail_events ${where} ORDER BY received_at DESC LIMIT ?`)
+    .all(...params, limit) as MailEventRow[];
 
   return rows.map((r) => ({
     id: r.id,
@@ -323,6 +338,25 @@ export function listMailEvents(limit = 200, search?: string): MailEvent[] {
     ipAddress: r.ip_address,
     senderEmail: r.sender_email,
     subject: r.subject,
+    recipient: r.recipient,
     receivedAt: r.received_at,
   }));
+}
+
+/** Distinct, already-seen recipients — powers the filter dropdown on the Anti-spam page rather
+ * than a free-text field, so picking one always matches something real. A stored value can be a
+ * comma-joined list for a multi-recipient message (see parseRspamdHistoryRow/parseRspamdLine), so
+ * each is split back into individual addresses before deduping. */
+export function listDistinctRecipients(): string[] {
+  const rows = getDb()
+    .prepare(`SELECT DISTINCT recipient FROM mail_events WHERE recipient IS NOT NULL AND recipient != ''`)
+    .all() as { recipient: string }[];
+  const addresses = new Set<string>();
+  for (const row of rows) {
+    for (const addr of row.recipient.split(",")) {
+      const trimmed = addr.trim();
+      if (trimmed) addresses.add(trimmed);
+    }
+  }
+  return Array.from(addresses).sort();
 }

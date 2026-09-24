@@ -5,6 +5,7 @@ export type ParsedMailEvent = {
   ip: string | null;
   sender: string | null;
   subject: string | null;
+  recipient: string | null;
   receivedAt: string;
 };
 
@@ -22,6 +23,12 @@ const RSPAMD_TIMESTAMP_RE = /^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/;
 const RSPAMD_IP_RE = /\bip:\s*([0-9a-fA-F:.]+)/;
 const RSPAMD_FROM_RE = /\bfrom:\s*<([^>]*)>/;
 const RSPAMD_SUBJECT_RE = /\bsubject:\s*"((?:[^"\\]|\\.)*)"/;
+// rspamd's default log_format (conf/logging.inc) includes the envelope recipients as
+// `rcpts: <a@b.com,c@d.com>` when present, falling back to the MIME To: header's
+// `mime_rcpts: <...>` when the envelope ones aren't (some transports only expose one or the
+// other) — same multi-recipient, comma-joined shape either way, stored as-is rather than split.
+const RSPAMD_RCPT_RE = /\brcpts:\s*<([^>]*)>/;
+const RSPAMD_MIME_RCPT_RE = /\bmime_rcpts:\s*<([^>]*)>/;
 
 function parseRspamdLine(sourceId: string, line: string): ParsedMailEvent | null {
   if (!RSPAMD_MARKER.test(line)) return null;
@@ -29,6 +36,7 @@ function parseRspamdLine(sourceId: string, line: string): ParsedMailEvent | null
   const ip = line.match(RSPAMD_IP_RE)?.[1] ?? null;
   const from = line.match(RSPAMD_FROM_RE)?.[1] ?? null;
   const subject = line.match(RSPAMD_SUBJECT_RE)?.[1]?.replace(/\\"/g, '"') ?? null;
+  const recipient = line.match(RSPAMD_RCPT_RE)?.[1] ?? line.match(RSPAMD_MIME_RCPT_RE)?.[1] ?? null;
   if (!ip && !from) return null;
 
   return {
@@ -36,6 +44,7 @@ function parseRspamdLine(sourceId: string, line: string): ParsedMailEvent | null
     ip,
     sender: from,
     subject,
+    recipient,
     receivedAt: ts ? new Date(ts.replace(" ", "T")).toISOString() : new Date().toISOString(),
   };
 }
@@ -74,6 +83,8 @@ export type RspamdHistoryRow = {
   subject?: string;
   action?: string;
   score?: number;
+  rcpt_smtp?: string[];
+  rcpt_mime?: string[];
 };
 
 /**
@@ -87,6 +98,8 @@ export function parseRspamdHistoryRow(sourceId: string, row: RspamdHistoryRow): 
   const ip = clean(row.ip);
   const sender = clean(row.sender_smtp) ?? clean(row.sender_mime);
   const subject = clean(row.subject);
+  const rcpts = (row.rcpt_smtp?.length ? row.rcpt_smtp : row.rcpt_mime) ?? [];
+  const recipient = rcpts.filter((r) => r && r !== "unknown").join(", ") || null;
   if (!ip && !sender) return null;
 
   const receivedAt = row.unix_time ? new Date(row.unix_time * 1000).toISOString() : new Date().toISOString();
@@ -95,6 +108,7 @@ export function parseRspamdHistoryRow(sourceId: string, row: RspamdHistoryRow): 
     ip,
     sender,
     subject,
+    recipient,
     receivedAt,
   };
 }
@@ -130,6 +144,10 @@ export function parseMailLogBatch(sourceId: string, lines: string[]): ParsedMail
         ip,
         sender: from || null,
         subject: null,
+        // Postfix's own logs never carry this either — the recipient only appears on a later
+        // delivery-agent line for the same queue id (local/lmtp/smtp), which this single-batch
+        // correlation doesn't track (see the module doc comment above).
+        recipient: null,
         receivedAt: parseSyslogTimestamp(ts),
       });
     }
