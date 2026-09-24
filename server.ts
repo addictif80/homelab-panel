@@ -30,6 +30,7 @@ import { startMailScheduler } from "./src/lib/mail/mailScheduler";
 import { startRiskScoreScheduler } from "./src/lib/security/riskScore";
 import { startEmergencyAccessScheduler } from "./src/lib/emergencyAccess";
 import { startNpmFailoverScheduler } from "./src/lib/npmFailoverScheduler";
+import { startHaScheduler } from "./src/lib/ha";
 import { startDemoSweeper } from "./src/lib/demo/store";
 import { runWithDemoId, DEMO_COOKIE_NAME } from "./src/lib/demo/context";
 
@@ -74,6 +75,7 @@ app.prepare().then(() => {
   startRiskScoreScheduler();
   startEmergencyAccessScheduler();
   startNpmFailoverScheduler();
+  startHaScheduler();
   startDemoSweeper();
 
   server.listen(port, hostname, () => {

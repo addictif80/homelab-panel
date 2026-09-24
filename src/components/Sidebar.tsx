@@ -39,7 +39,8 @@ type IconName =
   | "disaster"
   | "wrapped"
   | "missioncontrol"
-  | "help";
+  | "help"
+  | "ha";
 
 const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon: IconName }[] }[] = [
   {
@@ -90,6 +91,7 @@ const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon:
       { href: "/disaster-simulator", label: "Simulateur de sinistre", icon: "disaster" },
       { href: "/mail-security", label: "Anti-spam mail", icon: "mail" },
       { href: "/backups", label: "Sauvegardes", icon: "backup" },
+      { href: "/ha", label: "Haute disponibilité", icon: "ha" },
     ],
   },
   {
@@ -373,6 +375,15 @@ function NavIcon({ name }: { name: IconName }) {
           <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
           <path d="M9.5 9.2a2.5 2.5 0 014.8 1c0 1.6-2.3 1.8-2.3 3.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
           <circle cx="12" cy="17" r="1" fill="currentColor" />
+        </svg>
+      );
+    case "ha":
+      return (
+        <svg {...common}>
+          <rect x="3.5" y="4" width="7.5" height="7.5" rx="1.3" stroke="currentColor" strokeWidth="1.6" />
+          <rect x="13" y="12.5" width="7.5" height="7.5" rx="1.3" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M10.5 7.7h5a1.5 1.5 0 011.5 1.5v3.3M9.5 16.2h-1a1.5 1.5 0 01-1.5-1.5v-3.3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          <path d="M15.5 9.5l1.5-1.7 1.5 1.7M8.5 14.5l-1.5 1.7-1.5-1.7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       );
     case "storefront":

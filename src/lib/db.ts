@@ -816,6 +816,43 @@ export function migrate(db: Database.Database) {
       success INTEGER NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- One continuous replication link from a source host to a target host, for the high-
+    -- availability feature (lib/ha/*.ts): a "folder" replication runs lsyncd (inotify+rsync) on
+    -- the source host so a change is pushed within seconds; "mysql"/"postgres" set up that engine's
+    -- own native source/replica replication (binlog / streaming WAL) between the two servers'
+    -- database processes directly — not something this panel's own scheduler drives once it's
+    -- running; "sqlite" has no native replication at all, so it falls back to a frequent consistent
+    -- snapshot-and-copy on a timer (see lib/ha/scheduler.ts), the one type this panel's own
+    -- scheduler keeps re-triggering forever rather than just monitoring.
+    -- source_path/target_path mean different things per kind: a directory for 'folder', a database
+    -- name for 'mysql'/'postgres' (same name expected on both ends), a .db file path for 'sqlite'.
+    -- db_user/db_password_encrypted are admin-level credentials assumed valid on *both* the source
+    -- and target database servers (the common case for a homelab where the same root/admin
+    -- credentials are reused everywhere) — used only during setup, to create the dedicated
+    -- replication role and take the initial consistent copy. repl_user/repl_password_encrypted are
+    -- that dedicated, narrower-scoped role this panel generates and configures on both engines,
+    -- which is what actually carries the ongoing replication stream afterwards.
+    CREATE TABLE IF NOT EXISTS ha_replications (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('folder','mysql','postgres','sqlite')),
+      source_host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+      target_host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+      source_path TEXT NOT NULL,
+      target_path TEXT NOT NULL,
+      db_port INTEGER,
+      db_user TEXT,
+      db_password_encrypted TEXT,
+      repl_user TEXT,
+      repl_password_encrypted TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'unknown' CHECK (status IN ('unknown','setting_up','in_sync','lagging','error','stopped')),
+      status_detail TEXT,
+      last_checked_at TEXT,
+      last_synced_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   const hostColumns = db.prepare(`PRAGMA table_info(hosts)`).all() as { name: string }[];
