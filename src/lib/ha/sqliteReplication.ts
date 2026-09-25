@@ -16,7 +16,7 @@ export async function setupSqliteReplication(r: Replication): Promise<void> {
   const keyPath = await ensurePrivateKeyDeployed(r.sourceHostId);
   await ensurePublicKeyAuthorized(r.targetHostId);
 
-  updateReplicationStatus(r.id, "setting_up", "Vérification de rsync sur la machine cible…");
+  updateReplicationStatus(r.id, "setting_up", "Vérification de rsync sur la machine cible… (installation automatique si absent)");
   await ensureRsyncReachable(r.sourceHostId, r.targetHostId, keyPath);
 
   const targetDir = r.targetPath.slice(0, r.targetPath.lastIndexOf("/")) || "/";

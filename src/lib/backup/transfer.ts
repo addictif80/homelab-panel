@@ -1,5 +1,6 @@
 import { runSshCommand, runSshCommandStreaming, getHostConnectionInfo, shellQuote } from "../ssh";
 import { ensurePrivateKeyDeployed, ensurePublicKeyAuthorized } from "./keys";
+import { installPackageUniversal } from "../hostCompat";
 
 // These are quick filesystem metadata ops (mkdir/find/rm), never expected to take long — unlike
 // the actual rsync transfer below, which legitimately can. Without a timeout, a stuck sudo/profile
@@ -40,18 +41,37 @@ export async function ensureRemoteDir(fromHostId: number, toHostId: number, dirP
  * same machine (a `Match`/forced-command block keyed on the authenticating key, a restricted
  * shell for keys added outside the vendor's own UI, a container-namespaced sshd...), so a check
  * that passes over one credential doesn't prove anything about a transfer made over the other.
+ *
+ * A minimal Docker host (no desktop/server package set, just enough to run `dockerd`) very often
+ * has no rsync installed at all — a real, common case for an HA/backup target, not an edge case —
+ * so a missing rsync here triggers one auto-install attempt (via the panel's own regular
+ * credential for that host, which normally has sudo, unlike the dedicated backup key) before
+ * giving up and asking the user to do it by hand.
  */
 export async function ensureRsyncReachable(fromHostId: number, toHostId: number, keyPath: string): Promise<void> {
   const dest = getHostConnectionInfo(toHostId);
   const sshOpts = `-i ${keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -p ${dest.port}`;
   const command = `ssh ${sshOpts} ${dest.user}@${dest.address} "command -v rsync"`;
-  const { code, stdout, stderr } = await runSshCommand(fromHostId, command, { sudo: true, timeoutMs: METADATA_TIMEOUT_MS });
+  const check = () => runSshCommand(fromHostId, command, { sudo: true, timeoutMs: METADATA_TIMEOUT_MS });
+
+  let { code, stdout, stderr } = await check();
+  if (code !== 0 || !stdout.trim()) {
+    try {
+      await installPackageUniversal(toHostId, "rsync");
+    } catch {
+      // Fall through to the combined error below — the original reachability failure is the more
+      // useful message when auto-install itself isn't possible (no recognized package manager,
+      // e.g.), rather than masking it with the install attempt's own error.
+    }
+    ({ code, stdout, stderr } = await check());
+  }
   if (code !== 0 || !stdout.trim()) {
     throw new Error(
       `rsync n'est pas accessible sur la destination via la connexion réellement utilisée pour le transfert ` +
-        `(clé de sauvegarde dédiée) — ${stderr.trim() || "aucune sortie renvoyée"}. Installe rsync sur cette ` +
-        `machine si ce n'est pas déjà fait ; si c'est déjà le cas, le compte SSH utilisé pour les sauvegardes n'y ` +
-        `a peut-être pas accès (PATH restreint, commande forcée sur cette clé...).`
+        `(clé de sauvegarde dédiée) — ${stderr.trim() || "aucune sortie renvoyée"}. Une tentative d'installation ` +
+        `automatique a été faite et n'a pas suffi : installe rsync manuellement sur cette machine si ce n'est pas ` +
+        `déjà fait ; si c'est déjà le cas, le compte SSH utilisé pour les sauvegardes n'y a peut-être pas accès ` +
+        `(PATH restreint, commande forcée sur cette clé...).`
     );
   }
 }
