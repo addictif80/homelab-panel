@@ -21,6 +21,7 @@ type Replication = {
   targetOwner: string | null;
   targetMode: string | null;
   appDbUser: string | null;
+  targetDbContainer: string | null;
   enabled: boolean;
   status: "unknown" | "setting_up" | "in_sync" | "lagging" | "error" | "stopped";
   statusDetail: string | null;
@@ -71,6 +72,7 @@ const EMPTY_FORM = {
   targetMode: "",
   appDbUser: "",
   appDbPassword: "",
+  targetDbContainer: "",
 };
 
 export default function HaPage() {
@@ -277,6 +279,13 @@ export default function HaPage() {
               failover du reverse proxy
             </a>{" "}
             dès que la configuration réussit — plus besoin de le faire à la main.
+          </p>
+          <p className="mt-2 max-w-3xl rounded border border-amber-900 bg-amber-950/20 p-2 text-xs text-amber-300">
+            ⚠ La réplication ne se fait que dans un sens (source → cible). Une fois basculé sur la machine de secours,
+            tout ce qui y est écrit (nouvelles commandes, uploads...) n&apos;est pas renvoyé vers la source : remettre
+            la source en ligne et y refaire pointer le failover sans avoir d&apos;abord resynchronisé manuellement les
+            données écrites pendant la panne effacerait ces changements. Après un vrai basculement, resynchronise la
+            cible vers la source (ou inversement, selon où sont les données à jour) avant de revenir en arrière.
           </p>
         </div>
         <button
@@ -551,6 +560,26 @@ export default function HaPage() {
                 </p>
               )}
               {form.kind === "mysql" && (
+                <div className="border-t border-neutral-800 pt-3">
+                  <label className="mb-1 block text-xs text-neutral-400">
+                    Container Docker MariaDB/MySQL sur la machine cible (optionnel)
+                  </label>
+                  <input
+                    value={form.targetDbContainer}
+                    onChange={(e) => setForm({ ...form, targetDbContainer: e.target.value })}
+                    placeholder="ex: mariadb"
+                    className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                  />
+                  <p className="mt-1 text-xs text-neutral-600">
+                    Laisse vide si la machine cible a un client mysql/mariadb natif sur son propre système. Si sa base
+                    de données ne tourne que dans un container Docker (aucun client natif sur l&apos;hôte), indique le
+                    nom du container ici — le panel exécutera toutes les commandes SQL de configuration via{" "}
+                    <code>docker exec</code> dans ce container au lieu de s&apos;y connecter directement. La machine
+                    source, elle, reste toujours interrogée nativement.
+                  </p>
+                </div>
+              )}
+              {form.kind === "mysql" && (
                 <div className="grid grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
                   <div className="col-span-2">
                     <p className="text-xs text-neutral-500">
@@ -658,6 +687,11 @@ export default function HaPage() {
                   <p className="mt-0.5 text-xs text-neutral-600">
                     Failover NPM : <span className="text-neutral-400">{proxyHostLabel(r.proxyHostId)}</span>
                     {r.targetPort ? ` (port ${r.targetPort})` : ""}
+                  </p>
+                )}
+                {r.targetDbContainer && (
+                  <p className="mt-0.5 text-xs text-neutral-600">
+                    Admin SQL cible via <span className="font-mono text-neutral-400">docker exec {r.targetDbContainer}</span>
                   </p>
                 )}
               </div>

@@ -53,6 +53,25 @@ function mysqlCommand(host: string, port: number, user: string, password: string
   return `MYSQL_PWD=${shellQuote(password)} mysql -h ${shellQuote(host)} -P ${port} -u ${shellQuote(user)}`;
 }
 
+/** Same as mysqlCommand, but for the *target* host — routed through `docker exec` into
+ * `container` instead of a direct network connection when the target's MariaDB only exists inside
+ * a Docker container (no mysql/mariadb client on the target host's own shell). The container's own
+ * mysqld is what actually dials out to the source for replication — this only changes how the
+ * setup/admin SQL commands themselves are issued, since they still run over SSH on the target host,
+ * just piped into the container rather than into a native client. */
+function targetMysqlCommand(
+  container: string | null,
+  address: string,
+  port: number,
+  user: string,
+  password: string
+): string {
+  if (container) {
+    return `docker exec -i -e ${shellQuote(`MYSQL_PWD=${password}`)} ${shellQuote(container)} mysql -u ${shellQuote(user)}`;
+  }
+  return mysqlCommand(address, port, user, password);
+}
+
 /**
  * Sets up native MySQL/MariaDB source→replica replication end to end: enables binary logging on
  * the source (a dedicated include file + restart, since it's normally off by default and can't be
@@ -153,8 +172,11 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   if (transferCode !== 0) throw new Error(transferErr || "Échec du transfert de l'export vers la machine cible.");
 
   updateReplicationStatus(r.id, "setting_up", "Restauration sur la machine cible…");
-  const restoreCmd = `MYSQL_PWD=${shellQuote(targetCred.password)} mysql -h ${shellQuote(target.address)} -P ${port} -u ${shellQuote(targetCred.user)} < ${shellQuote(targetDumpPath)}`;
-  const { code: restoreCode, stderr: restoreErr } = await runSshCommand(r.targetHostId, restoreCmd, { timeoutMs: SETUP_TIMEOUT_MS });
+  const restoreCmd = `${targetMysqlCommand(r.targetDbContainer, target.address, port, targetCred.user, targetCred.password)} < ${shellQuote(targetDumpPath)}`;
+  const { code: restoreCode, stderr: restoreErr } = await runSshCommand(r.targetHostId, restoreCmd, {
+    timeoutMs: SETUP_TIMEOUT_MS,
+    sudo: !!r.targetDbContainer,
+  });
   await runSshCommand(r.targetHostId, `rm -f ${shellQuote(targetDumpPath)}`);
   if (restoreCode !== 0) throw new Error(restoreErr || "Échec de la restauration sur la machine cible.");
 
@@ -174,8 +196,8 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
       `${grantLines} FLUSH PRIVILEGES;`;
     const { code: appUserCode, stderr: appUserErr } = await runSshCommand(
       r.targetHostId,
-      `echo ${shellQuote(appUserSql)} | ${mysqlCommand(target.address, port, targetCred.user, targetCred.password)}`,
-      { timeoutMs: SETUP_TIMEOUT_MS }
+      `echo ${shellQuote(appUserSql)} | ${targetMysqlCommand(r.targetDbContainer, target.address, port, targetCred.user, targetCred.password)}`,
+      { timeoutMs: SETUP_TIMEOUT_MS, sudo: !!r.targetDbContainer }
     );
     if (appUserCode !== 0) throw new Error(appUserErr || "Impossible de créer l'identifiant applicatif sur la machine cible.");
   }
@@ -187,8 +209,8 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
     `MASTER_LOG_FILE=${shellQuote(logFile)}, MASTER_LOG_POS=${logPos}; START SLAVE;`;
   const { code: startCode, stderr: startErr } = await runSshCommand(
     r.targetHostId,
-    `echo ${shellQuote(changeMasterSql)} | ${mysqlCommand(target.address, port, targetCred.user, targetCred.password)}`,
-    { timeoutMs: SETUP_TIMEOUT_MS }
+    `echo ${shellQuote(changeMasterSql)} | ${targetMysqlCommand(r.targetDbContainer, target.address, port, targetCred.user, targetCred.password)}`,
+    { timeoutMs: SETUP_TIMEOUT_MS, sudo: !!r.targetDbContainer }
   );
   if (startCode !== 0) throw new Error(startErr || "Impossible de démarrer la réplication sur la machine cible.");
 
@@ -220,8 +242,8 @@ export async function checkMysqlReplicationStatus(r: Replication): Promise<void>
   const target = getHostConnectionInfo(r.targetHostId);
   const { stdout, code, stderr } = await runSshCommand(
     r.targetHostId,
-    `${mysqlCommand(target.address, port, targetCred.user, targetCred.password)} -B -e "SHOW SLAVE STATUS"`,
-    { timeoutMs: STATUS_TIMEOUT_MS }
+    `${targetMysqlCommand(r.targetDbContainer, target.address, port, targetCred.user, targetCred.password)} -B -e "SHOW SLAVE STATUS"`,
+    { timeoutMs: STATUS_TIMEOUT_MS, sudo: !!r.targetDbContainer }
   );
   if (code !== 0) {
     updateReplicationStatus(r.id, "error", stderr || "Impossible d'interroger l'état de la réplication sur la machine cible.");

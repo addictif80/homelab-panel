@@ -884,6 +884,7 @@ export function migrate(db: Database.Database) {
       target_mode TEXT,
       app_db_user TEXT,
       app_db_password_encrypted TEXT,
+      target_db_container TEXT,
       enabled INTEGER NOT NULL DEFAULT 1,
       status TEXT NOT NULL DEFAULT 'unknown' CHECK (status IN ('unknown','setting_up','in_sync','lagging','error','stopped')),
       status_detail TEXT,
@@ -939,6 +940,15 @@ export function migrate(db: Database.Database) {
   if (!haReplicationColumns.some((c) => c.name === "target_db_user")) {
     db.exec(`ALTER TABLE ha_replications ADD COLUMN target_db_user TEXT`);
     db.exec(`ALTER TABLE ha_replications ADD COLUMN target_db_password_encrypted TEXT`);
+  }
+
+  // 'mysql' only, optional — the target's MariaDB/MySQL isn't always reachable through a native
+  // client on the target host's own shell: a target that's a Docker LAMP stack (no mysql/mariadb
+  // client installed on the host OS itself, only inside the container) needs every admin SQL
+  // command run through `docker exec` into this container instead of a direct network connection.
+  // Null keeps the original native-client behavior unchanged.
+  if (!haReplicationColumns.some((c) => c.name === "target_db_container")) {
+    db.exec(`ALTER TABLE ha_replications ADD COLUMN target_db_container TEXT`);
   }
 
   // Optional fixed wall-clock time (e.g. "03:00") for daily/weekly plans — null keeps the original
