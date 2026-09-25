@@ -16,6 +16,10 @@ export type Replication = {
   dbPort: number | null;
   dbUser: string | null;
   hasDbPassword: boolean;
+  /** mysql/postgres only — admin credential for the target host, when different from the
+   * source's. Null means "same as dbUser/dbPassword" (see resolveTargetCredential below). */
+  targetDbUser: string | null;
+  hasTargetDbPassword: boolean;
   replUser: string | null;
   proxyHostId: number | null;
   targetPort: number | null;
@@ -36,9 +40,23 @@ export type Replication = {
  * this panel (SSH keys, SMTP passwords...). */
 export type ReplicationSecrets = {
   dbPassword: string | null;
+  targetDbPassword: string | null;
   replPassword: string | null;
   appDbPassword: string | null;
 };
+
+/** The credential to use for admin operations on the *target* host: the dedicated target
+ * credential when one was set, otherwise the same source credential — preserves the original
+ * "one admin login, valid on both machines" behavior for anyone who never needed to change it. */
+export function resolveTargetCredential(
+  r: Pick<Replication, "dbUser" | "targetDbUser">,
+  secrets: Pick<ReplicationSecrets, "dbPassword" | "targetDbPassword">
+): { user: string | null; password: string | null } {
+  return {
+    user: r.targetDbUser || r.dbUser,
+    password: secrets.targetDbPassword || secrets.dbPassword,
+  };
+}
 
 type ReplicationRow = {
   id: string;
@@ -51,6 +69,8 @@ type ReplicationRow = {
   db_port: number | null;
   db_user: string | null;
   db_password_encrypted: string | null;
+  target_db_user: string | null;
+  target_db_password_encrypted: string | null;
   repl_user: string | null;
   repl_password_encrypted: string | null;
   proxy_host_id: number | null;
@@ -79,6 +99,8 @@ function rowToReplication(row: ReplicationRow): Replication {
     dbPort: row.db_port,
     dbUser: row.db_user,
     hasDbPassword: !!row.db_password_encrypted,
+    targetDbUser: row.target_db_user,
+    hasTargetDbPassword: !!row.target_db_password_encrypted,
     replUser: row.repl_user,
     proxyHostId: row.proxy_host_id,
     targetPort: row.target_port,
@@ -109,12 +131,20 @@ export function getReplication(id: string): Replication | null {
 /** The decrypted secrets for one replication — for internal use by the setup/status scripts only. */
 export function getReplicationSecrets(id: string): ReplicationSecrets {
   const row = getDb()
-    .prepare(`SELECT db_password_encrypted, repl_password_encrypted, app_db_password_encrypted FROM ha_replications WHERE id = ?`)
+    .prepare(
+      `SELECT db_password_encrypted, target_db_password_encrypted, repl_password_encrypted, app_db_password_encrypted FROM ha_replications WHERE id = ?`
+    )
     .get(id) as
-    | { db_password_encrypted: string | null; repl_password_encrypted: string | null; app_db_password_encrypted: string | null }
+    | {
+        db_password_encrypted: string | null;
+        target_db_password_encrypted: string | null;
+        repl_password_encrypted: string | null;
+        app_db_password_encrypted: string | null;
+      }
     | undefined;
   return {
     dbPassword: row?.db_password_encrypted ? vaultDecrypt(row.db_password_encrypted) : null,
+    targetDbPassword: row?.target_db_password_encrypted ? vaultDecrypt(row.target_db_password_encrypted) : null,
     replPassword: row?.repl_password_encrypted ? vaultDecrypt(row.repl_password_encrypted) : null,
     appDbPassword: row?.app_db_password_encrypted ? vaultDecrypt(row.app_db_password_encrypted) : null,
   };
@@ -130,6 +160,10 @@ export type CreateReplicationInput = {
   dbPort?: number;
   dbUser?: string;
   dbPassword?: string;
+  /** mysql/postgres only — admin credential for the target host, when it differs from the
+   * source's. Left unset (or blank), the source credential is reused for the target too. */
+  targetDbUser?: string;
+  targetDbPassword?: string;
   /** NPM proxy host (lib/npm.ts) this replication backs — when set, a successful setup run wires
    * the target host straight into that proxy host's failover config automatically. */
   proxyHostId?: number;
@@ -154,8 +188,8 @@ export function createReplication(input: CreateReplicationInput): Replication {
   const id = randomUUID();
   getDb()
     .prepare(
-      `INSERT INTO ha_replications (id, name, kind, source_host_id, target_host_id, source_path, target_path, db_port, db_user, db_password_encrypted, proxy_host_id, target_port, target_owner, target_mode, app_db_user, app_db_password_encrypted)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO ha_replications (id, name, kind, source_host_id, target_host_id, source_path, target_path, db_port, db_user, db_password_encrypted, target_db_user, target_db_password_encrypted, proxy_host_id, target_port, target_owner, target_mode, app_db_user, app_db_password_encrypted)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -168,6 +202,8 @@ export function createReplication(input: CreateReplicationInput): Replication {
       input.dbPort ?? null,
       input.dbUser?.trim() || null,
       input.dbPassword ? vaultEncrypt(input.dbPassword) : null,
+      input.targetDbUser?.trim() || null,
+      input.targetDbPassword ? vaultEncrypt(input.targetDbPassword) : null,
       input.proxyHostId ?? null,
       input.targetPort ?? null,
       input.targetOwner?.trim() || null,

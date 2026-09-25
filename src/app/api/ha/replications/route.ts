@@ -17,6 +17,8 @@ export async function POST(req: NextRequest) {
     dbPort?: number;
     dbUser?: string;
     dbPassword?: string;
+    targetDbUser?: string;
+    targetDbPassword?: string;
     proxyHostId?: number;
     targetPort?: number;
     targetOwner?: string;
@@ -25,8 +27,16 @@ export async function POST(req: NextRequest) {
     appDbPassword?: string;
   };
 
-  if (!body.name?.trim() || !body.kind || !body.sourceHostId || !body.targetHostId || !body.sourcePath?.trim() || !body.targetPath?.trim()) {
-    return NextResponse.json({ error: "Nom, type, machines source/cible et chemins requis." }, { status: 400 });
+  const isDbKind = body.kind === "mysql" || body.kind === "postgres";
+
+  if (!body.name?.trim() || !body.kind || !body.sourceHostId || !body.targetHostId || !body.sourcePath?.trim()) {
+    return NextResponse.json({ error: "Nom, type, machines source/cible et chemin(s)/base(s) requis." }, { status: 400 });
+  }
+  // Native mysql/postgres replication can't rename a database in flight — the target ends up with
+  // exactly the same name(s) as the source no matter what's typed here, so that field is dropped
+  // for these two kinds rather than left to imply a rename that will never actually happen.
+  if (!isDbKind && !body.targetPath?.trim()) {
+    return NextResponse.json({ error: "Chemin/fichier cible requis." }, { status: 400 });
   }
   if (!["folder", "mysql", "postgres", "sqlite"].includes(body.kind)) {
     return NextResponse.json({ error: "Type de réplication invalide." }, { status: 400 });
@@ -34,9 +44,15 @@ export async function POST(req: NextRequest) {
   if (body.sourceHostId === body.targetHostId) {
     return NextResponse.json({ error: "La machine source et la machine cible doivent être différentes." }, { status: 400 });
   }
-  if ((body.kind === "mysql" || body.kind === "postgres") && (!body.dbUser?.trim() || !body.dbPassword)) {
+  if (isDbKind && (!body.dbUser?.trim() || !body.dbPassword)) {
     return NextResponse.json(
-      { error: "Identifiant et mot de passe administrateur requis (valides sur les deux machines) pour ce type de réplication." },
+      { error: "Identifiant et mot de passe administrateur requis pour la machine source." },
+      { status: 400 }
+    );
+  }
+  if (isDbKind && (!!body.targetDbUser?.trim() !== !!body.targetDbPassword)) {
+    return NextResponse.json(
+      { error: "Identifiants administrateur de la machine cible : renseigne l'utilisateur et le mot de passe ensemble, ou laisse les deux vides." },
       { status: 400 }
     );
   }
@@ -47,10 +63,12 @@ export async function POST(req: NextRequest) {
     sourceHostId: body.sourceHostId,
     targetHostId: body.targetHostId,
     sourcePath: body.sourcePath,
-    targetPath: body.targetPath,
+    targetPath: isDbKind ? body.sourcePath : body.targetPath!,
     dbPort: body.dbPort,
     dbUser: body.dbUser,
     dbPassword: body.dbPassword,
+    targetDbUser: body.targetDbUser,
+    targetDbPassword: body.targetDbPassword,
     proxyHostId: body.proxyHostId,
     targetPort: body.targetPort,
     targetOwner: body.targetOwner,

@@ -15,6 +15,7 @@ type Replication = {
   targetPath: string;
   dbPort: number | null;
   dbUser: string | null;
+  targetDbUser: string | null;
   proxyHostId: number | null;
   targetPort: number | null;
   targetOwner: string | null;
@@ -62,6 +63,8 @@ const EMPTY_FORM = {
   dbPort: "",
   dbUser: "",
   dbPassword: "",
+  targetDbUser: "",
+  targetDbPassword: "",
   proxyHostId: "" as number | "",
   targetPort: "",
   targetOwner: "",
@@ -80,6 +83,10 @@ export default function HaPage() {
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [differentTargetCreds, setDifferentTargetCreds] = useState(false);
+  const [availableDatabases, setAvailableDatabases] = useState<string[] | null>(null);
+  const [listingDatabases, setListingDatabases] = useState(false);
+  const [listDatabasesError, setListDatabasesError] = useState("");
 
   const load = useCallback(async () => {
     const [hostsRes, replRes, proxyRes] = await Promise.all([
@@ -121,6 +128,44 @@ export default function HaPage() {
 
   const isDbKind = form.kind === "mysql" || form.kind === "postgres";
 
+  function parseDbNames(value: string): string[] {
+    return value
+      .split(/[,\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
+  function toggleDbName(name: string) {
+    const current = parseDbNames(form.sourcePath);
+    const next = current.includes(name) ? current.filter((n) => n !== name) : [...current, name];
+    setForm({ ...form, sourcePath: next.join(", ") });
+  }
+
+  async function listSourceDatabases() {
+    if (!form.sourceHostId || !form.dbUser.trim() || !form.dbPassword) return;
+    setListingDatabases(true);
+    setListDatabasesError("");
+    try {
+      const res = await fetch("/api/ha/mysql-databases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hostId: form.sourceHostId,
+          port: form.dbPort ? Number(form.dbPort) : undefined,
+          dbUser: form.dbUser,
+          dbPassword: form.dbPassword,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setAvailableDatabases(data.databases);
+    } catch (err) {
+      setListDatabasesError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setListingDatabases(false);
+    }
+  }
+
   async function createReplication(e: React.FormEvent) {
     e.preventDefault();
     setError("");
@@ -134,6 +179,8 @@ export default function HaPage() {
           sourceHostId: form.sourceHostId || undefined,
           targetHostId: form.targetHostId || undefined,
           dbPort: form.dbPort ? Number(form.dbPort) : undefined,
+          targetDbUser: differentTargetCreds ? form.targetDbUser : undefined,
+          targetDbPassword: differentTargetCreds ? form.targetDbPassword : undefined,
           proxyHostId: form.proxyHostId || undefined,
           targetPort: form.targetPort ? Number(form.targetPort) : undefined,
         }),
@@ -142,6 +189,8 @@ export default function HaPage() {
       if (!res.ok) throw new Error(data.error);
       setForm(EMPTY_FORM);
       setShowCreate(false);
+      setDifferentTargetCreds(false);
+      setAvailableDatabases(null);
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur.");
@@ -255,7 +304,11 @@ export default function HaPage() {
             <label className="mb-1 block text-xs text-neutral-400">Type</label>
             <select
               value={form.kind}
-              onChange={(e) => setForm({ ...form, kind: e.target.value as Kind, sourcePath: "", targetPath: "" })}
+              onChange={(e) => {
+                setForm({ ...form, kind: e.target.value as Kind, sourcePath: "", targetPath: "" });
+                setAvailableDatabases(null);
+                setListDatabasesError("");
+              }}
               className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
             >
               {(Object.keys(KIND_LABELS) as Kind[]).map((k) => (
@@ -299,32 +352,98 @@ export default function HaPage() {
               </select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className={form.kind === "mysql" ? "" : "grid grid-cols-2 gap-3"}>
             <div>
               <label className="mb-1 block text-xs text-neutral-400">
-                {form.kind === "folder" ? "Dossier source" : form.kind === "sqlite" ? "Fichier .db source" : "Nom de la base"}
+                {form.kind === "folder"
+                  ? "Dossier source"
+                  : form.kind === "sqlite"
+                    ? "Fichier .db source"
+                    : form.kind === "mysql"
+                      ? "Bases de données (une ou plusieurs)"
+                      : "Nom de la base"}
               </label>
               <input
                 value={form.sourcePath}
                 onChange={(e) => setForm({ ...form, sourcePath: e.target.value })}
-                placeholder={form.kind === "folder" ? "/data/monapp" : form.kind === "sqlite" ? "/data/app.db" : "ma_base"}
+                placeholder={
+                  form.kind === "folder"
+                    ? "/data/monapp"
+                    : form.kind === "sqlite"
+                      ? "/data/app.db"
+                      : form.kind === "mysql"
+                        ? "ma_base, autre_base"
+                        : "ma_base"
+                }
                 className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
                 required
               />
+              {form.kind === "mysql" && (
+                <div className="mt-2 space-y-1.5">
+                  <button
+                    type="button"
+                    onClick={listSourceDatabases}
+                    disabled={!form.sourceHostId || !form.dbUser.trim() || !form.dbPassword || listingDatabases}
+                    className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-40"
+                  >
+                    {listingDatabases ? "Connexion…" : "Lister les bases de la machine source"}
+                  </button>
+                  {listDatabasesError && <p className="text-xs text-red-400">{listDatabasesError}</p>}
+                  {availableDatabases && (
+                    <div className="flex flex-wrap gap-1.5 rounded border border-neutral-800 bg-neutral-950 p-2">
+                      {availableDatabases.length === 0 && (
+                        <span className="text-xs text-neutral-600">Aucune base trouvée (hors bases système).</span>
+                      )}
+                      {availableDatabases.map((db) => {
+                        const checked = parseDbNames(form.sourcePath).includes(db);
+                        return (
+                          <label
+                            key={db}
+                            className={`flex cursor-pointer items-center gap-1.5 rounded border px-2 py-1 text-xs ${
+                              checked ? "border-blue-700 bg-blue-950/40 text-blue-200" : "border-neutral-700 text-neutral-400"
+                            }`}
+                          >
+                            <input type="checkbox" checked={checked} onChange={() => toggleDbName(db)} className="hidden" />
+                            {db}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-            <div>
-              <label className="mb-1 block text-xs text-neutral-400">
-                {form.kind === "folder" ? "Dossier destination" : form.kind === "sqlite" ? "Fichier .db destination" : "Nom de la base (cible)"}
-              </label>
-              <input
-                value={form.targetPath}
-                onChange={(e) => setForm({ ...form, targetPath: e.target.value })}
-                placeholder={form.kind === "folder" ? "/data/monapp" : form.kind === "sqlite" ? "/data/app.db" : "ma_base"}
-                className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
-                required
-              />
-            </div>
+            {form.kind !== "mysql" && form.kind !== "postgres" && (
+              <div>
+                <label className="mb-1 block text-xs text-neutral-400">
+                  {form.kind === "folder" ? "Dossier destination" : "Fichier .db destination"}
+                </label>
+                <input
+                  value={form.targetPath}
+                  onChange={(e) => setForm({ ...form, targetPath: e.target.value })}
+                  placeholder={form.kind === "folder" ? "/data/monapp" : "/data/app.db"}
+                  className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                  required
+                />
+              </div>
+            )}
           </div>
+          {form.kind === "postgres" && (
+            <div>
+              <label className="mb-1 block text-xs text-neutral-400">Nom de la base (repère seulement)</label>
+              <input
+                value={form.sourcePath}
+                onChange={(e) => setForm({ ...form, sourcePath: e.target.value })}
+                placeholder="ma_base"
+                className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                required
+              />
+              <p className="mt-1 text-xs text-neutral-600">
+                pg_basebackup clone tout le serveur PostgreSQL, pas une base en particulier — ce nom n&apos;est là que
+                pour t&apos;y retrouver dans la liste ci-dessous.
+              </p>
+            </div>
+          )}
           {(form.kind === "folder" || form.kind === "sqlite") && (
             <div className="space-y-2 rounded border border-neutral-800 p-3">
               <p className="text-xs text-neutral-500">
@@ -356,8 +475,9 @@ export default function HaPage() {
           {isDbKind && (
             <div className="space-y-3 rounded border border-neutral-800 p-3">
               <p className="text-xs text-neutral-500">
-                Identifiants administrateur, valides sur les deux machines — utilisés une seule fois pour créer un
-                rôle de réplication dédié, jamais réutilisés ensuite.
+                Identifiants administrateur de la machine source — utilisés une seule fois pour créer un rôle de
+                réplication dédié, jamais réutilisés ensuite. Si le mot de passe admin est différent sur la machine
+                cible, coche la case ci-dessous pour le préciser séparément — sinon celui-ci est réutilisé tel quel.
               </p>
               <div className="grid grid-cols-3 gap-3">
                 <div>
@@ -371,7 +491,7 @@ export default function HaPage() {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs text-neutral-400">Utilisateur admin</label>
+                  <label className="mb-1 block text-xs text-neutral-400">Utilisateur admin (source)</label>
                   <input
                     value={form.dbUser}
                     onChange={(e) => setForm({ ...form, dbUser: e.target.value })}
@@ -380,7 +500,7 @@ export default function HaPage() {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs text-neutral-400">Mot de passe admin</label>
+                  <label className="mb-1 block text-xs text-neutral-400">Mot de passe admin (source)</label>
                   <input
                     type="password"
                     value={form.dbPassword}
@@ -390,6 +510,46 @@ export default function HaPage() {
                   />
                 </div>
               </div>
+              <label className="flex items-center gap-1.5 text-xs text-neutral-400">
+                <input
+                  type="checkbox"
+                  checked={differentTargetCreds}
+                  onChange={(e) => {
+                    setDifferentTargetCreds(e.target.checked);
+                    if (!e.target.checked) setForm({ ...form, targetDbUser: "", targetDbPassword: "" });
+                  }}
+                />
+                Identifiants admin différents sur la machine cible
+              </label>
+              {differentTargetCreds && (
+                <div className="grid grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
+                  <div>
+                    <label className="mb-1 block text-xs text-neutral-400">Utilisateur admin (cible)</label>
+                    <input
+                      value={form.targetDbUser}
+                      onChange={(e) => setForm({ ...form, targetDbUser: e.target.value })}
+                      className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-neutral-400">Mot de passe admin (cible)</label>
+                    <input
+                      type="password"
+                      value={form.targetDbPassword}
+                      onChange={(e) => setForm({ ...form, targetDbPassword: e.target.value })}
+                      className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                      required
+                    />
+                  </div>
+                </div>
+              )}
+              {form.kind === "mysql" && (
+                <p className="text-xs text-neutral-600">
+                  La ou les bases sont créées automatiquement sur la machine cible si elles n&apos;y existent pas déjà
+                  — mysqldump s&apos;en charge lui-même, rien à cocher.
+                </p>
+              )}
               {form.kind === "mysql" && (
                 <div className="grid grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
                   <div className="col-span-2">
@@ -485,8 +645,14 @@ export default function HaPage() {
                   {r.name} <span className="text-xs text-neutral-500">— {KIND_LABELS[r.kind]}</span>
                 </p>
                 <p className="text-xs text-neutral-500">
-                  {hostName(r.sourceHostId)} → {hostName(r.targetHostId)} · <span className="font-mono">{r.sourcePath}</span> →{" "}
-                  <span className="font-mono">{r.targetPath}</span>
+                  {hostName(r.sourceHostId)} → {hostName(r.targetHostId)} ·{" "}
+                  {r.kind === "mysql" || r.kind === "postgres" ? (
+                    <span className="font-mono">{r.sourcePath}</span>
+                  ) : (
+                    <>
+                      <span className="font-mono">{r.sourcePath}</span> → <span className="font-mono">{r.targetPath}</span>
+                    </>
+                  )}
                 </p>
                 {r.proxyHostId && (
                   <p className="mt-0.5 text-xs text-neutral-600">

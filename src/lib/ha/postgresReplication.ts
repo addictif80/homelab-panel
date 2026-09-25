@@ -6,6 +6,7 @@ import {
   setReplicationCredential,
   getReplicationSecrets,
   updateReplicationStatus,
+  resolveTargetCredential,
   type Replication,
 } from "./replication";
 
@@ -34,7 +35,16 @@ function psql(host: string, port: number, user: string, password: string, sql: s
 export async function setupPostgresReplication(r: Replication): Promise<void> {
   const secrets = getReplicationSecrets(r.id);
   if (!r.dbUser || !secrets.dbPassword) {
-    throw new Error("Identifiant/mot de passe administrateur PostgreSQL requis (valides sur les deux machines) pour configurer la réplication.");
+    throw new Error("Identifiant/mot de passe administrateur PostgreSQL requis pour la machine source pour configurer la réplication.");
+  }
+  // Only needed for the one query below, before pg_basebackup wipes and rebuilds the target's data
+  // directory from the source's — after that, the target *is* a byte copy of the source cluster
+  // (roles included), so its admin login becomes identical to the source's for anything checked
+  // afterwards (checkPostgresReplicationStatus). This is the one moment the two can still validly
+  // differ: the target's own, still-independent PostgreSQL instance, before it's overwritten.
+  const targetCred = resolveTargetCredential(r, secrets);
+  if (!targetCred.user || !targetCred.password) {
+    throw new Error("Identifiant/mot de passe administrateur PostgreSQL requis pour la machine cible (ou laisse ces champs vides pour réutiliser ceux de la source).");
   }
   const port = r.dbPort || 5432;
   const cred = generateReplicationCredential("hlp_repl");
@@ -49,7 +59,7 @@ export async function setupPostgresReplication(r: Replication): Promise<void> {
   updateReplicationStatus(r.id, "setting_up", "Lecture du dossier de données de la machine cible…");
   const { stdout: targetDataDirOut, code: targetDataDirCode } = await runSshCommand(
     r.targetHostId,
-    psql("127.0.0.1", port, r.dbUser, secrets.dbPassword, "SHOW data_directory;"),
+    psql("127.0.0.1", port, targetCred.user, targetCred.password, "SHOW data_directory;"),
     { timeoutMs: STATUS_TIMEOUT_MS }
   );
   if (targetDataDirCode !== 0 || !targetDataDirOut.trim()) {

@@ -873,6 +873,8 @@ export function migrate(db: Database.Database) {
       db_port INTEGER,
       db_user TEXT,
       db_password_encrypted TEXT,
+      target_db_user TEXT,
+      target_db_password_encrypted TEXT,
       repl_user TEXT,
       repl_password_encrypted TEXT,
       proxy_host_id INTEGER,
@@ -928,6 +930,14 @@ export function migrate(db: Database.Database) {
     db.exec(`ALTER TABLE ha_replications ADD COLUMN target_mode TEXT`);
     db.exec(`ALTER TABLE ha_replications ADD COLUMN app_db_user TEXT`);
     db.exec(`ALTER TABLE ha_replications ADD COLUMN app_db_password_encrypted TEXT`);
+  }
+  // mysql/postgres: the admin credential used to set up replication was assumed identical on both
+  // machines — a real limitation when the two servers were never given the same root password.
+  // These columns are optional and null by default: when empty, source credentials are reused for
+  // the target too (unchanged behavior for every replication created before this).
+  if (!haReplicationColumns.some((c) => c.name === "target_db_user")) {
+    db.exec(`ALTER TABLE ha_replications ADD COLUMN target_db_user TEXT`);
+    db.exec(`ALTER TABLE ha_replications ADD COLUMN target_db_password_encrypted TEXT`);
   }
 
   const hostColumns = db.prepare(`PRAGMA table_info(hosts)`).all() as { name: string }[];

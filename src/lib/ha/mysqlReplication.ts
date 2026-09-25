@@ -6,8 +6,20 @@ import {
   setReplicationCredential,
   getReplicationSecrets,
   updateReplicationStatus,
+  resolveTargetCredential,
   type Replication,
 } from "./replication";
+
+/** `sourcePath` doubles as a list of database names for this engine (a single native replication
+ * stream naturally carries several databases — MariaDB just needs one `binlog_do_db` line per
+ * name) — split on comma/whitespace so "ma_base" and "ma_base, autre_base" both work from the same
+ * plain text field the UI already has. */
+function parseDatabaseNames(sourcePath: string): string[] {
+  return sourcePath
+    .split(/[,\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 const SETUP_TIMEOUT_MS = 5 * 60_000;
 const STATUS_TIMEOUT_MS = 15_000;
@@ -53,7 +65,15 @@ function mysqlCommand(host: string, port: number, user: string, password: string
 export async function setupMysqlReplication(r: Replication): Promise<void> {
   const secrets = getReplicationSecrets(r.id);
   if (!r.dbUser || !secrets.dbPassword) {
-    throw new Error("Identifiant/mot de passe administrateur MySQL requis (valides sur les deux machines) pour configurer la réplication.");
+    throw new Error("Identifiant/mot de passe administrateur MySQL requis pour la machine source pour configurer la réplication.");
+  }
+  const targetCred = resolveTargetCredential(r, secrets);
+  if (!targetCred.user || !targetCred.password) {
+    throw new Error("Identifiant/mot de passe administrateur MySQL requis pour la machine cible (ou laisse ces champs vides pour réutiliser ceux de la source).");
+  }
+  const databases = parseDatabaseNames(r.sourcePath);
+  if (databases.length === 0) {
+    throw new Error("Au moins un nom de base de données est requis.");
   }
   const port = r.dbPort || 3306;
   const cred = generateReplicationCredential("hlp_repl");
@@ -70,7 +90,8 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   // host id (offset to stay clear of MySQL's reserved id 0) rather than hardcoded, so two
   // replications from different source hosts never collide.
   const serverId = 1000 + r.sourceHostId;
-  const binlogConf = `[mariadb]\nserver-id = ${serverId}\nlog_bin = /var/log/mysql/mysql-bin.log\nbinlog_do_db = ${r.sourcePath}\n`;
+  const binlogDoDbLines = databases.map((db) => `binlog_do_db = ${db}`).join("\n");
+  const binlogConf = `[mariadb]\nserver-id = ${serverId}\nlog_bin = /var/log/mysql/mysql-bin.log\n${binlogDoDbLines}\n`;
   const writeConf = `cat > ${confDir}/99-homelab-panel-ha.cnf <<'HLP_MYSQL_CONF_EOF'\n${binlogConf}\nHLP_MYSQL_CONF_EOF`;
   const { code: writeConfCode, stderr: writeConfErr } = await runSshCommand(r.sourceHostId, writeConf, {
     sudo: true,
@@ -88,9 +109,13 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   );
   if (grantCode !== 0) throw new Error(grantErr || "Impossible de créer le rôle de réplication MySQL.");
 
-  updateReplicationStatus(r.id, "setting_up", "Export initial de la base…");
+  updateReplicationStatus(r.id, "setting_up", `Export initial de ${databases.length > 1 ? "des bases" : "la base"}…`);
   const dumpPath = `/tmp/hlp-mysql-dump-${r.id}.sql`;
-  const dumpCmd = `MYSQL_PWD=${shellQuote(secrets.dbPassword)} mysqldump -h 127.0.0.1 -P ${port} -u ${shellQuote(r.dbUser)} --single-transaction --master-data=2 --databases ${shellQuote(r.sourcePath)} > ${shellQuote(dumpPath)}`;
+  const dbArgs = databases.map((db) => shellQuote(db)).join(" ");
+  // --databases (rather than naming the db positionally) is what makes mysqldump prepend a
+  // `CREATE DATABASE IF NOT EXISTS` for each one — the target database(s) get created automatically
+  // on restore even if they don't exist yet there, no separate step needed.
+  const dumpCmd = `MYSQL_PWD=${shellQuote(secrets.dbPassword)} mysqldump -h 127.0.0.1 -P ${port} -u ${shellQuote(r.dbUser)} --single-transaction --master-data=2 --databases ${dbArgs} > ${shellQuote(dumpPath)}`;
   const { code: dumpCode, stderr: dumpErr } = await runSshCommand(r.sourceHostId, dumpCmd, { timeoutMs: SETUP_TIMEOUT_MS });
   if (dumpCode !== 0) throw new Error(dumpErr || "Échec de l'export initial de la base MySQL.");
 
@@ -117,7 +142,7 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   if (transferCode !== 0) throw new Error(transferErr || "Échec du transfert de l'export vers la machine cible.");
 
   updateReplicationStatus(r.id, "setting_up", "Restauration sur la machine cible…");
-  const restoreCmd = `MYSQL_PWD=${shellQuote(secrets.dbPassword)} mysql -h 127.0.0.1 -P ${port} -u ${shellQuote(r.dbUser)} < ${shellQuote(targetDumpPath)}`;
+  const restoreCmd = `MYSQL_PWD=${shellQuote(targetCred.password)} mysql -h 127.0.0.1 -P ${port} -u ${shellQuote(targetCred.user)} < ${shellQuote(targetDumpPath)}`;
   const { code: restoreCode, stderr: restoreErr } = await runSshCommand(r.targetHostId, restoreCmd, { timeoutMs: SETUP_TIMEOUT_MS });
   await runSshCommand(r.targetHostId, `rm -f ${shellQuote(targetDumpPath)}`);
   if (restoreCode !== 0) throw new Error(restoreErr || "Échec de la restauration sur la machine cible.");
@@ -129,13 +154,16 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
     // real login simply wouldn't exist on B at all, only the internal replication role above.
     // Idempotent (CREATE USER IF NOT EXISTS + an unconditional ALTER for the password) so
     // reconfiguring an existing replication updates the password instead of erroring on a rerun.
+    // One GRANT per database — MySQL's grant syntax has no wildcard/list form for naming several
+    // specific databases at once.
+    const grantLines = databases.map((db) => `GRANT ALL PRIVILEGES ON ${shellQuote(db)}.* TO ${shellQuote(r.appDbUser!)}@'%';`).join(" ");
     const appUserSql =
       `CREATE USER IF NOT EXISTS ${shellQuote(r.appDbUser)}@'%' IDENTIFIED BY ${shellQuote(secrets.appDbPassword)}; ` +
       `ALTER USER ${shellQuote(r.appDbUser)}@'%' IDENTIFIED BY ${shellQuote(secrets.appDbPassword)}; ` +
-      `GRANT ALL PRIVILEGES ON ${shellQuote(r.sourcePath)}.* TO ${shellQuote(r.appDbUser)}@'%'; FLUSH PRIVILEGES;`;
+      `${grantLines} FLUSH PRIVILEGES;`;
     const { code: appUserCode, stderr: appUserErr } = await runSshCommand(
       r.targetHostId,
-      `echo ${shellQuote(appUserSql)} | ${mysqlCommand("127.0.0.1", port, r.dbUser, secrets.dbPassword)}`,
+      `echo ${shellQuote(appUserSql)} | ${mysqlCommand("127.0.0.1", port, targetCred.user, targetCred.password)}`,
       { timeoutMs: SETUP_TIMEOUT_MS }
     );
     if (appUserCode !== 0) throw new Error(appUserErr || "Impossible de créer l'identifiant applicatif sur la machine cible.");
@@ -149,7 +177,7 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
     `MASTER_LOG_FILE=${shellQuote(logFile)}, MASTER_LOG_POS=${logPos}; START SLAVE;`;
   const { code: startCode, stderr: startErr } = await runSshCommand(
     r.targetHostId,
-    `echo ${shellQuote(changeMasterSql)} | ${mysqlCommand("127.0.0.1", port, r.dbUser, secrets.dbPassword)}`,
+    `echo ${shellQuote(changeMasterSql)} | ${mysqlCommand("127.0.0.1", port, targetCred.user, targetCred.password)}`,
     { timeoutMs: SETUP_TIMEOUT_MS }
   );
   if (startCode !== 0) throw new Error(startErr || "Impossible de démarrer la réplication sur la machine cible.");
@@ -173,14 +201,15 @@ function parseSlaveStatus(output: string): Record<string, string> | null {
 
 export async function checkMysqlReplicationStatus(r: Replication): Promise<void> {
   const secrets = getReplicationSecrets(r.id);
-  if (!r.dbUser || !secrets.dbPassword) {
+  const targetCred = resolveTargetCredential(r, secrets);
+  if (!targetCred.user || !targetCred.password) {
     updateReplicationStatus(r.id, "error", "Identifiants administrateur manquants pour vérifier l'état.");
     return;
   }
   const port = r.dbPort || 3306;
   const { stdout, code, stderr } = await runSshCommand(
     r.targetHostId,
-    `${mysqlCommand("127.0.0.1", port, r.dbUser, secrets.dbPassword)} -B -e "SHOW SLAVE STATUS"`,
+    `${mysqlCommand("127.0.0.1", port, targetCred.user, targetCred.password)} -B -e "SHOW SLAVE STATUS"`,
     { timeoutMs: STATUS_TIMEOUT_MS }
   );
   if (code !== 0) {
