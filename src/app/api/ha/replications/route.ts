@@ -26,6 +26,7 @@ export async function POST(req: NextRequest) {
     appDbUser?: string;
     appDbPassword?: string;
     targetDbContainer?: string;
+    sourceDbContainer?: string;
   };
 
   const isDbKind = body.kind === "mysql" || body.kind === "postgres";
@@ -77,6 +78,7 @@ export async function POST(req: NextRequest) {
     appDbUser: body.appDbUser,
     appDbPassword: body.appDbPassword,
     targetDbContainer: body.targetDbContainer,
+    sourceDbContainer: body.sourceDbContainer,
   });
   logAudit("ha.replication_created", replication.id, `${body.kind} ${body.sourceHostId}->${body.targetHostId}`);
   return NextResponse.json({ replication });

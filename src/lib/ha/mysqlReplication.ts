@@ -1,6 +1,7 @@
 import { runSshCommand, getHostConnectionInfo, shellQuote } from "../ssh";
 import { ensurePrivateKeyDeployed, ensurePublicKeyAuthorized } from "../backup/keys";
 import { ensureRemoteDir, ensureRsyncReachable } from "../backup/transfer";
+import { restartService } from "./hostCompat";
 import {
   generateReplicationCredential,
   setReplicationCredential,
@@ -24,48 +25,59 @@ function parseDatabaseNames(sourcePath: string): string[] {
 const SETUP_TIMEOUT_MS = 5 * 60_000;
 const STATUS_TIMEOUT_MS = 15_000;
 
-/** Debian/Ubuntu's MariaDB and MySQL packages each ship their own conf.d directory (only one of
- * which exists on a given host, depending which engine is actually installed) — tried in order
- * rather than assumed, since guessing wrong means writing a config file nothing ever reads. */
-async function findMysqlConfDir(hostId: number): Promise<string> {
+/** Debian/Ubuntu's MariaDB and MySQL packages (and the official Docker images, internally built the
+ * same way) each ship their own conf.d directory (only one of which exists on a given host,
+ * depending which engine is actually installed) — tried in order rather than assumed, since
+ * guessing wrong means writing a config file nothing ever reads. Routed through `docker exec` when
+ * `container` is set, so this works the same whether MariaDB is native or containerized. */
+async function findMysqlConfDir(hostId: number, container: string | null): Promise<string> {
   const candidates = ["/etc/mysql/mariadb.conf.d", "/etc/mysql/mysql.conf.d", "/etc/mysql/conf.d"];
   for (const dir of candidates) {
-    const { code } = await runSshCommand(hostId, `test -d ${shellQuote(dir)}`, { timeoutMs: STATUS_TIMEOUT_MS });
+    const testCmd = container ? `docker exec ${shellQuote(container)} test -d ${shellQuote(dir)}` : `test -d ${shellQuote(dir)}`;
+    const { code } = await runSshCommand(hostId, testCmd, { timeoutMs: STATUS_TIMEOUT_MS, sudo: !!container });
     if (code === 0) return dir;
   }
   throw new Error(
-    "Impossible de trouver le dossier de configuration MySQL/MariaDB (/etc/mysql/*.conf.d) sur cette machine — l'installation ne correspond pas au paquet Debian/Ubuntu standard."
+    `Impossible de trouver le dossier de configuration MySQL/MariaDB (/etc/mysql/*.conf.d) ${
+      container ? `dans le container "${container}"` : "sur cette machine"
+    } — l'installation ne correspond pas au paquet Debian/Ubuntu standard (ou à l'image Docker officielle).`
   );
 }
 
-/** Both `mariadb`/`mysql` are tried as the service name — the package renamed the systemd unit
- * across versions/distros, and probing which one actually exists is more reliable than assuming. */
-async function restartMysqlService(hostId: number): Promise<void> {
-  const { code, stderr } = await runSshCommand(
-    hostId,
-    `systemctl restart mariadb 2>/dev/null || systemctl restart mysql 2>/dev/null`,
-    { sudo: true, timeoutMs: SETUP_TIMEOUT_MS }
-  );
-  if (code !== 0) throw new Error(stderr || "Impossible de redémarrer le service MySQL/MariaDB sur cette machine.");
+/** Restarts the MySQL/MariaDB process so a config file just written actually takes effect — a
+ * `docker restart` when containerized (the config change already persists in the container's own
+ * writable layer, no volume/recreate needed), otherwise tries both the `mariadb` and `mysql`
+ * service names across systemd/OpenRC/SysV (see hostCompat.ts) rather than assuming either the
+ * name or the init system. */
+async function restartMysqlService(hostId: number, container: string | null): Promise<void> {
+  if (container) {
+    const { code, stderr } = await runSshCommand(hostId, `docker restart ${shellQuote(container)}`, {
+      sudo: true,
+      timeoutMs: SETUP_TIMEOUT_MS,
+    });
+    if (code !== 0) throw new Error(stderr || `Impossible de redémarrer le container "${container}".`);
+    return;
+  }
+  const mariadb = await restartService(hostId, "mariadb");
+  if (mariadb.code === 0) return;
+  const mysql = await restartService(hostId, "mysql");
+  if (mysql.code !== 0) {
+    throw new Error(mysql.stderr || mariadb.stderr || "Impossible de redémarrer le service MySQL/MariaDB sur cette machine.");
+  }
 }
 
 function mysqlCommand(host: string, port: number, user: string, password: string): string {
   return `MYSQL_PWD=${shellQuote(password)} mysql -h ${shellQuote(host)} -P ${port} -u ${shellQuote(user)}`;
 }
 
-/** Same as mysqlCommand, but for the *target* host — routed through `docker exec` into
- * `container` instead of a direct network connection when the target's MariaDB only exists inside
- * a Docker container (no mysql/mariadb client on the target host's own shell). The container's own
- * mysqld is what actually dials out to the source for replication — this only changes how the
- * setup/admin SQL commands themselves are issued, since they still run over SSH on the target host,
- * just piped into the container rather than into a native client. */
-function targetMysqlCommand(
-  container: string | null,
-  address: string,
-  port: number,
-  user: string,
-  password: string
-): string {
+/** Same as mysqlCommand, but routed through `docker exec` into `container` instead of a direct
+ * network connection when that machine's MariaDB only exists inside a Docker container (no
+ * mysql/mariadb client on the host's own shell) — used for both the source and the target, since
+ * either end can independently be native or containerized. The container's own mysqld is what
+ * actually dials out over the network for replication — this only changes how the setup/admin SQL
+ * commands themselves are issued, since they still run over SSH on that host, just piped into the
+ * container rather than into a native client. */
+function resolvedMysqlCommand(container: string | null, address: string, port: number, user: string, password: string): string {
   if (container) {
     return `docker exec -i -e ${shellQuote(`MYSQL_PWD=${password}`)} ${shellQuote(container)} mysql -u ${shellQuote(user)}`;
   }
@@ -116,27 +128,30 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   await ensureRsyncReachable(r.sourceHostId, r.targetHostId, keyPath);
 
   updateReplicationStatus(r.id, "setting_up", "Activation du binlog sur la machine source…");
-  const confDir = await findMysqlConfDir(r.sourceHostId);
+  const confDir = await findMysqlConfDir(r.sourceHostId, r.sourceDbContainer);
   // server-id must be unique among every server in the replication topology — derived from the
   // host id (offset to stay clear of MySQL's reserved id 0) rather than hardcoded, so two
   // replications from different source hosts never collide.
   const serverId = 1000 + r.sourceHostId;
   const binlogDoDbLines = databases.map((db) => `binlog_do_db = ${db}`).join("\n");
   const binlogConf = `[mariadb]\nserver-id = ${serverId}\nlog_bin = /var/log/mysql/mysql-bin.log\n${binlogDoDbLines}\n`;
-  const writeConf = `cat > ${confDir}/99-homelab-panel-ha.cnf <<'HLP_MYSQL_CONF_EOF'\n${binlogConf}\nHLP_MYSQL_CONF_EOF`;
+  const confPath = `${confDir}/99-homelab-panel-ha.cnf`;
+  const writeConf = r.sourceDbContainer
+    ? `docker exec -i ${shellQuote(r.sourceDbContainer)} sh -c ${shellQuote(`cat > ${confPath}`)} <<'HLP_MYSQL_CONF_EOF'\n${binlogConf}\nHLP_MYSQL_CONF_EOF`
+    : `cat > ${confPath} <<'HLP_MYSQL_CONF_EOF'\n${binlogConf}\nHLP_MYSQL_CONF_EOF`;
   const { code: writeConfCode, stderr: writeConfErr } = await runSshCommand(r.sourceHostId, writeConf, {
     sudo: true,
     timeoutMs: SETUP_TIMEOUT_MS,
   });
   if (writeConfCode !== 0) throw new Error(writeConfErr || "Impossible d'écrire la configuration de réplication MySQL sur la machine source.");
-  await restartMysqlService(r.sourceHostId);
+  await restartMysqlService(r.sourceHostId, r.sourceDbContainer);
 
   updateReplicationStatus(r.id, "setting_up", "Création du rôle de réplication…");
   const grantSql = `CREATE USER IF NOT EXISTS ${shellQuote(cred.user)}@'%' IDENTIFIED BY ${shellQuote(cred.password)}; GRANT REPLICATION SLAVE ON *.* TO ${shellQuote(cred.user)}@'%'; FLUSH PRIVILEGES;`;
   const { code: grantCode, stderr: grantErr } = await runSshCommand(
     r.sourceHostId,
-    `echo ${shellQuote(grantSql)} | ${mysqlCommand(source.address, port, r.dbUser, secrets.dbPassword)}`,
-    { timeoutMs: SETUP_TIMEOUT_MS }
+    `echo ${shellQuote(grantSql)} | ${resolvedMysqlCommand(r.sourceDbContainer, source.address, port, r.dbUser, secrets.dbPassword)}`,
+    { timeoutMs: SETUP_TIMEOUT_MS, sudo: !!r.sourceDbContainer }
   );
   if (grantCode !== 0) throw new Error(grantErr || "Impossible de créer le rôle de réplication MySQL.");
 
@@ -145,9 +160,17 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   const dbArgs = databases.map((db) => shellQuote(db)).join(" ");
   // --databases (rather than naming the db positionally) is what makes mysqldump prepend a
   // `CREATE DATABASE IF NOT EXISTS` for each one — the target database(s) get created automatically
-  // on restore even if they don't exist yet there, no separate step needed.
-  const dumpCmd = `MYSQL_PWD=${shellQuote(secrets.dbPassword)} mysqldump -h ${shellQuote(source.address)} -P ${port} -u ${shellQuote(r.dbUser)} --single-transaction --master-data=2 --databases ${dbArgs} > ${shellQuote(dumpPath)}`;
-  const { code: dumpCode, stderr: dumpErr } = await runSshCommand(r.sourceHostId, dumpCmd, { timeoutMs: SETUP_TIMEOUT_MS });
+  // on restore even if they don't exist yet there, no separate step needed. Routed through
+  // `docker exec` on the source too when containerized — mysqldump ships in the same image as
+  // mysql/mariadb, and its output is redirected to a host-side file either way since `>` here runs
+  // in the outer SSH shell, not inside the container.
+  const dumpCmd = r.sourceDbContainer
+    ? `docker exec -i -e ${shellQuote(`MYSQL_PWD=${secrets.dbPassword}`)} ${shellQuote(r.sourceDbContainer)} mysqldump -u ${shellQuote(r.dbUser)} --single-transaction --master-data=2 --databases ${dbArgs} > ${shellQuote(dumpPath)}`
+    : `MYSQL_PWD=${shellQuote(secrets.dbPassword)} mysqldump -h ${shellQuote(source.address)} -P ${port} -u ${shellQuote(r.dbUser)} --single-transaction --master-data=2 --databases ${dbArgs} > ${shellQuote(dumpPath)}`;
+  const { code: dumpCode, stderr: dumpErr } = await runSshCommand(r.sourceHostId, dumpCmd, {
+    timeoutMs: SETUP_TIMEOUT_MS,
+    sudo: !!r.sourceDbContainer,
+  });
   if (dumpCode !== 0) throw new Error(dumpErr || "Échec de l'export initial de la base MySQL.");
 
   const { stdout: coordLine } = await runSshCommand(
@@ -172,7 +195,7 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   if (transferCode !== 0) throw new Error(transferErr || "Échec du transfert de l'export vers la machine cible.");
 
   updateReplicationStatus(r.id, "setting_up", "Restauration sur la machine cible…");
-  const restoreCmd = `${targetMysqlCommand(r.targetDbContainer, target.address, port, targetCred.user, targetCred.password)} < ${shellQuote(targetDumpPath)}`;
+  const restoreCmd = `${resolvedMysqlCommand(r.targetDbContainer, target.address, port, targetCred.user, targetCred.password)} < ${shellQuote(targetDumpPath)}`;
   const { code: restoreCode, stderr: restoreErr } = await runSshCommand(r.targetHostId, restoreCmd, {
     timeoutMs: SETUP_TIMEOUT_MS,
     sudo: !!r.targetDbContainer,
@@ -196,7 +219,7 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
       `${grantLines} FLUSH PRIVILEGES;`;
     const { code: appUserCode, stderr: appUserErr } = await runSshCommand(
       r.targetHostId,
-      `echo ${shellQuote(appUserSql)} | ${targetMysqlCommand(r.targetDbContainer, target.address, port, targetCred.user, targetCred.password)}`,
+      `echo ${shellQuote(appUserSql)} | ${resolvedMysqlCommand(r.targetDbContainer, target.address, port, targetCred.user, targetCred.password)}`,
       { timeoutMs: SETUP_TIMEOUT_MS, sudo: !!r.targetDbContainer }
     );
     if (appUserCode !== 0) throw new Error(appUserErr || "Impossible de créer l'identifiant applicatif sur la machine cible.");
@@ -209,7 +232,7 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
     `MASTER_LOG_FILE=${shellQuote(logFile)}, MASTER_LOG_POS=${logPos}; START SLAVE;`;
   const { code: startCode, stderr: startErr } = await runSshCommand(
     r.targetHostId,
-    `echo ${shellQuote(changeMasterSql)} | ${targetMysqlCommand(r.targetDbContainer, target.address, port, targetCred.user, targetCred.password)}`,
+    `echo ${shellQuote(changeMasterSql)} | ${resolvedMysqlCommand(r.targetDbContainer, target.address, port, targetCred.user, targetCred.password)}`,
     { timeoutMs: SETUP_TIMEOUT_MS, sudo: !!r.targetDbContainer }
   );
   if (startCode !== 0) throw new Error(startErr || "Impossible de démarrer la réplication sur la machine cible.");
@@ -242,7 +265,7 @@ export async function checkMysqlReplicationStatus(r: Replication): Promise<void>
   const target = getHostConnectionInfo(r.targetHostId);
   const { stdout, code, stderr } = await runSshCommand(
     r.targetHostId,
-    `${targetMysqlCommand(r.targetDbContainer, target.address, port, targetCred.user, targetCred.password)} -B -e "SHOW SLAVE STATUS"`,
+    `${resolvedMysqlCommand(r.targetDbContainer, target.address, port, targetCred.user, targetCred.password)} -B -e "SHOW SLAVE STATUS"`,
     { timeoutMs: STATUS_TIMEOUT_MS, sudo: !!r.targetDbContainer }
   );
   if (code !== 0) {

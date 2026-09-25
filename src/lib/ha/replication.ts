@@ -32,6 +32,10 @@ export type Replication = {
    * target whose MariaDB only exists inside a Docker container (no mysql/mariadb client on the
    * host OS itself). Null keeps the original native-client behavior. */
   targetDbContainer: string | null;
+  /** 'mysql' only — same as targetDbContainer, but for the source host: when set, the binlog
+   * config, replication role and initial dump are all issued through `docker exec` into this
+   * container instead of a native client/service on the source host itself. */
+  sourceDbContainer: string | null;
   enabled: boolean;
   status: ReplicationStatus;
   statusDetail: string | null;
@@ -85,6 +89,7 @@ type ReplicationRow = {
   app_db_user: string | null;
   app_db_password_encrypted: string | null;
   target_db_container: string | null;
+  source_db_container: string | null;
   enabled: number;
   status: ReplicationStatus;
   status_detail: string | null;
@@ -115,6 +120,7 @@ function rowToReplication(row: ReplicationRow): Replication {
     appDbUser: row.app_db_user,
     hasAppDbPassword: !!row.app_db_password_encrypted,
     targetDbContainer: row.target_db_container,
+    sourceDbContainer: row.source_db_container,
     enabled: row.enabled === 1,
     status: row.status,
     statusDetail: row.status_detail,
@@ -192,14 +198,16 @@ export type CreateReplicationInput = {
   /** 'mysql' only — Docker container name on the target host to run admin SQL through
    * (`docker exec`) instead of a native client. Left unset for a target with a native install. */
   targetDbContainer?: string;
+  /** 'mysql' only — same as targetDbContainer, but for the source host. */
+  sourceDbContainer?: string;
 };
 
 export function createReplication(input: CreateReplicationInput): Replication {
   const id = randomUUID();
   getDb()
     .prepare(
-      `INSERT INTO ha_replications (id, name, kind, source_host_id, target_host_id, source_path, target_path, db_port, db_user, db_password_encrypted, target_db_user, target_db_password_encrypted, proxy_host_id, target_port, target_owner, target_mode, app_db_user, app_db_password_encrypted, target_db_container)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO ha_replications (id, name, kind, source_host_id, target_host_id, source_path, target_path, db_port, db_user, db_password_encrypted, target_db_user, target_db_password_encrypted, proxy_host_id, target_port, target_owner, target_mode, app_db_user, app_db_password_encrypted, target_db_container, source_db_container)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -220,7 +228,8 @@ export function createReplication(input: CreateReplicationInput): Replication {
       input.targetMode?.trim() || null,
       input.appDbUser?.trim() || null,
       input.appDbPassword ? vaultEncrypt(input.appDbPassword) : null,
-      input.targetDbContainer?.trim() || null
+      input.targetDbContainer?.trim() || null,
+      input.sourceDbContainer?.trim() || null
     );
   return getReplication(id)!;
 }

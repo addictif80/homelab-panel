@@ -1,6 +1,7 @@
 import { runSshCommand, getHostConnectionInfo, shellQuote } from "../ssh";
 import { ensurePrivateKeyDeployed, ensurePublicKeyAuthorized } from "../backup/keys";
 import { ensureRsyncReachable } from "../backup/transfer";
+import { restartService, stopService } from "./hostCompat";
 import {
   generateReplicationCredential,
   setReplicationCredential,
@@ -100,17 +101,15 @@ export async function setupPostgresReplication(r: Replication): Promise<void> {
   if (hbaCode !== 0) throw new Error(hbaErr || "Impossible d'autoriser la machine cible dans pg_hba.conf sur la source.");
 
   updateReplicationStatus(r.id, "setting_up", "Redémarrage de PostgreSQL sur la source (wal_level)…");
-  const { code: restartCode, stderr: restartErr } = await runSshCommand(r.sourceHostId, "systemctl restart postgresql", {
-    sudo: true,
-    timeoutMs: SETUP_TIMEOUT_MS,
-  });
+  // Tries systemd, then OpenRC, then SysV `service` (see hostCompat.ts) rather than assuming
+  // systemd — PostgreSQL replication stays native-only for now (pg_basebackup needs direct
+  // filesystem access to the data directory, unlike the mysql module's docker-exec support), but
+  // "native" still spans more than just Debian/Ubuntu.
+  const { code: restartCode, stderr: restartErr } = await restartService(r.sourceHostId, "postgresql");
   if (restartCode !== 0) throw new Error(restartErr || "Impossible de redémarrer PostgreSQL sur la machine source.");
 
   updateReplicationStatus(r.id, "setting_up", "Arrêt de PostgreSQL sur la cible et reconstruction depuis la source (pg_basebackup)…");
-  const { code: stopCode, stderr: stopErr } = await runSshCommand(r.targetHostId, "systemctl stop postgresql", {
-    sudo: true,
-    timeoutMs: SETUP_TIMEOUT_MS,
-  });
+  const { code: stopCode, stderr: stopErr } = await stopService(r.targetHostId, "postgresql");
   if (stopCode !== 0) throw new Error(stopErr || "Impossible d'arrêter PostgreSQL sur la machine cible.");
 
   const basebackupCmd = [
@@ -126,10 +125,9 @@ export async function setupPostgresReplication(r: Replication): Promise<void> {
   if (basebackupCode !== 0) throw new Error(basebackupErr || "Échec de pg_basebackup depuis la source.");
 
   updateReplicationStatus(r.id, "setting_up", "Démarrage de PostgreSQL sur la cible en réplique…");
-  const { code: startCode, stderr: startErr } = await runSshCommand(r.targetHostId, "systemctl start postgresql", {
-    sudo: true,
-    timeoutMs: SETUP_TIMEOUT_MS,
-  });
+  // restartService also re-enables the service (stopService above disabled it as part of the
+  // temporary stop) — ends in the same enabled+running state it started in, across systemd/OpenRC/SysV.
+  const { code: startCode, stderr: startErr } = await restartService(r.targetHostId, "postgresql");
   if (startCode !== 0) throw new Error(startErr || "Impossible de démarrer PostgreSQL sur la machine cible.");
 
   updateReplicationStatus(r.id, "in_sync", "Réplication démarrée.", true);

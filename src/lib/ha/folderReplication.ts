@@ -2,6 +2,7 @@ import { runSshCommand, getHostConnectionInfo } from "../ssh";
 import { ensurePrivateKeyDeployed, ensurePublicKeyAuthorized } from "../backup/keys";
 import { ensureRemoteDir, ensureRsyncReachable } from "../backup/transfer";
 import { listReplications, updateReplicationStatus, type Replication } from "./replication";
+import { installPackageUniversal, restartService, stopService, serviceIsActive, diagnoseServiceFailure } from "./hostCompat";
 
 const SETUP_TIMEOUT_MS = 60_000;
 const STATUS_TIMEOUT_MS = 15_000;
@@ -90,10 +91,7 @@ async function reconcileLsyncdOnHost(hostId: number): Promise<void> {
   if (entries.length === 0) {
     // Nothing left to sync from this host — stop and disable the service rather than leave it
     // running against a now-empty (or stale) config.
-    await runSshCommand(hostId, `systemctl stop lsyncd 2>/dev/null; systemctl disable lsyncd 2>/dev/null; true`, {
-      sudo: true,
-      timeoutMs: SETUP_TIMEOUT_MS,
-    });
+    await stopService(hostId, "lsyncd");
     return;
   }
 
@@ -115,25 +113,27 @@ async function reconcileLsyncdOnHost(hostId: number): Promise<void> {
   );
 
   const config = buildLsyncdConfig(built);
-  const command = [
+  const writeCmd = [
     `mkdir -p /etc/lsyncd /var/log/lsyncd`,
     `cat > ${LSYNCD_CONFIG_PATH} <<'HLP_LSYNCD_EOF'\n${config}\nHLP_LSYNCD_EOF`,
-    `systemctl enable lsyncd >/dev/null 2>&1; systemctl restart lsyncd`,
   ].join(" && ");
+  const { code: writeCode, stderr: writeErr } = await runSshCommand(hostId, writeCmd, {
+    sudo: true,
+    timeoutMs: SETUP_TIMEOUT_MS,
+  });
+  if (writeCode !== 0) throw new Error(writeErr || "Impossible d'écrire la configuration lsyncd sur la machine source.");
 
-  const { code, stderr } = await runSshCommand(hostId, command, { sudo: true, timeoutMs: SETUP_TIMEOUT_MS });
+  // Tries systemd, then OpenRC, then SysV `service` — not every host managed by this panel runs
+  // systemd (Alpine/OpenRC-based NAS firmwares, some minimal appliances).
+  const { code, stderr } = await restartService(hostId, "lsyncd");
   if (code !== 0) {
-    // `systemctl restart` failing tells you almost nothing on its own ("Job for lsyncd.service
-    // failed.") — the actual reason (a Lua syntax error in the config just written, a broken
-    // package install, missing rsync on this host) only shows up in the unit's own status/journal,
-    // so it's fetched and appended here rather than leaving the bare systemctl error to guess from.
-    const { stdout: diag } = await runSshCommand(
-      hostId,
-      "systemctl status lsyncd --no-pager -l 2>&1 | tail -n 15; journalctl -u lsyncd --no-pager -n 15 2>&1 | tail -n 15",
-      { sudo: true, timeoutMs: STATUS_TIMEOUT_MS }
-    ).catch(() => ({ stdout: "" }));
+    // A bare "failed to restart" tells you almost nothing on its own — the actual reason (a Lua
+    // syntax error in the config just written, a broken package install, missing rsync on this
+    // host) only shows up in the service's own status/journal, so it's fetched and appended here
+    // rather than leaving the bare error to guess from.
+    const diag = await diagnoseServiceFailure(hostId, "lsyncd").catch(() => "");
     throw new Error(
-      `${stderr || "Impossible d'appliquer la configuration lsyncd sur la machine source."}${diag.trim() ? `\n\n${diag.trim()}` : ""}`
+      `${stderr || "Impossible d'appliquer la configuration lsyncd sur la machine source."}${diag ? `\n\n${diag}` : ""}`
     );
   }
 }
@@ -154,17 +154,9 @@ export async function setupFolderReplication(r: Replication): Promise<void> {
   updateReplicationStatus(r.id, "setting_up", "Installation de lsyncd sur la machine source…");
   const { code: lsyncdCheckCode } = await runSshCommand(r.sourceHostId, "command -v lsyncd", { timeoutMs: STATUS_TIMEOUT_MS });
   if (lsyncdCheckCode !== 0) {
-    const { code, stderr } = await runSshCommand(
-      r.sourceHostId,
-      "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq lsyncd",
-      { sudo: true, timeoutMs: SETUP_TIMEOUT_MS }
-    );
-    if (code !== 0) {
-      throw new Error(
-        stderr ||
-          "Impossible d'installer lsyncd automatiquement sur la machine source (elle n'utilise peut-être pas apt) — installe-le manuellement puis relance la configuration."
-      );
-    }
+    // Tries apt/dnf/yum/apk/pacman/zypper in turn rather than assuming Debian/Ubuntu — this panel
+    // targets a heterogeneous fleet, not just apt-based distros.
+    await installPackageUniversal(r.sourceHostId, "lsyncd");
   }
 
   updateReplicationStatus(r.id, "setting_up", "Application de la configuration de réplication…");
@@ -183,23 +175,16 @@ export async function reconcileFolderReplicationsOnHost(hostId: number): Promise
  * on a timer, only status to observe: is the service actually up, and does its own status log show
  * anything alarming (a persistent rsync error would keep reappearing there). */
 export async function checkFolderReplicationStatus(r: Replication): Promise<void> {
-  const { stdout: activeOut } = await runSshCommand(r.sourceHostId, "systemctl is-active lsyncd 2>&1", {
-    timeoutMs: STATUS_TIMEOUT_MS,
-  });
-  const active = activeOut.trim() === "active";
+  const { active, raw } = await serviceIsActive(r.sourceHostId, "lsyncd");
   if (!active) {
     // Same reasoning as reconcileLsyncdOnHost's setup-time error: "non actif" alone gives no way
     // to tell a never-installed binary apart from a crashed one apart from a config error — pull
-    // the unit's own status/journal so the real cause is visible instead of just its symptom.
-    const { stdout: diag } = await runSshCommand(
-      r.sourceHostId,
-      "systemctl status lsyncd --no-pager -l 2>&1 | tail -n 12; journalctl -u lsyncd --no-pager -n 12 2>&1 | tail -n 12",
-      { sudo: true, timeoutMs: STATUS_TIMEOUT_MS }
-    ).catch(() => ({ stdout: "" }));
+    // the service's own status/journal so the real cause is visible instead of just its symptom.
+    const diag = await diagnoseServiceFailure(r.sourceHostId, "lsyncd").catch(() => "");
     updateReplicationStatus(
       r.id,
       "stopped",
-      `Service lsyncd non actif sur la machine source (${activeOut.trim() || "état inconnu"}).${diag.trim() ? `\n${diag.trim()}` : ""}`
+      `Service lsyncd non actif sur la machine source (${raw || "état inconnu"}).${diag ? `\n${diag}` : ""}`
     );
     return;
   }

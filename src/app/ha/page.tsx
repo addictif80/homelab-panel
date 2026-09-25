@@ -22,6 +22,7 @@ type Replication = {
   targetMode: string | null;
   appDbUser: string | null;
   targetDbContainer: string | null;
+  sourceDbContainer: string | null;
   enabled: boolean;
   status: "unknown" | "setting_up" | "in_sync" | "lagging" | "error" | "stopped";
   statusDetail: string | null;
@@ -73,6 +74,7 @@ const EMPTY_FORM = {
   appDbUser: "",
   appDbPassword: "",
   targetDbContainer: "",
+  sourceDbContainer: "",
 };
 
 export default function HaPage() {
@@ -451,10 +453,22 @@ export default function HaPage() {
                 pg_basebackup clone tout le serveur PostgreSQL, pas une base en particulier — ce nom n&apos;est là que
                 pour t&apos;y retrouver dans la liste ci-dessous.
               </p>
+              <p className="mt-1 text-xs text-amber-500">
+                ⚠ Contrairement à MySQL/MariaDB, la réplication PostgreSQL nécessite pour l&apos;instant une
+                installation native de PostgreSQL sur les deux machines (arrêt/redémarrage du service et accès direct
+                au dossier de données requis par pg_basebackup) — pas encore de mode Docker container ici.
+              </p>
             </div>
           )}
           {(form.kind === "folder" || form.kind === "sqlite") && (
             <div className="space-y-2 rounded border border-neutral-800 p-3">
+              <p className="text-xs text-neutral-500">
+                Le dossier/fichier cible doit être un chemin réel sur le système de fichiers de la machine cible — un
+                bind mount Docker (ex: <code>/opt/monapp/www</code> monté dans le container) fonctionne directement.
+                Pour un volume Docker <em>nommé</em>, résous d&apos;abord son point de montage réel sur l&apos;hôte
+                avec <code>docker volume inspect --format &apos;{"{{ .Mountpoint }}"}&apos; &lt;nom&gt;</code> et
+                utilise ce chemin ici.
+              </p>
               <p className="text-xs text-neutral-500">
                 Optionnel — sans ça, les fichiers arrivent sur la machine cible appartenant au compte SSH dédié à la
                 réplication, pas forcément au compte qui fait tourner le serveur web là-bas.
@@ -560,22 +574,37 @@ export default function HaPage() {
                 </p>
               )}
               {form.kind === "mysql" && (
-                <div className="border-t border-neutral-800 pt-3">
-                  <label className="mb-1 block text-xs text-neutral-400">
-                    Container Docker MariaDB/MySQL sur la machine cible (optionnel)
-                  </label>
-                  <input
-                    value={form.targetDbContainer}
-                    onChange={(e) => setForm({ ...form, targetDbContainer: e.target.value })}
-                    placeholder="ex: mariadb"
-                    className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
-                  />
-                  <p className="mt-1 text-xs text-neutral-600">
-                    Laisse vide si la machine cible a un client mysql/mariadb natif sur son propre système. Si sa base
-                    de données ne tourne que dans un container Docker (aucun client natif sur l&apos;hôte), indique le
-                    nom du container ici — le panel exécutera toutes les commandes SQL de configuration via{" "}
-                    <code>docker exec</code> dans ce container au lieu de s&apos;y connecter directement. La machine
-                    source, elle, reste toujours interrogée nativement.
+                <div className="grid grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
+                  <div>
+                    <label className="mb-1 block text-xs text-neutral-400">
+                      Container Docker sur la machine source (optionnel)
+                    </label>
+                    <input
+                      value={form.sourceDbContainer}
+                      onChange={(e) => setForm({ ...form, sourceDbContainer: e.target.value })}
+                      placeholder="ex: mariadb"
+                      className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-neutral-400">
+                      Container Docker sur la machine cible (optionnel)
+                    </label>
+                    <input
+                      value={form.targetDbContainer}
+                      onChange={(e) => setForm({ ...form, targetDbContainer: e.target.value })}
+                      placeholder="ex: mariadb"
+                      className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                    />
+                  </div>
+                  <p className="col-span-2 text-xs text-neutral-600">
+                    Laisse vide côté source et/ou cible quand cette machine a un client mysql/mariadb natif sur son
+                    propre système. Si sa base de données ne tourne que dans un container Docker (aucun client natif
+                    sur l&apos;hôte), indique le nom du container correspondant ici — le panel exécutera toutes les
+                    commandes SQL de configuration de cette machine via <code>docker exec</code> dans ce container au
+                    lieu de s&apos;y connecter/l&apos;administrer nativement. Source et cible sont indépendants :
+                    n&apos;importe quelle combinaison native/Docker fonctionne (native → Docker, Docker → native,
+                    Docker → Docker...).
                   </p>
                 </div>
               )}
@@ -689,9 +718,21 @@ export default function HaPage() {
                     {r.targetPort ? ` (port ${r.targetPort})` : ""}
                   </p>
                 )}
-                {r.targetDbContainer && (
+                {(r.sourceDbContainer || r.targetDbContainer) && (
                   <p className="mt-0.5 text-xs text-neutral-600">
-                    Admin SQL cible via <span className="font-mono text-neutral-400">docker exec {r.targetDbContainer}</span>
+                    Admin SQL via docker exec —
+                    {r.sourceDbContainer && (
+                      <>
+                        {" "}
+                        source : <span className="font-mono text-neutral-400">{r.sourceDbContainer}</span>
+                      </>
+                    )}
+                    {r.targetDbContainer && (
+                      <>
+                        {" "}
+                        cible : <span className="font-mono text-neutral-400">{r.targetDbContainer}</span>
+                      </>
+                    )}
                   </p>
                 )}
               </div>
