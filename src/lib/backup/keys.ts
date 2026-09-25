@@ -145,8 +145,24 @@ function explainHomeDirError(stderr: string): string {
 export async function ensurePrivateKeyDeployed(hostId: number): Promise<string> {
   const { privateKey, publicKey } = await getOrCreateBackupKeypair();
   const command = [
+    // Any real failure here has to actually stop the script — without this, a step further down
+    // failing silently (see the `rm -f` comment below for exactly how that happened in practice)
+    // still reaches the final `echo ___KEYPATH___`, which always succeeds on its own, making the
+    // whole call look like a success even though nothing it was supposed to do actually worked.
+    `set -e`,
     homeVarAssignment(hostId),
-    `mkdir -p "$BACKUP_HOME/.ssh" && chmod 700 "$BACKUP_HOME/.ssh"`,
+    `mkdir -p "$BACKUP_HOME/.ssh"`,
+    `chmod 700 "$BACKUP_HOME/.ssh"`,
+    // Removes any pre-existing key file *before* writing — deleting a file only needs write
+    // permission on the *directory* (which this account already has, since it owns `.ssh`),
+    // never on the file itself, so this succeeds even when the file left behind by an older
+    // version of this code (one that still used sudo, before that was removed) is owned by root.
+    // Without this, `cat >` on that same still-existing root-owned file fails to even open it
+    // (a non-root account has zero permission bits on a mode-600 root-owned file) — and since
+    // that failure previously wasn't checked, the stale key just sat there forever, silently
+    // breaking every transfer that tried to use it with a "Permission denied" that had nothing to
+    // do with the actual SSH authorization.
+    `rm -f "$BACKUP_HOME/.ssh/homelab_panel_backup_key"`,
     `cat > "$BACKUP_HOME/.ssh/homelab_panel_backup_key" <<'HOMELAB_BACKUP_KEY_EOF'\n${privateKey}\nHOMELAB_BACKUP_KEY_EOF`,
     `chmod 600 "$BACKUP_HOME/.ssh/homelab_panel_backup_key"`,
     // Derives the public key straight back out of the file that was just written, on this same
@@ -154,8 +170,13 @@ export async function ensurePrivateKeyDeployed(hostId: number): Promise<string> 
     // corrupted by some quoting/encoding edge case, before any later "Permission denied" during
     // the real rsync leaves that as just one hypothesis among several. ssh-keygen ships with every
     // OpenSSH install (client or server), so its absence would itself be unusual enough to surface
-    // rather than silently ignore.
-    `echo "___PUBFP___$(ssh-keygen -y -f "$BACKUP_HOME/.ssh/homelab_panel_backup_key" 2>&1)"`,
+    // rather than silently ignore. Deliberately run *outside* of `set -e`'s reach (its failure is
+    // captured into a variable via `$(...)`, not left to fail the script directly) — the check
+    // right below distinguishes a real "couldn't read the file back" failure from ssh-keygen
+    // itself simply being missing.
+    `set +e`,
+    `PUBFP=$(ssh-keygen -y -f "$BACKUP_HOME/.ssh/homelab_panel_backup_key" 2>&1)`,
+    `echo "___PUBFP___$PUBFP"`,
     `echo "___KEYPATH___$BACKUP_HOME/.ssh/homelab_panel_backup_key"`,
   ].join("\n");
   const { code, stdout, stderr } = await runSshCommand(hostId, command);
@@ -163,9 +184,22 @@ export async function ensurePrivateKeyDeployed(hostId: number): Promise<string> 
 
   const pubMatch = stdout.match(/___PUBFP___(.*)/);
   const derivedPublicKey = pubMatch?.[1].trim() ?? "";
+  // A permission/access error reading back the file we *just* wrote (as opposed to ssh-keygen
+  // itself being absent from PATH) is never something to silently wave through — that exact gap
+  // is what let a stale root-owned key file left behind by an older code path go undetected
+  // indefinitely, surfacing only much later as an unrelated-looking "Permission denied" during an
+  // actual transfer.
+  if (/permission denied|no such file/i.test(derivedPublicKey)) {
+    throw new Error(
+      `La clé privée vient d'être écrite sur cette machine mais n'est pas relisible juste après ` +
+        `(${derivedPublicKey}) — un souci de droits plus profond que cette étape ne peut pas corriger seule ` +
+        `(un montage réseau avec des UID qui ne correspondent pas, par exemple). Vérifie manuellement les droits ` +
+        `de ${`~/.ssh/homelab_panel_backup_key`} sur cette machine.`
+    );
+  }
   // Only a line that actually looks like a public key is treated as a verification result — an
-  // error (ssh-keygen missing from PATH, an unreadable file for some unrelated reason) shouldn't
-  // be misread as "the key is corrupted" when it really just means verification couldn't run.
+  // error (ssh-keygen missing from PATH, e.g.) shouldn't be misread as "the key is corrupted" when
+  // it really just means verification couldn't run.
   if (/^(ssh-|ecdsa-|sk-)\S+ /.test(derivedPublicKey) && keyFingerprint(derivedPublicKey) !== keyFingerprint(publicKey)) {
     throw new Error(
       `La clé privée déployée sur cette machine ne correspond pas à la clé publique attendue une fois relue depuis ` +
