@@ -1,7 +1,6 @@
 import { randomUUID } from "crypto";
-import type { SFTPWrapper } from "ssh2";
 import { getDb } from "./db";
-import { openSftp, statPath, readdirEntries, mkdirIfMissing, streamCopy } from "./sftp";
+import { statPath, readdirEntries, mkdirIfMissing, streamCopy } from "./sftp";
 
 export type CopyJobStatus = "running" | "success" | "failed";
 
@@ -92,43 +91,30 @@ export function startCopyJob(
 }
 
 async function runCopyJob(jobId: string, sourceHostId: number, sourcePath: string, destHostId: number, destPath: string) {
-  let source: Awaited<ReturnType<typeof openSftp>> | undefined;
-  let dest: Awaited<ReturnType<typeof openSftp>> | undefined;
   try {
-    source = await openSftp(sourceHostId);
-    dest = await openSftp(destHostId);
-    await copyRecursive(source.sftp, sourcePath, dest.sftp, destPath, jobId);
+    await copyRecursive(sourceHostId, sourcePath, destHostId, destPath, jobId);
     appendLog(jobId, `\nTerminé.\n`);
     finishJob(jobId, "success");
   } catch (err) {
     appendLog(jobId, `\nErreur : ${err instanceof Error ? err.message : "inconnue"}\n`);
     finishJob(jobId, "failed");
-  } finally {
-    source?.conn.end();
-    dest?.conn.end();
   }
 }
 
-async function copyRecursive(
-  sourceSftp: SFTPWrapper,
-  sourcePath: string,
-  destSftp: SFTPWrapper,
-  destPath: string,
-  jobId: string
-) {
-  const stat = await statPath(sourceSftp, sourcePath);
+async function copyRecursive(sourceHostId: number, sourcePath: string, destHostId: number, destPath: string, jobId: string) {
+  const stat = await statPath(sourceHostId, sourcePath);
 
   if (stat.isDirectory) {
-    await mkdirIfMissing(destSftp, destPath);
+    await mkdirIfMissing(destHostId, destPath);
     appendLog(jobId, `Dossier : ${destPath}\n`);
-    const entries = await readdirEntries(sourceSftp, sourcePath);
+    const entries = await readdirEntries(sourceHostId, sourcePath);
     for (const entry of entries) {
       if (entry.name === "." || entry.name === "..") continue;
-      await copyRecursive(sourceSftp, joinRemote(sourcePath, entry.name), destSftp, joinRemote(destPath, entry.name), jobId);
+      await copyRecursive(sourceHostId, joinRemote(sourcePath, entry.name), destHostId, joinRemote(destPath, entry.name), jobId);
     }
     return;
   }
 
-  await streamCopy(sourceSftp, sourcePath, destSftp, destPath);
+  await streamCopy(sourceHostId, sourcePath, destHostId, destPath);
   appendLog(jobId, `Copié : ${destPath} (${formatSize(stat.size)})\n`);
 }

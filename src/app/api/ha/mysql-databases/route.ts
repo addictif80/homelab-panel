@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runSshCommand, shellQuote } from "@/lib/ssh";
+import { runSshCommand, shellQuote, getHostConnectionInfo } from "@/lib/ssh";
+import { explainMysqlError } from "@/lib/dbManager/sqlRunner";
 
 const TIMEOUT_MS = 15_000;
 const SYSTEM_DATABASES = new Set(["information_schema", "mysql", "performance_schema", "sys"]);
@@ -25,14 +26,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Machine, utilisateur et mot de passe requis." }, { status: 400 });
   }
   const port = body.port || 3306;
+  // Connects to the host's own real address rather than 127.0.0.1/localhost — see the identical
+  // reasoning in mysqlReplication.ts (the "-h localhost" client quirk + root's unix_socket-plugin
+  // grant on most distros/images, which rejects a password over a loopback/socket connection even
+  // when it's correct — a real network connection matches the '%'-scoped grant instead, the one
+  // already confirmed working through the DB manager module).
+  const { address } = getHostConnectionInfo(body.hostId);
 
   const command =
-    `${MYSQL_BIN_DETECT}; MYSQL_PWD=${shellQuote(body.dbPassword)} "$BIN" --protocol=TCP -h 127.0.0.1 -P ${port} ` +
+    `${MYSQL_BIN_DETECT}; MYSQL_PWD=${shellQuote(body.dbPassword)} "$BIN" --protocol=TCP -h ${shellQuote(address)} -P ${port} ` +
     `-u ${shellQuote(body.dbUser.trim())} --batch --raw -e ${shellQuote("SHOW DATABASES;")}`;
 
   const { stdout, code, stderr } = await runSshCommand(body.hostId, command, { timeoutMs: TIMEOUT_MS });
   if (code !== 0) {
-    return NextResponse.json({ error: stderr.trim() || "Impossible de lister les bases sur cette machine." }, { status: 400 });
+    return NextResponse.json(
+      { error: stderr.trim() ? explainMysqlError(stderr) : "Impossible de lister les bases sur cette machine." },
+      { status: 400 }
+    );
   }
 
   const databases = stdout

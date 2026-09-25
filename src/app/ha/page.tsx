@@ -388,7 +388,7 @@ export default function HaPage() {
                   >
                     {listingDatabases ? "Connexion…" : "Lister les bases de la machine source"}
                   </button>
-                  {listDatabasesError && <p className="text-xs text-red-400">{listDatabasesError}</p>}
+                  {listDatabasesError && <p className="whitespace-pre-line text-xs text-red-400">{listDatabasesError}</p>}
                   {availableDatabases && (
                     <div className="flex flex-wrap gap-1.5 rounded border border-neutral-800 bg-neutral-950 p-2">
                       {availableDatabases.length === 0 && (

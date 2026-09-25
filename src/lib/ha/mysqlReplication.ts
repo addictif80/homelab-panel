@@ -79,6 +79,18 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   const cred = generateReplicationCredential("hlp_repl");
   setReplicationCredential(r.id, cred.user, cred.password);
 
+  // Admin queries below connect to each machine's own real address (its Tailscale/LAN IP) rather
+  // than 127.0.0.1/localhost, even though the command already runs on that same machine over SSH —
+  // "-h localhost" makes the mysql/mariadb client silently switch to a Unix socket (a client quirk,
+  // independent of --protocol=TCP), and the *server* then very often matches that socket connection
+  // to a `'user'@'localhost'` grant using the unix_socket auth plugin (the default for root on the
+  // official images/most distro packages), which rejects any password outright — a genuine network
+  // connection to the host's own address avoids that account entirely and matches whatever
+  // `'user'@'%'` (or `'user'@'<address>'`) grant actually has a real password, the same one already
+  // confirmed working through the DB manager module.
+  const source = getHostConnectionInfo(r.sourceHostId);
+  const target = getHostConnectionInfo(r.targetHostId);
+
   updateReplicationStatus(r.id, "setting_up", "Déploiement de la clé SSH dédiée…");
   const keyPath = await ensurePrivateKeyDeployed(r.sourceHostId);
   await ensurePublicKeyAuthorized(r.targetHostId);
@@ -104,7 +116,7 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   const grantSql = `CREATE USER IF NOT EXISTS ${shellQuote(cred.user)}@'%' IDENTIFIED BY ${shellQuote(cred.password)}; GRANT REPLICATION SLAVE ON *.* TO ${shellQuote(cred.user)}@'%'; FLUSH PRIVILEGES;`;
   const { code: grantCode, stderr: grantErr } = await runSshCommand(
     r.sourceHostId,
-    `echo ${shellQuote(grantSql)} | ${mysqlCommand("127.0.0.1", port, r.dbUser, secrets.dbPassword)}`,
+    `echo ${shellQuote(grantSql)} | ${mysqlCommand(source.address, port, r.dbUser, secrets.dbPassword)}`,
     { timeoutMs: SETUP_TIMEOUT_MS }
   );
   if (grantCode !== 0) throw new Error(grantErr || "Impossible de créer le rôle de réplication MySQL.");
@@ -115,7 +127,7 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   // --databases (rather than naming the db positionally) is what makes mysqldump prepend a
   // `CREATE DATABASE IF NOT EXISTS` for each one — the target database(s) get created automatically
   // on restore even if they don't exist yet there, no separate step needed.
-  const dumpCmd = `MYSQL_PWD=${shellQuote(secrets.dbPassword)} mysqldump -h 127.0.0.1 -P ${port} -u ${shellQuote(r.dbUser)} --single-transaction --master-data=2 --databases ${dbArgs} > ${shellQuote(dumpPath)}`;
+  const dumpCmd = `MYSQL_PWD=${shellQuote(secrets.dbPassword)} mysqldump -h ${shellQuote(source.address)} -P ${port} -u ${shellQuote(r.dbUser)} --single-transaction --master-data=2 --databases ${dbArgs} > ${shellQuote(dumpPath)}`;
   const { code: dumpCode, stderr: dumpErr } = await runSshCommand(r.sourceHostId, dumpCmd, { timeoutMs: SETUP_TIMEOUT_MS });
   if (dumpCode !== 0) throw new Error(dumpErr || "Échec de l'export initial de la base MySQL.");
 
@@ -132,17 +144,16 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   const [, logFile, logPos] = coordMatch;
 
   updateReplicationStatus(r.id, "setting_up", "Transfert de l'export vers la machine cible…");
-  const dest = getHostConnectionInfo(r.targetHostId);
   const targetDumpPath = `/tmp/hlp-mysql-dump-${r.id}.sql`;
   await ensureRemoteDir(r.sourceHostId, r.targetHostId, "/tmp", keyPath);
-  const sshOpts = `-i ${keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -p ${dest.port}`;
-  const transferCmd = `rsync -az -e ${shellQuote(`ssh ${sshOpts}`)} ${shellQuote(dumpPath)} ${shellQuote(`${dest.user}@${dest.address}:${targetDumpPath}`)}`;
+  const sshOpts = `-i ${keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -p ${target.port}`;
+  const transferCmd = `rsync -az -e ${shellQuote(`ssh ${sshOpts}`)} ${shellQuote(dumpPath)} ${shellQuote(`${target.user}@${target.address}:${targetDumpPath}`)}`;
   const { code: transferCode, stderr: transferErr } = await runSshCommand(r.sourceHostId, transferCmd, { timeoutMs: SETUP_TIMEOUT_MS });
   await runSshCommand(r.sourceHostId, `rm -f ${shellQuote(dumpPath)}`);
   if (transferCode !== 0) throw new Error(transferErr || "Échec du transfert de l'export vers la machine cible.");
 
   updateReplicationStatus(r.id, "setting_up", "Restauration sur la machine cible…");
-  const restoreCmd = `MYSQL_PWD=${shellQuote(targetCred.password)} mysql -h 127.0.0.1 -P ${port} -u ${shellQuote(targetCred.user)} < ${shellQuote(targetDumpPath)}`;
+  const restoreCmd = `MYSQL_PWD=${shellQuote(targetCred.password)} mysql -h ${shellQuote(target.address)} -P ${port} -u ${shellQuote(targetCred.user)} < ${shellQuote(targetDumpPath)}`;
   const { code: restoreCode, stderr: restoreErr } = await runSshCommand(r.targetHostId, restoreCmd, { timeoutMs: SETUP_TIMEOUT_MS });
   await runSshCommand(r.targetHostId, `rm -f ${shellQuote(targetDumpPath)}`);
   if (restoreCode !== 0) throw new Error(restoreErr || "Échec de la restauration sur la machine cible.");
@@ -163,21 +174,20 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
       `${grantLines} FLUSH PRIVILEGES;`;
     const { code: appUserCode, stderr: appUserErr } = await runSshCommand(
       r.targetHostId,
-      `echo ${shellQuote(appUserSql)} | ${mysqlCommand("127.0.0.1", port, targetCred.user, targetCred.password)}`,
+      `echo ${shellQuote(appUserSql)} | ${mysqlCommand(target.address, port, targetCred.user, targetCred.password)}`,
       { timeoutMs: SETUP_TIMEOUT_MS }
     );
     if (appUserCode !== 0) throw new Error(appUserErr || "Impossible de créer l'identifiant applicatif sur la machine cible.");
   }
 
   updateReplicationStatus(r.id, "setting_up", "Démarrage de la réplication…");
-  const source = getHostConnectionInfo(r.sourceHostId);
   const changeMasterSql =
     `CHANGE MASTER TO MASTER_HOST=${shellQuote(source.address)}, MASTER_PORT=${port}, ` +
     `MASTER_USER=${shellQuote(cred.user)}, MASTER_PASSWORD=${shellQuote(cred.password)}, ` +
     `MASTER_LOG_FILE=${shellQuote(logFile)}, MASTER_LOG_POS=${logPos}; START SLAVE;`;
   const { code: startCode, stderr: startErr } = await runSshCommand(
     r.targetHostId,
-    `echo ${shellQuote(changeMasterSql)} | ${mysqlCommand("127.0.0.1", port, targetCred.user, targetCred.password)}`,
+    `echo ${shellQuote(changeMasterSql)} | ${mysqlCommand(target.address, port, targetCred.user, targetCred.password)}`,
     { timeoutMs: SETUP_TIMEOUT_MS }
   );
   if (startCode !== 0) throw new Error(startErr || "Impossible de démarrer la réplication sur la machine cible.");
@@ -207,9 +217,10 @@ export async function checkMysqlReplicationStatus(r: Replication): Promise<void>
     return;
   }
   const port = r.dbPort || 3306;
+  const target = getHostConnectionInfo(r.targetHostId);
   const { stdout, code, stderr } = await runSshCommand(
     r.targetHostId,
-    `${mysqlCommand("127.0.0.1", port, targetCred.user, targetCred.password)} -B -e "SHOW SLAVE STATUS"`,
+    `${mysqlCommand(target.address, port, targetCred.user, targetCred.password)} -B -e "SHOW SLAVE STATUS"`,
     { timeoutMs: STATUS_TIMEOUT_MS }
   );
   if (code !== 0) {
