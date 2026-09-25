@@ -24,7 +24,15 @@ export async function ensureRemoteDir(fromHostId: number, toHostId: number, dirP
   const dest = getHostConnectionInfo(toHostId);
   const sshOpts = `-i ${keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -p ${dest.port}`;
   const command = `ssh ${sshOpts} ${dest.user}@${dest.address} ${shellQuote(`mkdir -p ${shellQuote(dirPath)}`)}`;
-  const { code, stderr } = await runSshCommand(fromHostId, command, { sudo: true, timeoutMs: METADATA_TIMEOUT_MS });
+  // No sudo here — this only spawns an unprivileged `ssh` *client* process on the source host
+  // (the mkdir itself runs on the destination, as whatever `dest.user` is, over the dedicated
+  // key — unaffected by this flag either way). Requesting sudo for that gets it wrapped as
+  // `sudo -S ... bash -lc '...'`, a real login shell that unconditionally chdirs into $HOME on
+  // startup — which fails loudly with "Could not chdir to home directory ... No such file or
+  // directory" on NAS OSes (Synology-style path layouts especially) whose home-directory service
+  // isn't enabled for that account, exactly the class of bug already worked around in
+  // backup/keys.ts's ensurePrivateKeyDeployed/ensurePublicKeyAuthorized for the same reason.
+  const { code, stderr } = await runSshCommand(fromHostId, command, { timeoutMs: METADATA_TIMEOUT_MS });
   if (code !== 0) throw new Error(stderr || `Impossible de créer le dossier ${dirPath} sur la destination.`);
 }
 
@@ -52,7 +60,13 @@ export async function ensureRsyncReachable(fromHostId: number, toHostId: number,
   const dest = getHostConnectionInfo(toHostId);
   const sshOpts = `-i ${keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -p ${dest.port}`;
   const command = `ssh ${sshOpts} ${dest.user}@${dest.address} "command -v rsync"`;
-  const check = () => runSshCommand(fromHostId, command, { sudo: true, timeoutMs: METADATA_TIMEOUT_MS });
+  // No sudo here — same reasoning as ensureRemoteDir just above: this only spawns an unprivileged
+  // `ssh` client on the source host, and wrapping it in `sudo -S ... bash -lc` for no real reason
+  // trips that login shell's own unconditional $HOME chdir on NAS OSes whose home-directory
+  // service is disabled for the account, surfacing as "Could not chdir to home directory ...
+  // No such file or directory" here even though the same account works fine everywhere else in
+  // this codebase's non-sudo calls.
+  const check = () => runSshCommand(fromHostId, command, { timeoutMs: METADATA_TIMEOUT_MS });
 
   let { code, stdout, stderr } = await check();
   if (code !== 0 || !stdout.trim()) {
