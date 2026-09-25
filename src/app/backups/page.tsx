@@ -27,6 +27,7 @@ type BackupPlan = {
   destHostId: number;
   destPath: string;
   schedule: Schedule;
+  atTime: string | null;
   retentionCount: number;
   enabled: boolean;
   hasPassword?: boolean;
@@ -267,7 +268,10 @@ export default function BackupsPage() {
                   </div>
                   <p className="mt-0.5 text-xs text-neutral-500">
                     {SOURCE_TYPE_LABELS[plan.sourceType]} · {hostName(plan.sourceHostId)} → {hostName(plan.destHostId)}
-                    {plan.destPath} · {SCHEDULE_LABELS[plan.schedule]} · {plan.retentionCount} versions conservées
+                    {plan.destPath} · {SCHEDULE_LABELS[plan.schedule]}
+                    {plan.atTime && (plan.schedule === "daily" || plan.schedule === "weekly") ? ` à ${plan.atTime}` : ""}
+                    {" · "}
+                    {plan.retentionCount} versions conservées
                   </p>
                   <p className={`mt-0.5 text-xs ${status.color}`}>{status.text}</p>
                 </div>
@@ -623,8 +627,10 @@ function CreatePlanForm({
   const [destHostId, setDestHostId] = useState<number | null>(editingPlan?.destHostId ?? hosts[0]?.id ?? null);
   const [destPath, setDestPath] = useState(editingPlan?.destPath ?? "/volume1/backups/homelab-panel");
   const [schedule, setSchedule] = useState<Schedule>(editingPlan?.schedule ?? "daily");
+  const [atTime, setAtTime] = useState(editingPlan?.atTime ?? "");
   const [retentionCount, setRetentionCount] = useState(editingPlan?.retentionCount ?? 7);
   const [creating, setCreating] = useState(false);
+  const showAtTime = schedule === "daily" || schedule === "weekly";
 
   // paths
   const [pathsText, setPathsText] = useState(
@@ -773,7 +779,16 @@ function CreatePlanForm({
         ? await fetch(`/api/backups/${editingPlan.id}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name, destHostId, destPath, schedule, retentionCount, sourceConfig, password }),
+            body: JSON.stringify({
+              name,
+              destHostId,
+              destPath,
+              schedule,
+              atTime: showAtTime ? atTime || null : null,
+              retentionCount,
+              sourceConfig,
+              password,
+            }),
           })
         : await fetch("/api/backups", {
             method: "POST",
@@ -787,6 +802,7 @@ function CreatePlanForm({
               destHostId,
               destPath,
               schedule,
+              atTime: showAtTime ? atTime || null : null,
               retentionCount,
             }),
           });
@@ -876,6 +892,12 @@ function CreatePlanForm({
             ))}
           </select>
         </label>
+        {showAtTime && (
+          <label className="block">
+            <span className="mb-1 block text-xs text-neutral-400">Heure précise (optionnel)</span>
+            <input type="time" value={atTime} onChange={(e) => setAtTime(e.target.value)} className={INPUT_CLASS} />
+          </label>
+        )}
         <label className="block">
           <span className="mb-1 block text-xs text-neutral-400">Versions à conserver</span>
           <input

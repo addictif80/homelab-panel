@@ -3,6 +3,8 @@ import { deletePlan, getPlan, updatePlan, type Schedule } from "@/lib/backup/pla
 import { vaultEncrypt } from "@/lib/crypto";
 import { logAudit } from "@/lib/db";
 
+const AT_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const plan = getPlan(id);
@@ -13,11 +15,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     destHostId?: number;
     destPath?: string;
     schedule?: Schedule;
+    atTime?: string | null;
     retentionCount?: number;
     enabled?: boolean;
     sourceConfig?: Record<string, unknown>;
     password?: string;
   };
+
+  if (body.atTime && !AT_TIME_RE.test(body.atTime)) {
+    return NextResponse.json({ error: "Heure planifiée invalide (format attendu : HH:MM)." }, { status: 400 });
+  }
 
   let sourceConfig: string | undefined;
   if (body.sourceConfig) {
@@ -34,6 +41,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     destHostId: body.destHostId,
     destPath: body.destPath,
     schedule: body.schedule,
+    atTime: body.atTime === undefined ? undefined : body.atTime?.trim() || null,
     retentionCount: body.retentionCount,
     enabled: body.enabled,
     sourceConfig,

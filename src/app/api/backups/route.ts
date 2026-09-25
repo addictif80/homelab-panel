@@ -4,6 +4,8 @@ import { getLatestRun } from "@/lib/backup/runs";
 import { vaultEncrypt } from "@/lib/crypto";
 import { logAudit } from "@/lib/db";
 
+const AT_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
 /** Strips anything sensitive out of a plan's source_config before it ever reaches the browser. */
 function sanitizePlan(plan: ReturnType<typeof listPlans>[number]) {
   let config: Record<string, unknown>;
@@ -35,11 +37,15 @@ export async function POST(req: NextRequest) {
     destHostId?: number;
     destPath?: string;
     schedule?: Schedule;
+    atTime?: string | null;
     retentionCount?: number;
   };
 
   if (!body.name || !body.sourceHostId || !body.sourceType || !body.destHostId || !body.destPath) {
     return NextResponse.json({ error: "Champs requis manquants." }, { status: 400 });
+  }
+  if (body.atTime && !AT_TIME_RE.test(body.atTime)) {
+    return NextResponse.json({ error: "Heure planifiée invalide (format attendu : HH:MM)." }, { status: 400 });
   }
 
   const config = { ...(body.sourceConfig || {}) };
@@ -58,6 +64,7 @@ export async function POST(req: NextRequest) {
     destHostId: body.destHostId,
     destPath: body.destPath,
     schedule: body.schedule || "manual",
+    atTime: body.atTime?.trim() || null,
     retentionCount: body.retentionCount || 7,
     enabled: true,
   });

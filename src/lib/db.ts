@@ -205,6 +205,7 @@ export function migrate(db: Database.Database) {
       schedule TEXT NOT NULL DEFAULT 'manual' CHECK (schedule IN ('manual','hourly','daily','weekly')),
       retention_count INTEGER NOT NULL DEFAULT 7,
       enabled INTEGER NOT NULL DEFAULT 1,
+      at_time TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -938,6 +939,14 @@ export function migrate(db: Database.Database) {
   if (!haReplicationColumns.some((c) => c.name === "target_db_user")) {
     db.exec(`ALTER TABLE ha_replications ADD COLUMN target_db_user TEXT`);
     db.exec(`ALTER TABLE ha_replications ADD COLUMN target_db_password_encrypted TEXT`);
+  }
+
+  // Optional fixed wall-clock time (e.g. "03:00") for daily/weekly plans — null keeps the original
+  // elapsed-time-since-last-run behavior (checked every 15 min, no fixed hour) for every plan
+  // created before this and for anyone who doesn't set one.
+  const backupPlanColumns = db.prepare(`PRAGMA table_info(backup_plans)`).all() as { name: string }[];
+  if (!backupPlanColumns.some((c) => c.name === "at_time")) {
+    db.exec(`ALTER TABLE backup_plans ADD COLUMN at_time TEXT`);
   }
 
   const hostColumns = db.prepare(`PRAGMA table_info(hosts)`).all() as { name: string }[];

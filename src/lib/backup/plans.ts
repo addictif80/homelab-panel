@@ -14,6 +14,10 @@ export type BackupPlan = {
   destHostId: number;
   destPath: string;
   schedule: Schedule;
+  /** Optional fixed wall-clock time ("HH:MM") for daily/weekly plans — null keeps the original
+   * elapsed-time-since-last-run behavior (see lib/backup/scheduler.ts). Meaningless for
+   * manual/hourly schedules. */
+  atTime: string | null;
   retentionCount: number;
   enabled: boolean;
   createdAt: string;
@@ -28,6 +32,7 @@ type PlanRow = {
   dest_host_id: number;
   dest_path: string;
   schedule: Schedule;
+  at_time: string | null;
   retention_count: number;
   enabled: number;
   created_at: string;
@@ -43,6 +48,7 @@ function rowToPlan(row: PlanRow): BackupPlan {
     destHostId: row.dest_host_id,
     destPath: row.dest_path,
     schedule: row.schedule,
+    atTime: row.at_time,
     retentionCount: row.retention_count,
     enabled: !!row.enabled,
     createdAt: row.created_at,
@@ -62,8 +68,8 @@ export function createPlan(input: Omit<BackupPlan, "id" | "createdAt">): BackupP
   const id = randomUUID();
   getDb()
     .prepare(
-      `INSERT INTO backup_plans (id, name, source_host_id, source_type, source_config, dest_host_id, dest_path, schedule, retention_count, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO backup_plans (id, name, source_host_id, source_type, source_config, dest_host_id, dest_path, schedule, at_time, retention_count, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -74,6 +80,7 @@ export function createPlan(input: Omit<BackupPlan, "id" | "createdAt">): BackupP
       input.destHostId,
       input.destPath,
       input.schedule,
+      input.atTime,
       input.retentionCount,
       input.enabled ? 1 : 0
     );
@@ -86,12 +93,13 @@ export function updatePlan(id: string, patch: Partial<Omit<BackupPlan, "id" | "c
   // A key present in `patch` but set to undefined (any caller that only sends the fields it
   // actually means to change, like the plan-edit form, which never touches `enabled`) must leave
   // that field alone — {...current, ...patch} would otherwise spread the literal `undefined` over
-  // it, silently disabling/blanking whatever wasn't explicitly passed.
+  // it, silently disabling/blanking whatever wasn't explicitly passed. `atTime` is explicitly
+  // nullable, though — passing null (not undefined) is how the form clears a previously-set time.
   const definedPatch = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
   const merged = { ...current, ...definedPatch };
   getDb()
     .prepare(
-      `UPDATE backup_plans SET name=?, source_host_id=?, source_type=?, source_config=?, dest_host_id=?, dest_path=?, schedule=?, retention_count=?, enabled=? WHERE id=?`
+      `UPDATE backup_plans SET name=?, source_host_id=?, source_type=?, source_config=?, dest_host_id=?, dest_path=?, schedule=?, at_time=?, retention_count=?, enabled=? WHERE id=?`
     )
     .run(
       merged.name,
@@ -101,6 +109,7 @@ export function updatePlan(id: string, patch: Partial<Omit<BackupPlan, "id" | "c
       merged.destHostId,
       merged.destPath,
       merged.schedule,
+      merged.atTime,
       merged.retentionCount,
       merged.enabled ? 1 : 0,
       id
