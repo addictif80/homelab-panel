@@ -151,11 +151,17 @@ export async function setupFolderReplication(r: Replication): Promise<void> {
   await ensureRsyncReachable(r.sourceHostId, r.targetHostId, keyPath);
   await ensureRemoteDir(r.sourceHostId, r.targetHostId, r.targetPath, keyPath);
 
-  updateReplicationStatus(r.id, "setting_up", "Installation de lsyncd sur la machine source…");
+  updateReplicationStatus(
+    r.id,
+    "setting_up",
+    "Installation de lsyncd sur la machine source… (peut prendre plusieurs minutes si apt/dpkg est occupé par une mise à jour en arrière-plan)"
+  );
   const { code: lsyncdCheckCode } = await runSshCommand(r.sourceHostId, "command -v lsyncd", { timeoutMs: STATUS_TIMEOUT_MS });
   if (lsyncdCheckCode !== 0) {
     // Tries apt/dnf/yum/apk/pacman/zypper in turn rather than assuming Debian/Ubuntu — this panel
-    // targets a heterogeneous fleet, not just apt-based distros.
+    // targets a heterogeneous fleet, not just apt-based distros. On apt specifically, also waits
+    // out a concurrent dpkg lock (unattended-upgrades running in the background, most commonly)
+    // instead of failing immediately on "Could not get lock" — see hostCompat.ts.
     await installPackageUniversal(r.sourceHostId, "lsyncd");
   }
 

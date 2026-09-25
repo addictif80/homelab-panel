@@ -22,8 +22,36 @@ const PACKAGE_MANAGER_BINS: [PackageManager, string][] = [
   ["zypper", "zypper"],
 ];
 
+// dpkg/apt's own lock (/var/lib/dpkg/lock-frontend) is held for the whole duration of any other
+// apt/dpkg run on the same machine — extremely common right after boot, since Ubuntu ships
+// unattended-upgrades enabled by default and it can start an update run at any time, unpredictably,
+// with no way for this panel to know in advance. Failing immediately on "Could not get lock" turns
+// a transient, self-resolving condition into a hard error the user then has to notice and retry by
+// hand — instead this waits and retries for a while, and only gives up (with a message that
+// actually explains why) if the lock is still held well past when any normal unattended-upgrades
+// run should have finished.
+const APT_LOCK_RETRY_SCRIPT = (pkg: string) =>
+  [
+    `PKG=${shellQuote(pkg)}`,
+    `i=0`,
+    `while [ "$i" -lt 40 ]; do`,
+    `  OUT=$(apt-get update -qq 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$PKG" 2>&1)`,
+    `  CODE=$?`,
+    `  [ "$CODE" -eq 0 ] && { echo "$OUT"; exit 0; }`,
+    `  if echo "$OUT" | grep -qiE "could not get lock|dpkg frontend lock|resource temporarily unavailable"; then`,
+    `    i=$((i + 1))`,
+    `    sleep 7`,
+    `    continue`,
+    `  fi`,
+    `  echo "$OUT" >&2`,
+    `  exit "$CODE"`,
+    `done`,
+    `echo "apt/dpkg est resté verrouillé par un autre processus pendant plus de 4 minutes (unattended-upgrades ou une autre installation en cours) — réessaie dans quelques minutes." >&2`,
+    `exit 1`,
+  ].join("\n");
+
 const INSTALL_COMMANDS: Record<PackageManager, (pkg: string) => string> = {
-  apt: (pkg) => `apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ${shellQuote(pkg)}`,
+  apt: APT_LOCK_RETRY_SCRIPT,
   dnf: (pkg) => `dnf install -y -q ${shellQuote(pkg)}`,
   yum: (pkg) => `yum install -y -q ${shellQuote(pkg)}`,
   apk: (pkg) => `apk add --no-cache ${shellQuote(pkg)}`,
@@ -56,9 +84,12 @@ export async function installPackageUniversal(
     );
   }
   const packageName = altNames[manager] || pkg;
+  // apt's own retry loop above can legitimately run for several minutes waiting out a concurrent
+  // unattended-upgrades run — the timeout has to comfortably outlast that, not just the install
+  // itself.
   const { code, stderr } = await runSshCommand(hostId, INSTALL_COMMANDS[manager](packageName), {
     sudo: true,
-    timeoutMs: 120_000,
+    timeoutMs: manager === "apt" ? 360_000 : 120_000,
   });
   if (code !== 0) {
     throw new Error(
