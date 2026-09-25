@@ -21,8 +21,18 @@ echo '###UNATTENDED###'
 dpkg -l unattended-upgrades 2>/dev/null | awk '$1=="ii"{print "installed"}'
 echo '###APT_PENDING###'
 command -v apt-get >/dev/null 2>&1 && apt-get -s dist-upgrade 2>/dev/null | grep -c '^Inst '
+echo '###DNF_PENDING###'
+command -v dnf >/dev/null 2>&1 && dnf check-update 2>/dev/null | grep -cE '^\S+\.\S+\s+\S+\s+\S+'
+echo '###PACMAN_PENDING###'
+command -v pacman >/dev/null 2>&1 && pacman -Qu 2>/dev/null | wc -l
+echo '###APK_PENDING###'
+command -v apk >/dev/null 2>&1 && apk list -u 2>/dev/null | wc -l
 echo '###OPKG_PENDING###'
 command -v opkg >/dev/null 2>&1 && opkg list-upgradable 2>/dev/null | wc -l
+echo '###UNATTENDED_DNF###'
+systemctl is-enabled dnf-automatic-install.timer 2>/dev/null
+echo '###UNATTENDED_YUM###'
+systemctl is-enabled yum-cron 2>/dev/null
 echo '###UID0###'
 awk -F: '$3==0{print $1}' /etc/passwd 2>/dev/null
 echo '###EMPTYPASS###'

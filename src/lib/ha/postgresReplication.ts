@@ -1,7 +1,7 @@
 import { runSshCommand, getHostConnectionInfo, shellQuote } from "../ssh";
 import { ensurePrivateKeyDeployed, ensurePublicKeyAuthorized } from "../backup/keys";
 import { ensureRsyncReachable } from "../backup/transfer";
-import { restartService, stopService } from "./hostCompat";
+import { restartService, stopService } from "../hostCompat";
 import {
   generateReplicationCredential,
   setReplicationCredential,

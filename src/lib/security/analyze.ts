@@ -21,9 +21,19 @@ function sshdValue(sshdSection: string, key: string): string | null {
 }
 
 /** Turns raw facts collected over SSH into plain-language findings a non-expert can act on. */
+const PACKAGE_MANAGED_METHODS = ["apt", "dnf", "pacman", "apk"] as const;
+type PackageManagedMethod = (typeof PACKAGE_MANAGED_METHODS)[number];
+const PENDING_SECTION: Record<PackageManagedMethod, string> = {
+  apt: "APT_PENDING",
+  dnf: "DNF_PENDING",
+  pacman: "PACMAN_PENDING",
+  apk: "APK_PENDING",
+};
 export function analyzeHost(host: HostForAnalysis, facts: HostFacts): Finding[] {
   const findings: Finding[] = [];
-  const isApt = host.update_method === "apt";
+  const packageManagedMethod = PACKAGE_MANAGED_METHODS.includes(host.update_method as PackageManagedMethod)
+    ? (host.update_method as PackageManagedMethod)
+    : null;
   const isRouter = host.kind === "router";
   const isDsm = host.update_method === "dsm";
 
@@ -42,7 +52,7 @@ export function analyzeHost(host: HostForAnalysis, facts: HostFacts): Finding[] 
         howTo: [
           "# Vérifie d'abord qu'une connexion par clé SSH fonctionne pour ce compte, sinon tu vas te bloquer l'accès !",
           "sudo bash -c \"echo 'PermitRootLogin prohibit-password' > /etc/ssh/sshd_config.d/99-homelab-panel.conf\"",
-          "sudo sshd -t && sudo systemctl reload sshd",
+          "sudo sshd -t && sudo systemctl reload ssh 2>/dev/null || sudo systemctl reload sshd",
         ],
       });
     }
@@ -58,7 +68,7 @@ export function analyzeHost(host: HostForAnalysis, facts: HostFacts): Finding[] 
         howTo: [
           "# Teste d'abord une connexion par clé depuis un autre terminal (`ssh -i ta_cle ...`) avant de continuer !",
           "sudo bash -c \"echo 'PasswordAuthentication no' > /etc/ssh/sshd_config.d/99-homelab-panel-password.conf\"",
-          "sudo sshd -t && sudo systemctl reload sshd",
+          "sudo sshd -t && sudo systemctl reload ssh 2>/dev/null || sudo systemctl reload sshd",
         ],
       });
     }
@@ -104,12 +114,11 @@ export function analyzeHost(host: HostForAnalysis, facts: HostFacts): Finding[] 
   }
 
   // --- Updates ---
-  if (isApt) {
-    const pendingRaw = line(facts, "APT_PENDING");
-    const pending = parseInt(pendingRaw, 10) || 0;
+  if (packageManagedMethod) {
+    const pending = parseInt(line(facts, PENDING_SECTION[packageManagedMethod]), 10) || 0;
     if (pending > 0) {
       findings.push({
-        id: "apt-updates-pending",
+        id: "updates-pending",
         category: "updates",
         severity: pending > 20 ? "critical" : "warning",
         title: `${pending} mise${pending > 1 ? "s" : ""} à jour en attente`,
@@ -121,18 +130,40 @@ export function analyzeHost(host: HostForAnalysis, facts: HostFacts): Finding[] 
           "Lance une vraie mise à jour système (comme depuis la page Mises à jour). Une machine peut redémarrer certains services ; en cas de mise à jour du noyau, un redémarrage complet peut être nécessaire ensuite.",
       });
     }
-    const unattended = line(facts, "UNATTENDED");
-    if (!unattended.includes("installed")) {
-      findings.push({
-        id: "unattended-upgrades-missing",
-        category: "updates",
-        severity: "info",
-        title: "Les mises à jour de sécurité ne s'installent pas toutes seules",
-        detail:
-          "Avec unattended-upgrades, les correctifs de sécurité Debian/Ubuntu s'installent automatiquement dès qu'ils sortent, sans attendre que tu viennes cliquer sur \"Mettre à jour\".",
-        fixId: "install-unattended-upgrades",
-        fixLabel: "Activer les mises à jour de sécurité automatiques",
-      });
+
+    // Automatic security updates: the mechanism differs per distro family (Debian/Ubuntu's
+    // unattended-upgrades, Fedora/RHEL's dnf-automatic/yum-cron) — Arch/Alpine have no equivalent
+    // built-in mechanism at all, so there's nothing automatable to suggest there beyond a manual
+    // cron entry, which isn't worth a recurring "finding" nagging about a fix that doesn't exist.
+    if (packageManagedMethod === "apt") {
+      const unattended = line(facts, "UNATTENDED");
+      if (!unattended.includes("installed")) {
+        findings.push({
+          id: "unattended-upgrades-missing",
+          category: "updates",
+          severity: "info",
+          title: "Les mises à jour de sécurité ne s'installent pas toutes seules",
+          detail:
+            "Avec unattended-upgrades, les correctifs de sécurité Debian/Ubuntu s'installent automatiquement dès qu'ils sortent, sans attendre que tu viennes cliquer sur \"Mettre à jour\".",
+          fixId: "install-unattended-upgrades",
+          fixLabel: "Activer les mises à jour de sécurité automatiques",
+        });
+      }
+    } else if (packageManagedMethod === "dnf") {
+      const dnfTimerEnabled = line(facts, "UNATTENDED_DNF").trim() === "enabled";
+      const yumCronEnabled = line(facts, "UNATTENDED_YUM").trim() === "enabled";
+      if (!dnfTimerEnabled && !yumCronEnabled) {
+        findings.push({
+          id: "unattended-upgrades-missing",
+          category: "updates",
+          severity: "info",
+          title: "Les mises à jour de sécurité ne s'installent pas toutes seules",
+          detail:
+            "Avec dnf-automatic (ou yum-cron sur les systèmes plus anciens), les correctifs de sécurité s'installent automatiquement dès qu'ils sortent, sans attendre que tu viennes cliquer sur \"Mettre à jour\".",
+          fixId: "install-unattended-upgrades",
+          fixLabel: "Activer les mises à jour de sécurité automatiques",
+        });
+      }
     }
   } else if (isRouter) {
     const pending = parseInt(line(facts, "OPKG_PENDING"), 10) || 0;

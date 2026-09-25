@@ -23,6 +23,9 @@ type UpdateJob = {
 
 const METHOD_LABELS: Record<string, string> = {
   apt: "apt (Debian/Ubuntu)",
+  dnf: "dnf (Fedora/RHEL/Rocky/Alma)",
+  pacman: "pacman (Arch)",
+  apk: "apk (Alpine)",
   opkg: "opkg (OpenWrt)",
   dsm: "DSM (Synology)",
 };

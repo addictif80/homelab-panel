@@ -1,4 +1,4 @@
-import { runSshCommand, shellQuote } from "../ssh";
+import { runSshCommand, shellQuote } from "./ssh";
 
 /**
  * This panel's HA/replication setup used to assume Debian/Ubuntu everywhere it touched a host

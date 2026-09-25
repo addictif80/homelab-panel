@@ -45,7 +45,7 @@ const KIND_LABELS: Record<string, string> = {
 };
 
 const KIND_OPTIONS = Object.keys(KIND_LABELS);
-const UPDATE_METHOD_OPTIONS = ["apt", "opkg", "dsm"];
+const UPDATE_METHOD_OPTIONS = ["apt", "dnf", "pacman", "apk", "opkg", "dsm"];
 
 type PingState = Record<number, "idle" | "checking" | "up" | "down" | "unknown">;
 

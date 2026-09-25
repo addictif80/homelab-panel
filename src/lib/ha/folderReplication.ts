@@ -2,7 +2,7 @@ import { runSshCommand, getHostConnectionInfo } from "../ssh";
 import { ensurePrivateKeyDeployed, ensurePublicKeyAuthorized } from "../backup/keys";
 import { ensureRemoteDir, ensureRsyncReachable } from "../backup/transfer";
 import { listReplications, updateReplicationStatus, type Replication } from "./replication";
-import { installPackageUniversal, restartService, stopService, serviceIsActive, diagnoseServiceFailure } from "./hostCompat";
+import { installPackageUniversal, restartService, stopService, serviceIsActive, diagnoseServiceFailure } from "../hostCompat";
 
 const SETUP_TIMEOUT_MS = 60_000;
 const STATUS_TIMEOUT_MS = 15_000;

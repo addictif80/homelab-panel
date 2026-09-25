@@ -187,19 +187,26 @@ export async function unblockIpEverywhere(
 }
 
 /**
- * Detects UFW at the top of the block/unblock command instead of assuming raw iptables: on any
- * Ubuntu box with UFW enabled (the default on Ubuntu Desktop, and common on Ubuntu Server too),
- * `iptables -I INPUT` either gets overridden by UFW's own chains or gets silently wiped out the
- * next time UFW reloads its rules from /etc/ufw/ — and on newer Debian/Ubuntu releases the
- * `iptables` binary may not even be installed at all (nftables-only by default), so the command
- * just fails outright. UFW rules are persistent by construction (stored under /etc/ufw/), so
- * there's no separate "make it survive a reboot" step needed for that branch, unlike raw iptables.
+ * Detects which firewall frontend is actually in charge before falling back to raw iptables:
+ *  - UFW active (Debian/Ubuntu's usual choice): `iptables -I INPUT` either gets overridden by
+ *    UFW's own chains or gets silently wiped out the next time UFW reloads its rules from
+ *    /etc/ufw/, and on newer Debian/Ubuntu releases the `iptables` binary may not even be
+ *    installed at all (nftables-only by default), so a raw rule just fails outright.
+ *  - firewalld active (the default on Fedora/RHEL/CentOS/Rocky/Alma and openSUSE): same problem
+ *    in the other direction — firewalld manages its own nftables/iptables backend and can
+ *    overwrite or ignore rules added outside it on the next reload.
+ *  - Anything else: raw iptables as a last resort, exactly as before.
+ * Both UFW and firewalld rules are persistent by construction (stored under /etc/ufw/ or by
+ * `--permanent`), so neither needs the separate "make it survive a reboot" step raw iptables does.
+ * Exported so callers other than block/unblock (e.g. the "basic firewall" security fix) can reuse
+ * the same three-way detection instead of duplicating or, worse, diverging from it.
  */
-function firewallBackendScript(ip: string, onUfw: string, onIptables: string): string {
+export function firewallBackendScript(onUfw: string, onFirewalld: string, onIptables: string): string {
   return [
-    `IP=${shellQuote(ip)}`,
     `if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "^Status: active"; then`,
     onUfw,
+    `elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state 2>/dev/null | grep -q running; then`,
+    onFirewalld,
     `else`,
     onIptables,
     `fi`,
@@ -264,18 +271,25 @@ async function applyBlockIp(hostId: number, ip: string): Promise<{ message: stri
         ].join("\n")
       : "";
 
-  const command = firewallBackendScript(
-    ip,
-    [
-      `  ufw status numbered 2>/dev/null | grep -q "DENY.*$IP" || ufw insert 1 deny from "$IP" to any`,
-      `  echo homelab_backend=ufw`,
-    ].join("\n"),
-    [
-      `  iptables -C INPUT -s "$IP" -j DROP 2>/dev/null || iptables -I INPUT -s "$IP" -j DROP`,
-      persistApt,
-      `  echo homelab_backend=iptables`,
-    ].join("\n")
-  );
+  const command = [
+    `IP=${shellQuote(ip)}`,
+    firewallBackendScript(
+      [
+        `  ufw status numbered 2>/dev/null | grep -q "DENY.*$IP" || ufw insert 1 deny from "$IP" to any`,
+        `  echo homelab_backend=ufw`,
+      ].join("\n"),
+      [
+        `  firewall-cmd --permanent --add-rich-rule="rule family='ipv4' source address='$IP' reject" >/dev/null 2>&1`,
+        `  firewall-cmd --reload >/dev/null 2>&1`,
+        `  echo homelab_backend=firewalld`,
+      ].join("\n"),
+      [
+        `  iptables -C INPUT -s "$IP" -j DROP 2>/dev/null || iptables -I INPUT -s "$IP" -j DROP`,
+        persistApt,
+        `  echo homelab_backend=iptables`,
+      ].join("\n")
+    ),
+  ].join("\n");
 
   const { code, stdout, stderr } = await withTimeout(
     runSshCommand(hostId, command, { sudo: true }),
@@ -286,6 +300,9 @@ async function applyBlockIp(hostId: number, ip: string): Promise<{ message: stri
 
   if (stdout.includes("homelab_backend=ufw")) {
     return { message: `IP ${ip} bloquée via UFW (règle persistante, survit à un redémarrage).` };
+  }
+  if (stdout.includes("homelab_backend=firewalld")) {
+    return { message: `IP ${ip} bloquée via firewalld (règle permanente, survit à un redémarrage).` };
   }
   if (updateMethod === "apt") {
     return { message: `IP ${ip} bloquée (règle iptables persistante, survit à un redémarrage).` };
@@ -322,16 +339,22 @@ export async function unblockIp(hostId: number, ip: string): Promise<{ message: 
     return { message: `IP ${ip} débloquée.` };
   }
 
-  const command = firewallBackendScript(
-    ip,
-    [`  ufw --force delete deny from "$IP" to any >/dev/null 2>&1 || true`].join("\n"),
-    [
-      `  iptables -D INPUT -s "$IP" -j DROP 2>/dev/null || true`,
-      updateMethod === "apt"
-        ? `  command -v netfilter-persistent >/dev/null 2>&1 && netfilter-persistent save >/dev/null 2>&1 || true`
-        : "",
-    ].join("\n")
-  );
+  const command = [
+    `IP=${shellQuote(ip)}`,
+    firewallBackendScript(
+      [`  ufw --force delete deny from "$IP" to any >/dev/null 2>&1 || true`].join("\n"),
+      [
+        `  firewall-cmd --permanent --remove-rich-rule="rule family='ipv4' source address='$IP' reject" >/dev/null 2>&1 || true`,
+        `  firewall-cmd --reload >/dev/null 2>&1 || true`,
+      ].join("\n"),
+      [
+        `  iptables -D INPUT -s "$IP" -j DROP 2>/dev/null || true`,
+        updateMethod === "apt"
+          ? `  command -v netfilter-persistent >/dev/null 2>&1 && netfilter-persistent save >/dev/null 2>&1 || true`
+          : "",
+      ].join("\n")
+    ),
+  ].join("\n");
 
   const { code, stderr } = await withTimeout(
     runSshCommand(hostId, command, { sudo: true }),

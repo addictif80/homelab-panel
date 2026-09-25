@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { connectSsh, buildPrivilegedCommand } from "./ssh";
 import { getDb } from "./db";
 
-export type UpdateMethod = "apt" | "opkg" | "dsm";
+export type UpdateMethod = "apt" | "dnf" | "pacman" | "apk" | "opkg" | "dsm";
 export type UpdateMode = "dry-run" | "apply";
 
 type CommandSet = {
@@ -22,6 +22,34 @@ const COMMANDS: Record<UpdateMethod, CommandSet> = {
       "export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get -y dist-upgrade && apt-get -y autoremove",
     rebootCheck: `test -f /var/run/reboot-required && echo ${REBOOT_MARKER} || true`,
     supportsAutoReboot: true,
+  },
+  dnf: {
+    // `dnf check-update` exits 100 (not 0) when updates ARE available — trailing `; true` keeps
+    // that from being mistaken for a failed dry-run job.
+    dryRun: "dnf check-update; true",
+    apply: "dnf -y upgrade --refresh",
+    // needs-restarting -r (dnf-utils/yum-utils) exits 1 if a reboot is warranted (a new kernel,
+    // glibc, systemd...) and 0 otherwise; silently skipped if the package isn't installed rather
+    // than treated as "no reboot needed" by default, so the check just reports nothing either way.
+    rebootCheck: `command -v needs-restarting >/dev/null 2>&1 && { needs-restarting -r >/dev/null 2>&1 || echo ${REBOOT_MARKER}; } || true`,
+    supportsAutoReboot: true,
+  },
+  pacman: {
+    // pacman -Qu lists upgradable packages and exits non-zero when there are none on some
+    // versions — `; true` keeps that from failing the dry-run job like dnf's check-update above.
+    dryRun: "pacman -Sy >/dev/null 2>&1; pacman -Qu; true",
+    apply: "pacman -Syu --noconfirm",
+    // No standard "reboot required" marker on Arch — left for the admin to judge (a kernel
+    // upgrade there is usually handled by a reboot reminder tool the admin already chose, not by
+    // this panel guessing at one).
+    rebootCheck: null,
+    supportsAutoReboot: false,
+  },
+  apk: {
+    dryRun: "apk update >/dev/null 2>&1; apk list -u 2>/dev/null; true",
+    apply: "apk update && apk upgrade",
+    rebootCheck: null,
+    supportsAutoReboot: false,
   },
   opkg: {
     dryRun: "opkg update && opkg list-upgradable",

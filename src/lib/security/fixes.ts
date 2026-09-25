@@ -2,7 +2,8 @@ import { runSshCommand } from "../ssh";
 import { getDb } from "../db";
 import { buildUpdateCommand, startUpdateJob, type UpdateMethod } from "../updates";
 import { withTimeout } from "../timeout";
-import { blockIp, blockIpEverywhere } from "../firewall";
+import { blockIp, blockIpEverywhere, firewallBackendScript } from "../firewall";
+import { installPackageUniversal, restartService } from "../hostCompat";
 
 export type FixResult = { message: string; jobId?: string };
 
@@ -21,18 +22,51 @@ async function run(hostId: number, command: string) {
 
 export const FIX_REGISTRY: Record<string, FixFn> = {
   "install-fail2ban": async (hostId) => {
-    await run(
-      hostId,
-      "export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y fail2ban && systemctl enable --now fail2ban"
-    );
+    // Tries apt/dnf/yum/apk/pacman/zypper, then systemd/OpenRC/SysV to start it — this panel
+    // targets a heterogeneous fleet, not just Debian/Ubuntu with systemd.
+    await installPackageUniversal(hostId, "fail2ban");
+    const { code, stderr } = await restartService(hostId, "fail2ban");
+    if (code !== 0) throw new Error(stderr || "fail2ban installé, mais impossible de le démarrer sur cette machine.");
     return { message: "fail2ban installé et démarré." };
   },
 
   "install-unattended-upgrades": async (hostId) => {
-    await run(
-      hostId,
-      "export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y unattended-upgrades && dpkg-reconfigure -f noninteractive unattended-upgrades && systemctl enable --now unattended-upgrades"
+    // The mechanism itself (not just the package name) differs per distro family — Debian/Ubuntu's
+    // unattended-upgrades, RHEL/Fedora's dnf-automatic (or the older yum-cron), and no established
+    // built-in equivalent at all on Alpine/Arch/openSUSE — so this is a self-contained per-distro
+    // script rather than a single generic "install X" call, with an honest "not supported" outcome
+    // for anything else instead of a misleading fake success.
+    const command = [
+      `if command -v apt-get >/dev/null 2>&1; then`,
+      `  export DEBIAN_FRONTEND=noninteractive`,
+      `  apt-get update && apt-get install -y unattended-upgrades && dpkg-reconfigure -f noninteractive unattended-upgrades && (systemctl enable --now unattended-upgrades 2>/dev/null || true)`,
+      `  echo homelab_backend=apt`,
+      `elif command -v dnf >/dev/null 2>&1; then`,
+      `  dnf install -y dnf-automatic`,
+      `  sed -i 's/^apply_updates.*/apply_updates = yes/' /etc/dnf/automatic.conf 2>/dev/null || true`,
+      `  systemctl enable --now dnf-automatic-install.timer`,
+      `  echo homelab_backend=dnf`,
+      `elif command -v yum >/dev/null 2>&1; then`,
+      `  yum install -y yum-cron`,
+      `  sed -i 's/^apply_updates.*/apply_updates = yes/' /etc/yum/yum-cron.conf 2>/dev/null || true`,
+      `  systemctl enable --now yum-cron`,
+      `  echo homelab_backend=yum`,
+      `else`,
+      `  echo homelab_unsupported`,
+      `fi`,
+    ].join("\n");
+    const { stdout, code, stderr } = await withTimeout(
+      runSshCommand(hostId, command, { sudo: true }),
+      120_000,
+      "Délai dépassé lors de l'activation des mises à jour automatiques."
     );
+    if (stdout.includes("homelab_unsupported")) {
+      throw new Error(
+        "Aucun mécanisme de mises à jour de sécurité automatiques reconnu pour cette distribution (ni apt, ni dnf/yum) — " +
+          "à mettre en place manuellement (par exemple via une tâche cron planifiée exécutant la commande de mise à jour du système)."
+      );
+    }
+    if (code !== 0) throw new Error(stderr.trim() || "Échec de l'activation des mises à jour automatiques.");
     return { message: "Mises à jour de sécurité automatiques activées." };
   },
 
@@ -51,17 +85,31 @@ export const FIX_REGISTRY: Record<string, FixFn> = {
       | { ssh_port: number }
       | undefined;
     const sshPort = host?.ssh_port || 22;
-    // Idempotent baseline: loopback, established/related, ICMP, and SSH stay open; everything
-    // else inbound is dropped. Rules are inserted with a -C check first so re-running is safe.
+    // Same three-way UFW/firewalld/iptables detection as firewall.ts's blockIp/unblockIp —
+    // applying raw iptables rules on a machine actually managed by UFW or firewalld risks being
+    // silently overridden (or conflicting outright) on their next reload.
     const command = [
-      `add() { iptables -C INPUT $* 2>/dev/null || iptables -I INPUT $*; }`,
-      `add -i lo -j ACCEPT`,
-      `add -m state --state ESTABLISHED,RELATED -j ACCEPT`,
-      `add -p icmp -j ACCEPT`,
-      `add -p tcp --dport ${sshPort} -j ACCEPT`,
-      `iptables -P INPUT DROP`,
-      `iptables -P FORWARD DROP`,
-    ].join(" && ");
+      `PORT=${sshPort}`,
+      firewallBackendScript(
+        [`  ufw allow "$PORT"/tcp >/dev/null 2>&1`, `  ufw --force enable >/dev/null 2>&1`].join("\n"),
+        [
+          `  firewall-cmd --set-default-zone=drop >/dev/null 2>&1`,
+          `  firewall-cmd --permanent --add-port="$PORT"/tcp >/dev/null 2>&1`,
+          `  firewall-cmd --reload >/dev/null 2>&1`,
+        ].join("\n"),
+        // Idempotent baseline: loopback, established/related, ICMP, and SSH stay open; everything
+        // else inbound is dropped. Rules are inserted with a -C check first so re-running is safe.
+        [
+          `  add() { iptables -C INPUT "$@" 2>/dev/null || iptables -I INPUT "$@"; }`,
+          `  add -i lo -j ACCEPT`,
+          `  add -m state --state ESTABLISHED,RELATED -j ACCEPT`,
+          `  add -p icmp -j ACCEPT`,
+          `  add -p tcp --dport "$PORT" -j ACCEPT`,
+          `  iptables -P INPUT DROP`,
+          `  iptables -P FORWARD DROP`,
+        ].join("\n")
+      ),
+    ].join("\n");
     await run(hostId, command);
     return {
       message: `Pare-feu de base activé (SSH sur le port ${sshPort} conservé, reste du trafic entrant bloqué).`,
