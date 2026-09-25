@@ -664,7 +664,11 @@ export default function HaPage() {
               <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${STATUS_STYLES[r.status]}`}>{STATUS_LABELS[r.status]}</span>
             </div>
 
-            {r.statusDetail && <p className="mt-2 text-xs text-neutral-500">{r.statusDetail}</p>}
+            {r.statusDetail && (
+              <p className="mt-2 whitespace-pre-line rounded bg-neutral-900 p-2 font-mono text-[11px] leading-relaxed text-neutral-500">
+                {r.statusDetail}
+              </p>
+            )}
             {r.lastSyncedAt && (
               <p className="mt-1 text-xs text-neutral-600">Dernière synchro confirmée : {new Date(`${r.lastSyncedAt}Z`).toLocaleString("fr-FR")}</p>
             )}

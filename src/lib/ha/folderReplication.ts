@@ -122,7 +122,20 @@ async function reconcileLsyncdOnHost(hostId: number): Promise<void> {
   ].join(" && ");
 
   const { code, stderr } = await runSshCommand(hostId, command, { sudo: true, timeoutMs: SETUP_TIMEOUT_MS });
-  if (code !== 0) throw new Error(stderr || "Impossible d'appliquer la configuration lsyncd sur la machine source.");
+  if (code !== 0) {
+    // `systemctl restart` failing tells you almost nothing on its own ("Job for lsyncd.service
+    // failed.") — the actual reason (a Lua syntax error in the config just written, a broken
+    // package install, missing rsync on this host) only shows up in the unit's own status/journal,
+    // so it's fetched and appended here rather than leaving the bare systemctl error to guess from.
+    const { stdout: diag } = await runSshCommand(
+      hostId,
+      "systemctl status lsyncd --no-pager -l 2>&1 | tail -n 15; journalctl -u lsyncd --no-pager -n 15 2>&1 | tail -n 15",
+      { sudo: true, timeoutMs: STATUS_TIMEOUT_MS }
+    ).catch(() => ({ stdout: "" }));
+    throw new Error(
+      `${stderr || "Impossible d'appliquer la configuration lsyncd sur la machine source."}${diag.trim() ? `\n\n${diag.trim()}` : ""}`
+    );
+  }
 }
 
 /** First-time setup for one folder replication: deploys the dedicated replication SSH key on both
@@ -175,7 +188,19 @@ export async function checkFolderReplicationStatus(r: Replication): Promise<void
   });
   const active = activeOut.trim() === "active";
   if (!active) {
-    updateReplicationStatus(r.id, "stopped", `Service lsyncd non actif sur la machine source (${activeOut.trim() || "état inconnu"}).`);
+    // Same reasoning as reconcileLsyncdOnHost's setup-time error: "non actif" alone gives no way
+    // to tell a never-installed binary apart from a crashed one apart from a config error — pull
+    // the unit's own status/journal so the real cause is visible instead of just its symptom.
+    const { stdout: diag } = await runSshCommand(
+      r.sourceHostId,
+      "systemctl status lsyncd --no-pager -l 2>&1 | tail -n 12; journalctl -u lsyncd --no-pager -n 12 2>&1 | tail -n 12",
+      { sudo: true, timeoutMs: STATUS_TIMEOUT_MS }
+    ).catch(() => ({ stdout: "" }));
+    updateReplicationStatus(
+      r.id,
+      "stopped",
+      `Service lsyncd non actif sur la machine source (${activeOut.trim() || "état inconnu"}).${diag.trim() ? `\n${diag.trim()}` : ""}`
+    );
     return;
   }
 

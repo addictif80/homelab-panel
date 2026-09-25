@@ -119,6 +119,20 @@ function explainHomeDirError(stderr: string): string {
       `SSH l'accepte — active ce service (ou choisis un compte qui a déjà un dossier personnel) côté machine.`
     );
   }
+  // A `.ssh` directory that already exists but is owned by a different account (root, most often
+  // — some NAS/appliance images pre-create it at 700 owned by root as part of their base image)
+  // can't be chmod'd by this one, and since this whole flow deliberately never uses sudo (see this
+  // file's doc comment above on why), there's no way to self-heal it from here — only pointed out
+  // clearly instead of surfacing as a bare, unexplained "Operation not permitted".
+  if (/chmod:.*\.ssh.*Operation not permitted/i.test(stderr) || /Operation not permitted/i.test(stderr)) {
+    return (
+      `${stderr}\n\nLe dossier .ssh du compte SSH de cette machine existe déjà mais appartient à un autre compte ` +
+      `(souvent root — certaines images NAS/appliance le pré-créent ainsi) : ce compte ne peut pas en changer les ` +
+      `permissions lui-même, et cette étape n'utilise volontairement pas sudo. Corrige la propriété une fois, en te ` +
+      `connectant sur cette machine avec un accès root et en exécutant : chown -R <compte SSH>:<compte SSH> ~<compte SSH>/.ssh ` +
+      `— puis relance.`
+    );
+  }
   return stderr;
 }
 
