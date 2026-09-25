@@ -30,24 +30,38 @@ const PACKAGE_MANAGER_BINS: [PackageManager, string][] = [
 // hand — instead this waits and retries for a while, and only gives up (with a message that
 // actually explains why) if the lock is still held well past when any normal unattended-upgrades
 // run should have finished.
+// `apt-get update` and `apt-get install` are retried as two *separate* phases, each with their
+// own lock-wait loop — retrying them as a single combined command (as an earlier version of this
+// script did) re-ran `apt-get update` on every single lock-retry iteration too, which on a host
+// with a slow mirror or many sources can itself take long enough to blow through the overall SSH
+// timeout well before the lock-wait budget is even exhausted. Separating them means `update` only
+// ever runs again if it specifically was the one that hit the lock.
 const APT_LOCK_RETRY_SCRIPT = (pkg: string) =>
   [
     `PKG=${shellQuote(pkg)}`,
-    `i=0`,
-    `while [ "$i" -lt 40 ]; do`,
-    `  OUT=$(apt-get update -qq 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$PKG" 2>&1)`,
-    `  CODE=$?`,
-    `  [ "$CODE" -eq 0 ] && { echo "$OUT"; exit 0; }`,
-    `  if echo "$OUT" | grep -qiE "could not get lock|dpkg frontend lock|resource temporarily unavailable"; then`,
-    `    i=$((i + 1))`,
-    `    sleep 7`,
-    `    continue`,
-    `  fi`,
-    `  echo "$OUT" >&2`,
-    `  exit "$CODE"`,
-    `done`,
-    `echo "apt/dpkg est resté verrouillé par un autre processus pendant plus de 4 minutes (unattended-upgrades ou une autre installation en cours) — réessaie dans quelques minutes." >&2`,
-    `exit 1`,
+    `retry_apt() {`,
+    `  CMD="$1"`,
+    `  i=0`,
+    `  while [ "$i" -lt 25 ]; do`,
+    // Single-quoted at the call site below, so $CMD holds the literal text (including the
+    // embedded $PKG) — `eval` is what actually expands $PKG, at the time each attempt runs, not
+    // the call site up front.
+    `    OUT=$(eval "$CMD" 2>&1)`,
+    `    CODE=$?`,
+    `    [ "$CODE" -eq 0 ] && { echo "$OUT"; return 0; }`,
+    `    if echo "$OUT" | grep -qiE "could not get lock|dpkg frontend lock|resource temporarily unavailable"; then`,
+    `      i=$((i + 1))`,
+    `      sleep 7`,
+    `      continue`,
+    `    fi`,
+    `    echo "$OUT" >&2`,
+    `    return "$CODE"`,
+    `  done`,
+    `  echo "apt/dpkg est resté verrouillé par un autre processus pendant plus de 3 minutes (unattended-upgrades ou une autre installation en cours) — réessaie dans quelques minutes." >&2`,
+    `  return 1`,
+    `}`,
+    `retry_apt 'apt-get update -qq' || exit $?`,
+    `retry_apt 'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$PKG"'`,
   ].join("\n");
 
 const INSTALL_COMMANDS: Record<PackageManager, (pkg: string) => string> = {
@@ -84,12 +98,13 @@ export async function installPackageUniversal(
     );
   }
   const packageName = altNames[manager] || pkg;
-  // apt's own retry loop above can legitimately run for several minutes waiting out a concurrent
-  // unattended-upgrades run — the timeout has to comfortably outlast that, not just the install
-  // itself.
+  // apt's own retry loop above can legitimately spend up to ~3 minutes waiting out a concurrent
+  // unattended-upgrades run on *each* of its two phases (update, then install) — the timeout has
+  // to comfortably outlast the worst case of both back to back, plus the actual update/install
+  // work itself, not just one phase's wait budget.
   const { code, stderr } = await runSshCommand(hostId, INSTALL_COMMANDS[manager](packageName), {
     sudo: true,
-    timeoutMs: manager === "apt" ? 360_000 : 120_000,
+    timeoutMs: manager === "apt" ? 600_000 : 120_000,
   });
   if (code !== 0) {
     throw new Error(
