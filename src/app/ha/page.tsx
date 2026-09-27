@@ -138,11 +138,17 @@ export default function HaPage() {
     load();
   }, [load]);
 
-  // Live-ish view during setup: a replication mid-setup updates its own status/statusDetail at
-  // each step, so poll while at least one is in that state instead of leaving the page stale.
+  // Keeps the page live without a manual reload: the panel's own background scheduler
+  // (checkAllReplications, server.ts) re-checks every enabled replication and updates its
+  // status/lastSyncedAt independently of anyone having this page open at all — without this poll,
+  // that only ever became visible on the next full page reload, which reads as "did this actually
+  // just check, or is it stuck?" for anything that isn't mid-setup. A replication actively being
+  // configured polls quickly (its own status/statusDetail changes step by step); once settled, a
+  // slower interval is still enough to track the scheduler's own ~30s cadence without hammering the
+  // API for something that rarely changes.
   useEffect(() => {
-    if (!replications.some((r) => r.status === "setting_up")) return;
-    const timer = setInterval(load, 3000);
+    const fast = replications.some((r) => r.status === "setting_up");
+    const timer = setInterval(load, fast ? 3000 : 20_000);
     return () => clearInterval(timer);
   }, [replications, load]);
 
