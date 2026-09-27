@@ -4,12 +4,20 @@ import {
   deleteReplication as deleteReplicationRow,
   updateReplicationStatus,
   type Replication,
+  type ReplicationStatus,
 } from "./replication";
 import { setupFolderReplication, checkFolderReplicationStatus, teardownFolderReplication } from "./folderReplication";
 import { setupSqliteReplication, runSqliteSync } from "./sqliteReplication";
 import { setupMysqlReplication, checkMysqlReplicationStatus } from "./mysqlReplication";
 import { setupPostgresReplication, checkPostgresReplicationStatus } from "./postgresReplication";
 import { wireFailoverForReplication } from "./failoverWiring";
+import { notifyAll, hasAnyNotificationChannel } from "../notifications/notify";
+import { getDb } from "../db";
+
+function hostLabel(hostId: number): string {
+  const row = getDb().prepare(`SELECT name FROM hosts WHERE id = ?`).get(hostId) as { name: string } | undefined;
+  return row?.name ?? `#${hostId}`;
+}
 
 export * from "./replication";
 export { wireFailoverForReplication } from "./failoverWiring";
@@ -83,16 +91,39 @@ async function finishReplicationSetup(id: string, r: Replication): Promise<void>
   }
 }
 
+// Alert-worthy states — "lagging" is a soft warning (behind schedule, still working) rather than
+// broken, so it deliberately doesn't trigger its own notification either way; only a genuine
+// failure/stop does, and only crossing the boundary into or out of it, never on every 30s tick
+// while it stays there (which is how often this runs — see checkAllReplications).
+const ALERT_STATES: ReplicationStatus[] = ["error", "stopped"];
+
 export async function checkReplicationStatus(id: string): Promise<void> {
-  const r = getReplication(id);
-  if (!r) return;
+  const before = getReplication(id);
+  if (!before) return;
   try {
-    if (r.kind === "folder") await checkFolderReplicationStatus(r);
-    else if (r.kind === "sqlite") await runSqliteSync(r);
-    else if (r.kind === "mysql") await checkMysqlReplicationStatus(r);
-    else await checkPostgresReplicationStatus(r);
+    if (before.kind === "folder") await checkFolderReplicationStatus(before);
+    else if (before.kind === "sqlite") await runSqliteSync(before);
+    else if (before.kind === "mysql") await checkMysqlReplicationStatus(before);
+    else await checkPostgresReplicationStatus(before);
   } catch (err) {
     updateReplicationStatus(id, "error", err instanceof Error ? err.message : "Erreur inconnue lors de la vérification.");
+  }
+
+  if (!hasAnyNotificationChannel()) return;
+  const after = getReplication(id);
+  if (!after) return;
+  const wasDown = ALERT_STATES.includes(before.status);
+  const isDown = ALERT_STATES.includes(after.status);
+  if (!wasDown && isDown) {
+    notifyAll(
+      `⚠ Réplication en échec : ${after.name}`,
+      `La réplication "${after.name}" (${after.kind}, ${hostLabel(after.sourceHostId)} → ${hostLabel(after.targetHostId)}) vient de passer en erreur.\n\n${after.statusDetail ?? ""}`
+    ).catch(() => {});
+  } else if (wasDown && !isDown) {
+    notifyAll(
+      `✅ Réplication rétablie : ${after.name}`,
+      `La réplication "${after.name}" (${after.kind}, ${hostLabel(after.sourceHostId)} → ${hostLabel(after.targetHostId)}) est de nouveau opérationnelle.`
+    ).catch(() => {});
   }
 }
 
