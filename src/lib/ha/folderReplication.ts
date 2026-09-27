@@ -1,4 +1,4 @@
-import { runSshCommand, getHostConnectionInfo } from "../ssh";
+import { runSshCommand, getHostConnectionInfo, shellQuote } from "../ssh";
 import { ensurePrivateKeyDeployed, ensurePublicKeyAuthorized } from "../backup/keys";
 import { ensureRemoteDir, ensureRsyncReachable } from "../backup/transfer";
 import { listReplications, updateReplicationStatus, type Replication } from "./replication";
@@ -6,6 +6,10 @@ import { installPackageUniversal, restartService, stopService, serviceIsActive, 
 
 const SETUP_TIMEOUT_MS = 60_000;
 const STATUS_TIMEOUT_MS = 15_000;
+// A reverse sync moves a whole directory tree back across the network (potentially everything
+// written on the target during a failover), the same order of magnitude of work as the very first
+// sync — needs the same generous budget, not the quick per-step timeout above.
+const REVERSE_SYNC_TIMEOUT_MS = 30 * 60_000;
 const LSYNCD_CONFIG_PATH = "/etc/lsyncd/lsyncd.conf.lua";
 
 /**
@@ -183,6 +187,32 @@ export async function setupFolderReplication(r: Replication): Promise<void> {
   await reconcileLsyncdOnHost(r.sourceHostId);
 
   updateReplicationStatus(r.id, "in_sync", "lsyncd actif — synchronisation continue en cours.", true);
+}
+
+/**
+ * Manual recovery action for after a failover: pulls the target's current directory tree back onto
+ * the source, overwriting whatever's there — the scenario is a real outage on A during which
+ * traffic (and writes) moved to B, so by the time A comes back its own copy is the *stale* one and
+ * B holds the data that actually matters. Runs `rsync --delete` *from* the source host, pulling
+ * from the target over the same dedicated key/identity already used for the forward direction (it
+ * only needs read access on the target, which the existing authorized_keys entry already grants —
+ * no new key or authorization required). Deliberately never automatic: this is a one-way overwrite
+ * the user has to explicitly ask for, at a moment of their choosing.
+ */
+export async function reverseSyncFolderReplication(r: Replication): Promise<void> {
+  updateReplicationStatus(r.id, "setting_up", "Resynchronisation depuis la machine cible (écrase la source)…");
+  const keyPath = await ensurePrivateKeyDeployed(r.sourceHostId);
+  const target = getHostConnectionInfo(r.targetHostId);
+  const sshOpts = `-i ${keyPath} -p ${target.port} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10`;
+  const cmd =
+    `rsync -az --delete -e ${shellQuote(`ssh ${sshOpts}`)} ` +
+    `${shellQuote(`${target.user}@${target.address}:${r.targetPath}/`)} ${shellQuote(`${r.sourcePath}/`)}`;
+  const { code, stderr } = await runSshCommand(r.sourceHostId, cmd, { timeoutMs: REVERSE_SYNC_TIMEOUT_MS });
+  if (code !== 0) throw new Error(stderr || "Échec de la resynchronisation depuis la machine cible.");
+
+  updateReplicationStatus(r.id, "setting_up", "Reprise de la réplication normale…");
+  await reconcileLsyncdOnHost(r.sourceHostId);
+  updateReplicationStatus(r.id, "in_sync", "Resynchronisé depuis la machine cible — réplication normale (source → cible) reprise.", true);
 }
 
 /** Re-applies the combined config on `hostId` — call after enabling/disabling/removing any folder

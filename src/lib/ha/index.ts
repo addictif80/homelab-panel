@@ -6,9 +6,14 @@ import {
   type Replication,
   type ReplicationStatus,
 } from "./replication";
-import { setupFolderReplication, checkFolderReplicationStatus, teardownFolderReplication } from "./folderReplication";
+import {
+  setupFolderReplication,
+  checkFolderReplicationStatus,
+  teardownFolderReplication,
+  reverseSyncFolderReplication,
+} from "./folderReplication";
 import { setupSqliteReplication, runSqliteSync } from "./sqliteReplication";
-import { setupMysqlReplication, checkMysqlReplicationStatus } from "./mysqlReplication";
+import { setupMysqlReplication, checkMysqlReplicationStatus, reverseSyncMysqlReplication } from "./mysqlReplication";
 import { setupPostgresReplication, checkPostgresReplicationStatus } from "./postgresReplication";
 import { wireFailoverForReplication } from "./failoverWiring";
 import { notifyAll, hasAnyNotificationChannel } from "../notifications/notify";
@@ -64,6 +69,43 @@ export async function runReplicationSetup(id: string): Promise<void> {
       throw err;
     }
     await finishReplicationSetup(id, r);
+  } finally {
+    activeSetups.delete(id);
+  }
+}
+
+/** 'folder' and 'mysql' only today — the two kinds this panel's actual users have needed a manual
+ * fail-back for so far. 'postgres' streaming replication and 'sqlite''s plain periodic copy would
+ * each need their own reverse-flow implementation; asking for one on an unsupported kind fails
+ * loudly rather than silently doing nothing. */
+export function reverseSyncSupported(kind: Replication["kind"]): boolean {
+  return kind === "folder" || kind === "mysql";
+}
+
+/** Manual recovery action for after a failover: overwrites the source with the target's current
+ * data, on the assumption that real writes happened on the target while the source was down (see
+ * reverseSyncFolderReplication/reverseSyncMysqlReplication's own doc comments for exactly how each
+ * kind does this). Shares the same in-memory lock as a normal setup — the two must never run
+ * concurrently against the same replication's source/target pair, whichever direction each is
+ * currently moving data in. */
+export async function runReverseSync(id: string): Promise<void> {
+  if (activeSetups.has(id)) {
+    throw new Error("Une opération est déjà en cours pour cette réplication — attends qu'elle se termine avant d'en relancer une.");
+  }
+  activeSetups.add(id);
+  try {
+    const r = getReplication(id);
+    if (!r) throw new Error("Réplication introuvable.");
+    if (!reverseSyncSupported(r.kind)) {
+      throw new Error(`La resynchronisation manuelle n'est pas encore disponible pour le type "${r.kind}".`);
+    }
+    try {
+      if (r.kind === "folder") await reverseSyncFolderReplication(r);
+      else await reverseSyncMysqlReplication(r);
+    } catch (err) {
+      updateReplicationStatus(id, "error", err instanceof Error ? err.message : "Erreur inconnue lors de la resynchronisation.");
+      throw err;
+    }
   } finally {
     activeSetups.delete(id);
   }

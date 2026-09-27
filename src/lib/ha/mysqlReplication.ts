@@ -392,3 +392,124 @@ export async function checkMysqlReplicationStatus(r: Replication): Promise<void>
     );
   }
 }
+
+/**
+ * Manual recovery action for after a failover: the scenario is a real outage on the source during
+ * which the app kept running against the target (writes it never sent to the source, since the
+ * source was down), so by the time the source comes back its own copy is the *stale* one. Dumps the
+ * target's current data and restores it onto the source, overwriting whatever's there — the same
+ * dump/wipe/restore shape as the initial setup, just with the two ends swapped. The dump file is
+ * pulled from the target rather than pushed from the source: the dedicated backup key already lives
+ * on the source host and is already authorized on the target (the forward direction's own setup),
+ * so the source can pull from the target with no new key or authorization needed.
+ *
+ * Deliberately never automatic, and deliberately doesn't try to reconcile anything written on the
+ * source while it was still reachable but before the outage was noticed — it's a full overwrite,
+ * only ever run when the user explicitly asks for it.
+ */
+export async function reverseSyncMysqlReplication(r: Replication): Promise<void> {
+  const secrets = getReplicationSecrets(r.id);
+  const targetCred = resolveTargetCredential(r, secrets);
+  if (!r.dbUser || !secrets.dbPassword) {
+    throw new Error("Identifiant/mot de passe administrateur MySQL requis pour la machine source pour resynchroniser.");
+  }
+  if (!targetCred.user || !targetCred.password) {
+    throw new Error("Identifiant/mot de passe administrateur MySQL requis pour la machine cible pour resynchroniser.");
+  }
+  const databases = parseDatabaseNames(r.sourcePath);
+  if (databases.length === 0) throw new Error("Au moins un nom de base de données est requis.");
+  const port = r.dbPort || 3306;
+
+  const source = getHostConnectionInfo(r.sourceHostId);
+  const target = getHostConnectionInfo(r.targetHostId);
+  const sourceAdminHost = r.sourceDbContainer
+    ? source.address
+    : await resolveMysqlAdminHost(r.sourceHostId, port, r.dbUser, secrets.dbPassword, source.address);
+  const targetAdminHost = r.targetDbContainer
+    ? target.address
+    : await resolveMysqlAdminHost(r.targetHostId, port, targetCred.user, targetCred.password, target.address);
+
+  updateReplicationStatus(r.id, "setting_up", "Arrêt de la réplication normale sur la machine cible…");
+  await runSshCommand(
+    r.targetHostId,
+    `echo ${shellQuote("STOP SLAVE;")} | ${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)}`,
+    { timeoutMs: STATUS_TIMEOUT_MS, sudo: !!r.targetDbContainer }
+  ).catch(() => {});
+
+  updateReplicationStatus(r.id, "setting_up", `Export depuis la machine cible de ${databases.length > 1 ? "des bases" : "la base"}…`);
+  const dumpPath = `/tmp/hlp-mysql-reverse-dump-${r.id}.sql`;
+  const dbArgs = databases.map((db) => shellQuote(db)).join(" ");
+  const dumpCmd = r.targetDbContainer
+    ? `docker exec -i -e ${shellQuote(`MYSQL_PWD=${targetCred.password}`)} ${shellQuote(r.targetDbContainer)} mysqldump -u ${shellQuote(targetCred.user)} --single-transaction --databases ${dbArgs} > ${shellQuote(dumpPath)}`
+    : `MYSQL_PWD=${shellQuote(targetCred.password)} mysqldump -h ${shellQuote(targetAdminHost)} -P ${port} -u ${shellQuote(targetCred.user)} --single-transaction --databases ${dbArgs} > ${shellQuote(dumpPath)}`;
+  const { code: dumpCode, stderr: dumpErr } = await runSshCommand(r.targetHostId, dumpCmd, {
+    timeoutMs: SETUP_TIMEOUT_MS,
+    sudo: !!r.targetDbContainer,
+  });
+  if (dumpCode !== 0) throw new Error(dumpErr || "Échec de l'export depuis la machine cible.");
+
+  updateReplicationStatus(r.id, "setting_up", "Transfert de l'export vers la machine source…");
+  const keyPath = await ensurePrivateKeyDeployed(r.sourceHostId);
+  const sourceDumpPath = `/tmp/hlp-mysql-reverse-dump-${r.id}.sql`;
+  const sshOpts = `-i ${keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -p ${target.port}`;
+  const transferCmd = `rsync -az -e ${shellQuote(`ssh ${sshOpts}`)} ${shellQuote(`${target.user}@${target.address}:${dumpPath}`)} ${shellQuote(sourceDumpPath)}`;
+  const { code: transferCode, stderr: transferErr } = await runSshCommand(r.sourceHostId, transferCmd, { timeoutMs: SETUP_TIMEOUT_MS });
+  await runSshCommand(r.targetHostId, `rm -f ${shellQuote(dumpPath)}`, { sudo: !!r.targetDbContainer }).catch(() => {});
+  if (transferCode !== 0) throw new Error(transferErr || "Échec du transfert de l'export vers la machine source.");
+
+  updateReplicationStatus(r.id, "setting_up", "Préparation de la base sur la machine source…");
+  const createDbSql = databases.map((db) => `CREATE DATABASE IF NOT EXISTS ${sqlIdent(db)};`).join(" ");
+  const { code: createDbCode, stderr: createDbErr } = await runSshCommand(
+    r.sourceHostId,
+    `echo ${shellQuote(createDbSql)} | ${resolvedMysqlCommand(r.sourceDbContainer, sourceAdminHost, port, r.dbUser, secrets.dbPassword)}`,
+    { timeoutMs: SETUP_TIMEOUT_MS, sudo: !!r.sourceDbContainer }
+  );
+  if (createDbCode !== 0) throw new Error(createDbErr || "Impossible de préparer la base sur la machine source.");
+
+  const schemaList = databases.map((db) => shellQuote(db)).join(", ");
+  const listTablesSql = `SELECT CONCAT(table_schema, '.', table_name) FROM information_schema.tables WHERE table_schema IN (${schemaList});`;
+  const { code: listTablesCode, stdout: existingTablesOut, stderr: listTablesErr } = await runSshCommand(
+    r.sourceHostId,
+    `echo ${shellQuote(listTablesSql)} | ${resolvedMysqlCommand(r.sourceDbContainer, sourceAdminHost, port, r.dbUser, secrets.dbPassword)} --batch --raw -N`,
+    { timeoutMs: STATUS_TIMEOUT_MS, sudo: !!r.sourceDbContainer }
+  );
+  if (listTablesCode !== 0) throw new Error(listTablesErr || "Impossible de lister les tables existantes sur la machine source.");
+  const existingTables = existingTablesOut
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (existingTables.length > 0) {
+    const dropList = existingTables
+      .map((qualified) => {
+        const [schema, table] = qualified.split(".");
+        return `${sqlIdent(schema)}.${sqlIdent(table)}`;
+      })
+      .join(", ");
+    const dropTablesSql = `SET FOREIGN_KEY_CHECKS = 0; DROP TABLE IF EXISTS ${dropList}; SET FOREIGN_KEY_CHECKS = 1;`;
+    const { code: dropTablesCode, stderr: dropTablesErr } = await runSshCommand(
+      r.sourceHostId,
+      `echo ${shellQuote(dropTablesSql)} | ${resolvedMysqlCommand(r.sourceDbContainer, sourceAdminHost, port, r.dbUser, secrets.dbPassword)}`,
+      { timeoutMs: SETUP_TIMEOUT_MS, sudo: !!r.sourceDbContainer }
+    );
+    if (dropTablesCode !== 0) throw new Error(dropTablesErr || "Impossible de vider la base sur la machine source avant restauration.");
+  }
+
+  updateReplicationStatus(r.id, "setting_up", "Restauration sur la machine source…");
+  const restoreCmd = `${resolvedMysqlCommand(r.sourceDbContainer, sourceAdminHost, port, r.dbUser, secrets.dbPassword)} < ${shellQuote(sourceDumpPath)}`;
+  const { code: restoreCode, stderr: restoreErr } = await runSshCommand(r.sourceHostId, restoreCmd, {
+    timeoutMs: SETUP_TIMEOUT_MS,
+    sudo: !!r.sourceDbContainer,
+  });
+  await runSshCommand(r.sourceHostId, `rm -f ${shellQuote(sourceDumpPath)}`).catch(() => {});
+  if (restoreCode !== 0) throw new Error(restoreErr || "Échec de la restauration sur la machine source.");
+
+  updateReplicationStatus(r.id, "setting_up", "Reprise de la réplication normale…");
+  const { code: startCode, stderr: startErr } = await runSshCommand(
+    r.targetHostId,
+    `echo ${shellQuote("START SLAVE;")} | ${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)}`,
+    { timeoutMs: STATUS_TIMEOUT_MS, sudo: !!r.targetDbContainer }
+  );
+  if (startCode !== 0) throw new Error(startErr || "Impossible de reprendre la réplication normale sur la machine cible.");
+
+  updateReplicationStatus(r.id, "in_sync", "Resynchronisé depuis la machine cible — réplication normale (source → cible) reprise.", true);
+}

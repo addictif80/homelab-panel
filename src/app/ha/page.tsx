@@ -114,6 +114,7 @@ export default function HaPage() {
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [confirmingReverseSyncId, setConfirmingReverseSyncId] = useState<string | null>(null);
   const [differentTargetCreds, setDifferentTargetCreds] = useState(false);
   const [availableDatabases, setAvailableDatabases] = useState<string[] | null>(null);
   const [listingDatabases, setListingDatabases] = useState(false);
@@ -252,6 +253,30 @@ export default function HaPage() {
       }
       if (!res.ok) throw new Error(data.error);
       setConfirmingId(null);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function runReverseSync(r: Replication, confirmed = false) {
+    setBusyId(r.id);
+    setError("");
+    try {
+      const res = await fetch(`/api/ha/replications/${r.id}/reverse-sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmed }),
+      });
+      const data = await res.json();
+      if (res.status === 409 && data.requiresConfirmation) {
+        setConfirmingReverseSyncId(r.id);
+        return;
+      }
+      if (!res.ok) throw new Error(data.error);
+      setConfirmingReverseSyncId(null);
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur.");
@@ -1106,6 +1131,32 @@ export default function HaPage() {
               </div>
             )}
 
+            {confirmingReverseSyncId === r.id && (
+              <div className="mt-3 rounded border border-red-800 bg-red-950/30 p-3 text-sm text-red-200">
+                <p className="mb-2">
+                  Ceci va <strong>écraser</strong> le contenu actuel de <strong>{hostName(r.sourceHostId)}</strong> (la
+                  source) avec celui de <strong>{hostName(r.targetHostId)}</strong> (la cible) — à utiliser après un
+                  vrai basculement, quand la cible contient les données à jour et que la source a pris du retard.
+                  Confirmer ?
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => runReverseSync(r, true)}
+                    disabled={busyId === r.id}
+                    className="rounded border border-red-700 px-2 py-1 text-xs text-red-100 hover:bg-red-900/40"
+                  >
+                    Oui, écraser la source
+                  </button>
+                  <button
+                    onClick={() => setConfirmingReverseSyncId(null)}
+                    className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+                  >
+                    Annuler
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 onClick={() => (editingId === r.id ? cancelEdit() : startEdit(r))}
@@ -1143,6 +1194,16 @@ export default function HaPage() {
                   className="rounded border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
                 >
                   Rebrancher le failover
+                </button>
+              )}
+              {(r.kind === "folder" || r.kind === "mysql") && (
+                <button
+                  onClick={() => runReverseSync(r)}
+                  disabled={busyId === r.id || r.status === "setting_up"}
+                  title="Après un vrai basculement : écrase la source avec les données actuelles de la cible, puis reprend la réplication normale."
+                  className="rounded border border-red-900 px-2.5 py-1 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50"
+                >
+                  Resynchroniser depuis la cible
                 </button>
               )}
               <label className="flex items-center gap-1.5 text-xs text-neutral-400">
