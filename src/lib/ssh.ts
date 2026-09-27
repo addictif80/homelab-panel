@@ -322,7 +322,7 @@ export function runSshCommandStreaming(
   hostId: number,
   rawCommand: string,
   onChunk: (chunk: string) => void,
-  opts: { sudo?: boolean; timeoutMs?: number } = {}
+  opts: { sudo?: boolean; timeoutMs?: number; signal?: AbortSignal } = {}
 ): Promise<number> {
   if (isDemoContext()) {
     const result = fakeExec(hostId, rawCommand);
@@ -346,10 +346,30 @@ export function runSshCommandStreaming(
           reject(new Error("Délai dépassé — la connexion SSH a été fermée."));
         }, opts.timeoutMs)
       : null;
+    // A user-initiated cancel (see backup/engine.ts's cancelBackupRun) — closing the SSH connection
+    // outright rather than trying to signal the remote process itself: an exec channel's SIGTERM
+    // forwarding depends on the remote sshd/shell actually propagating it to whatever it spawned,
+    // which isn't reliable across the heterogeneous fleet this panel targets, whereas dropping the
+    // connection always works and rsync/mysqldump/etc. reliably die on the resulting broken pipe.
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      if (conn) forceClose(conn);
+      reject(new Error("Annulé par l'utilisateur."));
+    };
+    if (opts.signal) {
+      if (opts.signal.aborted) {
+        if (timer) clearTimeout(timer);
+        onAbort();
+        return;
+      }
+      opts.signal.addEventListener("abort", onAbort, { once: true });
+    }
     const settle = (fn: () => void) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
       fn();
     };
 

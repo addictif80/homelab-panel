@@ -85,6 +85,7 @@ export default function BackupsPage() {
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [runHistory, setRunHistory] = useState<Record<string, BackupRun[]>>({});
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const [activeRun, setActiveRun] = useState<BackupRun | null>(null);
   const [restoring, setRestoring] = useState<{ plan: BackupPlan; run: BackupRun; path: string } | null>(null);
   const [importingRunId, setImportingRunId] = useState<string | null>(null);
@@ -134,6 +135,16 @@ export default function BackupsPage() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function cancelActiveRun() {
+    if (!activeRunId) return;
+    setCancelling(true);
+    try {
+      await fetch(`/api/backups/runs/${activeRunId}/cancel`, { method: "POST" });
+    } finally {
+      setCancelling(false);
+    }
+  }
 
   useEffect(() => {
     if (!activeRunId) return;
@@ -412,9 +423,20 @@ export default function BackupsPage() {
             <span className="text-sm text-neutral-200">
               {activeRun.status === "running" ? "Sauvegarde en cours..." : activeRun.status === "success" ? "Sauvegarde terminée" : "Échec de la sauvegarde"}
             </span>
-            <button onClick={() => setActiveRunId(null)} className="text-xs text-neutral-500 hover:text-neutral-300">
-              Fermer
-            </button>
+            <div className="flex items-center gap-3">
+              {activeRun.status === "running" && (
+                <button
+                  onClick={cancelActiveRun}
+                  disabled={cancelling}
+                  className="text-xs text-red-400 hover:text-red-300 disabled:opacity-50"
+                >
+                  {cancelling ? "Annulation..." : "Interrompre"}
+                </button>
+              )}
+              <button onClick={() => setActiveRunId(null)} className="text-xs text-neutral-500 hover:text-neutral-300">
+                Fermer
+              </button>
+            </div>
           </div>
           {activeRun.status === "running" &&
             (() => {

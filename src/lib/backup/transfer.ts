@@ -119,8 +119,9 @@ export async function rsyncTransfer(opts: {
   destDir: string;
   linkDestDir?: string | null;
   append: (text: string) => void;
+  signal?: AbortSignal;
 }): Promise<void> {
-  const { fromHostId, toHostId, sourcePath, destDir, linkDestDir, append } = opts;
+  const { fromHostId, toHostId, sourcePath, destDir, linkDestDir, append, signal } = opts;
 
   const keyPath = await ensurePrivateKeyDeployed(fromHostId);
   await ensurePublicKeyAuthorized(toHostId);
@@ -174,7 +175,7 @@ export async function rsyncTransfer(opts: {
       output += chunk;
       append(chunk.replace(/\r\n?/g, "\n"));
     },
-    { sudo: true }
+    { sudo: true, signal }
   );
   if (code !== 0) {
     // rsync exit code 12 + "connection unexpectedly closed" almost always means the *local* rsync

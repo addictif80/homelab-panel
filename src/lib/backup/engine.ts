@@ -27,9 +27,11 @@ async function copyPathsIntoSnapshot(
   paths: string[],
   snapshotDir: string,
   previousSnapshotDir: string | null,
-  append: (text: string) => void
+  append: (text: string) => void,
+  signal: AbortSignal
 ): Promise<void> {
   for (const raw of paths) {
+    if (signal.aborted) throw new Error("Annulé par l'utilisateur.");
     const clean = raw.replace(/\/+$/, "");
     if (!clean) continue;
     const parent = parentOf(clean);
@@ -42,6 +44,7 @@ async function copyPathsIntoSnapshot(
       destDir,
       linkDestDir,
       append,
+      signal,
     });
   }
 }
@@ -61,6 +64,22 @@ async function pruneOldSnapshots(
   }
 }
 
+// One AbortController per currently-running backup, keyed by run id — lets a user cancel a
+// specific run from the UI (see cancelBackupRun) without touching any other run in flight. Purely
+// in-memory: it only needs to reach the streaming SSH call still open in this same Node process,
+// and naturally has nothing left to cancel after a restart (the run itself would already show as
+// interrupted from a dropped connection at that point anyway).
+const activeRuns = new Map<string, AbortController>();
+
+/** Cancels a running backup — closes its SSH connection outright (see runSshCommandStreaming's own
+ * comment for why that's used instead of trying to signal the remote process), which reliably kills
+ * whatever rsync/mysqldump/etc. was reading from or writing to it on the next broken-pipe write.
+ * A no-op, not an error, for a run that already finished or was never tracked here (already gone by
+ * the time the request arrived is an unremarkable race, not a bug to report). */
+export function cancelBackupRun(runId: string): void {
+  activeRuns.get(runId)?.abort();
+}
+
 /** Runs one backup plan end to end: resolves its source into plain paths, rsyncs each into a
  * fresh timestamped, hardlink-versioned snapshot directory, then prunes old snapshots. */
 export async function runBackupPlan(planId: string): Promise<string> {
@@ -70,6 +89,8 @@ export async function runBackupPlan(planId: string): Promise<string> {
 
   const runId = startRun(planId);
   const append = (text: string) => appendRunLog(runId, text);
+  const controller = new AbortController();
+  activeRuns.set(runId, controller);
 
   (async () => {
     let cleanup = "";
@@ -122,7 +143,7 @@ export async function runBackupPlan(planId: string): Promise<string> {
 
       if (paths.length === 0) throw new Error("Rien à sauvegarder (aucun chemin résolu).");
 
-      await copyPathsIntoSnapshot(plan.sourceHostId, plan.destHostId, paths, newSnapshotDir, previousSnapshotDir, append);
+      await copyPathsIntoSnapshot(plan.sourceHostId, plan.destHostId, paths, newSnapshotDir, previousSnapshotDir, append, controller.signal);
 
       if (cleanup) {
         await runSshCommand(plan.sourceHostId, cleanup, { sudo: true }).catch(() => {});
@@ -133,8 +154,11 @@ export async function runBackupPlan(planId: string): Promise<string> {
       append(`\nTerminé avec succès. Snapshot : ${newSnapshotDir}\n`);
       finishRun(runId, "success", newSnapshotDir, paths);
     } catch (err) {
-      append(`\nErreur : ${err instanceof Error ? err.message : "inconnue"}\n`);
+      const cancelled = controller.signal.aborted;
+      append(`\n${cancelled ? "Sauvegarde annulée par l'utilisateur." : `Erreur : ${err instanceof Error ? err.message : "inconnue"}`}\n`);
       finishRun(runId, "failed", null, []);
+    } finally {
+      activeRuns.delete(runId);
     }
   })();
 
