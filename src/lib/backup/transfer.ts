@@ -152,7 +152,16 @@ export async function rsyncTransfer(opts: {
     ? `--link-dest=${shellQuote(linkDestDir.endsWith("/") ? linkDestDir : `${linkDestDir}/`)} `
     : "";
 
-  const command = `rsync -a --delete --stats ${linkFlag}-e ${shellQuote(sshOpts)} ${shellQuote(sourcePath)} ${shellQuote(`${dest.user}@${dest.address}:${destDirSlash}`)}`;
+  // --info=progress2 is what makes a live percentage possible at all: without it rsync stays
+  // completely silent (bar the initial file list) until the whole transfer finishes and --stats
+  // prints its one-shot summary — for anything large enough to take minutes, the log (and any UI
+  // reading it) just sits there looking hung the entire time. It reports on the *transfer as a
+  // whole* rather than per-file, refreshing in place on one line via carriage returns rather than
+  // newlines (a terminal-progress-bar convention) — turned into one log line per update below so
+  // the stored log stays readable and a percentage can be parsed back out of it (see
+  // BackupRunProgress in the backups page) instead of one file's worth of characters overwriting
+  // each other into an unreadable smear.
+  const command = `rsync -a --delete --stats --info=progress2 ${linkFlag}-e ${shellQuote(sshOpts)} ${shellQuote(sourcePath)} ${shellQuote(`${dest.user}@${dest.address}:${destDirSlash}`)}`;
 
   append(`\n$ copie de ${sourcePath} vers ${dest.user}@${dest.address}:${destDirSlash}\n`);
   // Mirrored locally as well as streamed to the job log, purely so the error thrown below can
@@ -163,7 +172,7 @@ export async function rsyncTransfer(opts: {
     command,
     (chunk) => {
       output += chunk;
-      append(chunk);
+      append(chunk.replace(/\r\n?/g, "\n"));
     },
     { sudo: true }
   );

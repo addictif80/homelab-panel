@@ -19,6 +19,20 @@ type BackupRun = {
   finishedAt: string | null;
 };
 
+/** rsync's `--info=progress2` prints lines like "1,234,567  45%  12.34MB/s  0:00:10" as the
+ * transfer goes — each path backed up overwrites this with its own fresh 0→100% run (multiple
+ * paths in one plan means the number resets per path, not one bar for the whole plan), so the last
+ * percentage anywhere in the log is always this path's current progress. Returns null once nothing
+ * matches — the very start of a run before rsync has printed anything yet, or a plan whose source
+ * doesn't go through rsync (Proxmox VM snapshots, `panel_config`) — an absent bar rather than a
+ * stuck one is the correct way to show that. */
+function parseRsyncProgressPercent(log: string): number | null {
+  const matches = log.match(/(\d{1,3})%/g);
+  if (!matches || matches.length === 0) return null;
+  const last = Number(matches[matches.length - 1].replace("%", ""));
+  return Number.isFinite(last) ? Math.min(100, Math.max(0, last)) : null;
+}
+
 type BackupPlan = {
   id: string;
   name: string;
@@ -343,6 +357,17 @@ export default function BackupsPage() {
                         <li key={run.id} className="rounded border border-neutral-800 p-2 text-xs">
                           <div className="flex items-center justify-between">
                             <span className={s.color}>{s.text}</span>
+                            {run.status === "running" && (
+                              <button
+                                onClick={() => {
+                                  setActiveRunId(run.id);
+                                  setActiveRun(run);
+                                }}
+                                className="rounded border border-blue-800 bg-blue-950/30 px-1.5 py-0.5 text-blue-300 hover:bg-blue-950/60"
+                              >
+                                Suivre en direct
+                              </button>
+                            )}
                             {run.status === "success" && run.paths.length > 0 && (
                               <div className="flex flex-wrap gap-1">
                                 {plan.sourceType === "panel_config" ? (
@@ -391,6 +416,22 @@ export default function BackupsPage() {
               Fermer
             </button>
           </div>
+          {activeRun.status === "running" &&
+            (() => {
+              const pct = parseRsyncProgressPercent(activeRun.log);
+              if (pct === null) return null;
+              return (
+                <div className="px-3 pt-2">
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-800">
+                    <div
+                      className="h-full rounded-full bg-blue-500 transition-[width] duration-500"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <p className="mt-1 text-right text-[10px] text-neutral-500">{pct}%</p>
+                </div>
+              );
+            })()}
           <pre
             ref={logRef}
             className="max-h-64 overflow-auto whitespace-pre-wrap bg-black p-2 font-mono text-[11px] text-neutral-300"
