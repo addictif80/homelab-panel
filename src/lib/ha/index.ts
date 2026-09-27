@@ -22,19 +22,46 @@ export function replicationSetupIsDestructive(kind: Replication["kind"]): boolea
   return kind === "postgres";
 }
 
-export async function runReplicationSetup(id: string): Promise<void> {
-  const r = getReplication(id);
-  if (!r) throw new Error("Réplication introuvable.");
-  try {
-    if (r.kind === "folder") await setupFolderReplication(r);
-    else if (r.kind === "sqlite") await setupSqliteReplication(r);
-    else if (r.kind === "mysql") await setupMysqlReplication(r);
-    else await setupPostgresReplication(r);
-  } catch (err) {
-    updateReplicationStatus(id, "error", err instanceof Error ? err.message : "Erreur inconnue lors de la configuration.");
-    throw err;
-  }
+// Guards against two overlapping runs of the *same* replication's setup — nothing previously
+// stopped a second "Configurer" click (a genuine double-click, a page reload followed by a retry,
+// a slow first attempt that looked stuck) from firing off a second background run while the first
+// was still mid-flight, since setup is fired-and-forgotten from the API route rather than awaited.
+// Two independent runs racing to dump/wipe/restore the *same* target tables is exactly what
+// produced confusing "table already exists" failures fully unrelated to the actual bug being fixed
+// at the time. Deliberately in-memory rather than a DB flag: it only needs to survive for this one
+// Node process's lifetime, and resetting empty on every restart/redeploy is the right behavior — a
+// run that really did crash/vanish (the process died mid-setup) shouldn't leave the replication
+// permanently unable to retry just because its `status` column was never updated past "setting_up".
+const activeSetups = new Set<string>();
 
+export function isReplicationSetupRunning(id: string): boolean {
+  return activeSetups.has(id);
+}
+
+export async function runReplicationSetup(id: string): Promise<void> {
+  if (activeSetups.has(id)) {
+    throw new Error("Une configuration est déjà en cours pour cette réplication — attends qu'elle se termine avant d'en relancer une.");
+  }
+  activeSetups.add(id);
+  try {
+    const r = getReplication(id);
+    if (!r) throw new Error("Réplication introuvable.");
+    try {
+      if (r.kind === "folder") await setupFolderReplication(r);
+      else if (r.kind === "sqlite") await setupSqliteReplication(r);
+      else if (r.kind === "mysql") await setupMysqlReplication(r);
+      else await setupPostgresReplication(r);
+    } catch (err) {
+      updateReplicationStatus(id, "error", err instanceof Error ? err.message : "Erreur inconnue lors de la configuration.");
+      throw err;
+    }
+    await finishReplicationSetup(id, r);
+  } finally {
+    activeSetups.delete(id);
+  }
+}
+
+async function finishReplicationSetup(id: string, r: Replication): Promise<void> {
   // The replication itself succeeded (its own status is already "in_sync") — wiring the failover
   // is a best-effort extra step on top, not something that should undo or mask that success if it
   // fails (a misconfigured NPM host shouldn't make a healthy replication look broken).

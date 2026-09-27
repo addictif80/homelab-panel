@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getReplication, runReplicationSetup, replicationSetupIsDestructive } from "@/lib/ha";
+import { getReplication, runReplicationSetup, replicationSetupIsDestructive, isReplicationSetupRunning } from "@/lib/ha";
 import { logAudit } from "@/lib/db";
 
 /**
@@ -12,6 +12,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params;
   const replication = getReplication(id);
   if (!replication) return NextResponse.json({ error: "Réplication introuvable." }, { status: 404 });
+  // A second click (double-click, a reload while the first request's fire-and-forget setup is
+  // still running server-side, a slow first attempt that looked stuck) would otherwise start a
+  // *second* overlapping setup for the same replication — two runs racing to dump/wipe/restore the
+  // same target tables, which surfaces as confusing "table already exists" failures unrelated to
+  // whatever's actually being configured.
+  if (isReplicationSetupRunning(id)) {
+    return NextResponse.json({ error: "Une configuration est déjà en cours pour cette réplication." }, { status: 409 });
+  }
 
   const { confirmed } = (await req.json().catch(() => ({}))) as { confirmed?: boolean };
   if (replicationSetupIsDestructive(replication.kind) && !confirmed) {
