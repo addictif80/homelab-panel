@@ -67,6 +67,14 @@ async function restartMysqlService(hostId: number, container: string | null): Pr
   }
 }
 
+/** Backtick-quotes a database/table name for use as a SQL identifier — distinct from shellQuote's
+ * single-quoting, which is for shell argument escaping and, not coincidentally, also the right
+ * quoting for a *username* in `CREATE USER`/`GRANT ... TO 'user'@'host'` (a real MySQL string
+ * literal there) — but wrong for a database name in `GRANT ... ON db.*`, which needs an identifier. */
+function sqlIdent(name: string): string {
+  return `\`${name.replace(/`/g, "``")}\``;
+}
+
 function mysqlCommand(host: string, port: number, user: string, password: string): string {
   return `MYSQL_PWD=${shellQuote(password)} mysql -h ${shellQuote(host)} -P ${port} -u ${shellQuote(user)}`;
 }
@@ -200,6 +208,24 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   await runSshCommand(r.sourceHostId, `rm -f ${shellQuote(dumpPath)}`);
   if (transferCode !== 0) throw new Error(transferErr || "Échec du transfert de l'export vers la machine cible.");
 
+  updateReplicationStatus(r.id, "setting_up", "Préparation de la base sur la machine cible…");
+  // Drops and recreates each target database from scratch before restoring into it — a previous
+  // "Configurer" attempt that failed partway (a permission/network issue interrupting the restore
+  // mid-stream, for instance) can leave the target with some tables created and others missing,
+  // which then makes a fresh restore fail confusingly on whichever statement comes first for a
+  // table that's still around from that earlier partial run. Starting from a guaranteed-empty
+  // database makes every "Configurer"/"Reconfigurer" idempotent regardless of how many times a
+  // prior attempt broke down midway — the same "wipe and rebuild from the source" behavior this
+  // panel already tells the user to expect for PostgreSQL, just made explicit here instead of
+  // relying on mysqldump's own per-table DROP TABLE IF EXISTS to cover every case.
+  const dropRecreateSql = databases.map((db) => `DROP DATABASE IF EXISTS ${sqlIdent(db)}; CREATE DATABASE ${sqlIdent(db)};`).join(" ");
+  const { code: dropRecreateCode, stderr: dropRecreateErr } = await runSshCommand(
+    r.targetHostId,
+    `echo ${shellQuote(dropRecreateSql)} | ${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)}`,
+    { timeoutMs: SETUP_TIMEOUT_MS, sudo: !!r.targetDbContainer }
+  );
+  if (dropRecreateCode !== 0) throw new Error(dropRecreateErr || "Impossible de préparer la base sur la machine cible.");
+
   updateReplicationStatus(r.id, "setting_up", "Restauration sur la machine cible…");
   const restoreCmd = `${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)} < ${shellQuote(targetDumpPath)}`;
   const { code: restoreCode, stderr: restoreErr } = await runSshCommand(r.targetHostId, restoreCmd, {
@@ -218,7 +244,7 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
     // reconfiguring an existing replication updates the password instead of erroring on a rerun.
     // One GRANT per database — MySQL's grant syntax has no wildcard/list form for naming several
     // specific databases at once.
-    const grantLines = databases.map((db) => `GRANT ALL PRIVILEGES ON ${shellQuote(db)}.* TO ${shellQuote(r.appDbUser!)}@'%';`).join(" ");
+    const grantLines = databases.map((db) => `GRANT ALL PRIVILEGES ON ${sqlIdent(db)}.* TO ${shellQuote(r.appDbUser!)}@'%';`).join(" ");
     const appUserSql =
       `CREATE USER IF NOT EXISTS ${shellQuote(r.appDbUser)}@'%' IDENTIFIED BY ${shellQuote(secrets.appDbPassword)}; ` +
       `ALTER USER ${shellQuote(r.appDbUser)}@'%' IDENTIFIED BY ${shellQuote(secrets.appDbPassword)}; ` +
