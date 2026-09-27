@@ -1,15 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runSshCommand, shellQuote, getHostConnectionInfo } from "@/lib/ssh";
 import { explainMysqlError } from "@/lib/dbManager/sqlRunner";
+import { resolveMysqlAdminHost, MYSQL_BIN_DETECT } from "@/lib/ha/mysqlAdminHost";
 
 const TIMEOUT_MS = 15_000;
 const SYSTEM_DATABASES = new Set(["information_schema", "mysql", "performance_schema", "sys"]);
-
-// Same fallback as sqlRunner.ts's MYSQL_BIN_DETECT — recent MariaDB packaging can lack the `mysql`
-// compatibility name entirely.
-const MYSQL_BIN_DETECT =
-  'BIN=$(command -v mysql 2>/dev/null || command -v mariadb 2>/dev/null); ' +
-  '[ -n "$BIN" ] || { echo "Client mysql/mariadb introuvable sur cette machine." >&2; exit 127; }';
 
 /** Lists the real (non-system) databases on a host, using admin credentials the caller has typed
  * into the HA replication form but not necessarily saved yet — this is what powers that form's
@@ -26,15 +21,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Machine, utilisateur et mot de passe requis." }, { status: 400 });
   }
   const port = body.port || 3306;
-  // Connects to the host's own real address rather than 127.0.0.1/localhost — see the identical
-  // reasoning in mysqlReplication.ts (the "-h localhost" client quirk + root's unix_socket-plugin
-  // grant on most distros/images, which rejects a password over a loopback/socket connection even
-  // when it's correct — a real network connection matches the '%'-scoped grant instead, the one
-  // already confirmed working through the DB manager module).
   const { address } = getHostConnectionInfo(body.hostId);
+  // Loopback first — needs no network exposure at all and works whenever bind-address is left at
+  // its common 127.0.0.1-only default (CyberPanel and most distro packages out of the box). Falls
+  // back to the host's own real address only for the opposite case, an install where the account
+  // only has a unix_socket-plugin `'user'@'localhost'` grant — see mysqlAdminHost.ts.
+  const host = await resolveMysqlAdminHost(body.hostId, port, body.dbUser.trim(), body.dbPassword, address);
 
   const command =
-    `${MYSQL_BIN_DETECT}; MYSQL_PWD=${shellQuote(body.dbPassword)} "$BIN" --protocol=TCP -h ${shellQuote(address)} -P ${port} ` +
+    `${MYSQL_BIN_DETECT}; MYSQL_PWD=${shellQuote(body.dbPassword)} "$BIN" --protocol=TCP -h ${shellQuote(host)} -P ${port} ` +
     `-u ${shellQuote(body.dbUser.trim())} --batch --raw -e ${shellQuote("SHOW DATABASES;")}`;
 
   const { stdout, code, stderr } = await runSshCommand(body.hostId, command, { timeoutMs: TIMEOUT_MS });
