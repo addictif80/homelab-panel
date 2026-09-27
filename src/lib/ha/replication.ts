@@ -249,6 +249,41 @@ export function deleteReplication(id: string): void {
   getDb().prepare(`DELETE FROM ha_replications WHERE id = ?`).run(id);
 }
 
+/** Creates a second, independent replication with the same settings as an existing one — the
+ * common case being "same target/credentials, different source path or database" for a new
+ * site/database that needs the same kind of protection. Copies every setting *except* the
+ * failover wiring (proxyHostId/targetPort): that's tied to one specific NPM redirection's backup
+ * slot, and blindly duplicating it would point two unrelated replications at the same slot, which
+ * makes no sense — the user wires failover deliberately for the new one if it applies. The copy
+ * starts fully unconfigured (status "unknown", no replication-role credential yet) since it's a
+ * brand new replication as far as its target machine is concerned, even though its *admin*
+ * credentials are pre-filled from the original. */
+export function duplicateReplication(id: string): Replication | null {
+  const original = getReplication(id);
+  if (!original) return null;
+  const secrets = getReplicationSecrets(id);
+  return createReplication({
+    name: `${original.name} (copie)`,
+    kind: original.kind,
+    sourceHostId: original.sourceHostId,
+    targetHostId: original.targetHostId,
+    sourcePath: original.sourcePath,
+    targetPath: original.targetPath,
+    dbPort: original.dbPort ?? undefined,
+    dbUser: original.dbUser ?? undefined,
+    dbPassword: secrets.dbPassword ?? undefined,
+    targetDbUser: original.targetDbUser ?? undefined,
+    targetDbPassword: secrets.targetDbPassword ?? undefined,
+    targetOwner: original.targetOwner ?? undefined,
+    targetMode: original.targetMode ?? undefined,
+    targetNeedsSudo: original.targetNeedsSudo,
+    appDbUser: original.appDbUser ?? undefined,
+    appDbPassword: secrets.appDbPassword ?? undefined,
+    targetDbContainer: original.targetDbContainer ?? undefined,
+    sourceDbContainer: original.sourceDbContainer ?? undefined,
+  });
+}
+
 export function setReplicationEnabled(id: string, enabled: boolean): void {
   getDb().prepare(`UPDATE ha_replications SET enabled = ? WHERE id = ?`).run(enabled ? 1 : 0, id);
 }

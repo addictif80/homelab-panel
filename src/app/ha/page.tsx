@@ -287,6 +287,22 @@ export default function HaPage() {
     load();
   }
 
+  async function duplicateReplication(r: Replication) {
+    setBusyId(r.id);
+    setError("");
+    try {
+      const res = await fetch(`/api/ha/replications/${r.id}/duplicate`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      await load();
+      startEdit(data.replication);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   function startEdit(r: Replication) {
     setError("");
     setEditingId(r.id);
@@ -1090,6 +1106,14 @@ export default function HaPage() {
                 className="rounded border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
               >
                 {editingId === r.id ? "Fermer l'édition" : "Modifier"}
+              </button>
+              <button
+                onClick={() => duplicateReplication(r)}
+                disabled={busyId === r.id}
+                title="Crée une nouvelle réplication avec les mêmes réglages (identifiants inclus) — pratique pour protéger un nouveau site/base avec la même cible et les mêmes identifiants admin."
+                className="rounded border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+              >
+                Dupliquer
               </button>
               <button
                 onClick={() => runSetup(r)}
