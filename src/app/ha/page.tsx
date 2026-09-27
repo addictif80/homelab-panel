@@ -79,12 +79,36 @@ const EMPTY_FORM = {
   sourceDbContainer: "",
 };
 
+// Deliberately no kind/sourceHostId/targetHostId here — those drive which SSH keys/dirs were
+// provisioned and on which machines, so changing them is a different replication, not an edit of
+// this one (delete and recreate instead). Password fields always start blank (never re-sent to the
+// browser) and are left untouched server-side when submitted blank.
+const EMPTY_EDIT_FORM = {
+  name: "",
+  sourcePath: "",
+  targetPath: "",
+  dbPort: "",
+  dbUser: "",
+  dbPassword: "",
+  targetDbUser: "",
+  targetDbPassword: "",
+  targetOwner: "",
+  targetMode: "",
+  targetNeedsSudo: false,
+  appDbUser: "",
+  appDbPassword: "",
+  targetDbContainer: "",
+  sourceDbContainer: "",
+};
+
 export default function HaPage() {
   const [hosts, setHosts] = useState<Host[]>([]);
   const [proxyHosts, setProxyHosts] = useState<ProxyHost[]>([]);
   const [replications, setReplications] = useState<Replication[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState(EMPTY_EDIT_FORM);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -261,6 +285,70 @@ export default function HaPage() {
       body: JSON.stringify({ enabled: !r.enabled }),
     });
     load();
+  }
+
+  function startEdit(r: Replication) {
+    setError("");
+    setEditingId(r.id);
+    setEditForm({
+      name: r.name,
+      sourcePath: r.sourcePath,
+      targetPath: r.targetPath,
+      dbPort: r.dbPort ? String(r.dbPort) : "",
+      dbUser: r.dbUser ?? "",
+      dbPassword: "",
+      targetDbUser: r.targetDbUser ?? "",
+      targetDbPassword: "",
+      targetOwner: r.targetOwner ?? "",
+      targetMode: r.targetMode ?? "",
+      targetNeedsSudo: r.targetNeedsSudo,
+      appDbUser: r.appDbUser ?? "",
+      appDbPassword: "",
+      targetDbContainer: r.targetDbContainer ?? "",
+      sourceDbContainer: r.sourceDbContainer ?? "",
+    });
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditForm(EMPTY_EDIT_FORM);
+  }
+
+  async function saveEdit(r: Replication) {
+    setBusyId(r.id);
+    setError("");
+    try {
+      const isDbKind = r.kind === "mysql" || r.kind === "postgres";
+      const res = await fetch(`/api/ha/replications/${r.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editForm.name,
+          sourcePath: editForm.sourcePath,
+          targetPath: isDbKind ? undefined : editForm.targetPath,
+          dbPort: editForm.dbPort ? Number(editForm.dbPort) : null,
+          dbUser: editForm.dbUser,
+          dbPassword: editForm.dbPassword || undefined,
+          targetDbUser: editForm.targetDbUser,
+          targetDbPassword: editForm.targetDbPassword || undefined,
+          targetOwner: editForm.targetOwner,
+          targetMode: editForm.targetMode,
+          targetNeedsSudo: r.kind === "folder" ? editForm.targetNeedsSudo : undefined,
+          appDbUser: editForm.appDbUser,
+          appDbPassword: editForm.appDbPassword || undefined,
+          targetDbContainer: editForm.targetDbContainer,
+          sourceDbContainer: editForm.sourceDbContainer,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      cancelEdit();
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setBusyId(null);
+    }
   }
 
   async function toggleNeedsSudo(r: Replication) {
@@ -784,6 +872,193 @@ export default function HaPage() {
               <p className="mt-1 text-xs text-neutral-600">Dernière synchro confirmée : {new Date(`${r.lastSyncedAt}Z`).toLocaleString("fr-FR")}</p>
             )}
 
+            {editingId === r.id && (
+              <div className="mt-3 space-y-3 rounded border border-neutral-800 bg-neutral-900/40 p-3">
+                <div>
+                  <label className="mb-1 block text-xs text-neutral-400">Nom</label>
+                  <input
+                    value={editForm.name}
+                    onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                    className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                  />
+                </div>
+                {(r.kind === "folder" || r.kind === "sqlite") && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-xs text-neutral-400">Chemin source</label>
+                      <input
+                        value={editForm.sourcePath}
+                        onChange={(e) => setEditForm({ ...editForm, sourcePath: e.target.value })}
+                        className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 font-mono text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-neutral-400">Chemin cible</label>
+                      <input
+                        value={editForm.targetPath}
+                        onChange={(e) => setEditForm({ ...editForm, targetPath: e.target.value })}
+                        className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 font-mono text-sm"
+                      />
+                    </div>
+                  </div>
+                )}
+                {(r.kind === "folder" || r.kind === "sqlite") && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-xs text-neutral-400">Propriétaire sur la cible</label>
+                      <input
+                        value={editForm.targetOwner}
+                        onChange={(e) => setEditForm({ ...editForm, targetOwner: e.target.value })}
+                        placeholder="www-data:www-data"
+                        className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-neutral-400">Droits sur la cible</label>
+                      <input
+                        value={editForm.targetMode}
+                        onChange={(e) => setEditForm({ ...editForm, targetMode: e.target.value })}
+                        placeholder="D755,F644"
+                        className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                      />
+                    </div>
+                  </div>
+                )}
+                {r.kind === "folder" && (
+                  <label className="flex items-center gap-1.5 text-xs text-neutral-400">
+                    <input
+                      type="checkbox"
+                      checked={editForm.targetNeedsSudo}
+                      onChange={(e) => setEditForm({ ...editForm, targetNeedsSudo: e.target.checked })}
+                    />
+                    Le compte SSH cible a besoin de sudo pour écrire (CyberPanel, cPanel, Plesk…)
+                  </label>
+                )}
+                {(r.kind === "mysql" || r.kind === "postgres") && (
+                  <>
+                    <div>
+                      <label className="mb-1 block text-xs text-neutral-400">
+                        {r.kind === "mysql" ? "Base(s) (séparées par une virgule)" : "Base"}
+                      </label>
+                      <input
+                        value={editForm.sourcePath}
+                        onChange={(e) => setEditForm({ ...editForm, sourcePath: e.target.value })}
+                        className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 font-mono text-sm"
+                      />
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="mb-1 block text-xs text-neutral-400">Port</label>
+                        <input
+                          value={editForm.dbPort}
+                          onChange={(e) => setEditForm({ ...editForm, dbPort: e.target.value })}
+                          inputMode="numeric"
+                          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-neutral-400">Utilisateur admin (source)</label>
+                        <input
+                          value={editForm.dbUser}
+                          onChange={(e) => setEditForm({ ...editForm, dbUser: e.target.value })}
+                          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-neutral-400">Mot de passe admin (source)</label>
+                        <input
+                          type="password"
+                          value={editForm.dbPassword}
+                          onChange={(e) => setEditForm({ ...editForm, dbPassword: e.target.value })}
+                          placeholder="inchangé si vide"
+                          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
+                      <div>
+                        <label className="mb-1 block text-xs text-neutral-400">Utilisateur admin (cible, si différent)</label>
+                        <input
+                          value={editForm.targetDbUser}
+                          onChange={(e) => setEditForm({ ...editForm, targetDbUser: e.target.value })}
+                          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-neutral-400">Mot de passe admin (cible)</label>
+                        <input
+                          type="password"
+                          value={editForm.targetDbPassword}
+                          onChange={(e) => setEditForm({ ...editForm, targetDbPassword: e.target.value })}
+                          placeholder="inchangé si vide"
+                          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+                {r.kind === "mysql" && (
+                  <>
+                    <div className="grid grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
+                      <div>
+                        <label className="mb-1 block text-xs text-neutral-400">Container Docker (source)</label>
+                        <input
+                          value={editForm.sourceDbContainer}
+                          onChange={(e) => setEditForm({ ...editForm, sourceDbContainer: e.target.value })}
+                          placeholder="ex: mariadb"
+                          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-neutral-400">Container Docker (cible)</label>
+                        <input
+                          value={editForm.targetDbContainer}
+                          onChange={(e) => setEditForm({ ...editForm, targetDbContainer: e.target.value })}
+                          placeholder="ex: mariadb"
+                          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
+                      <div>
+                        <label className="mb-1 block text-xs text-neutral-400">Utilisateur applicatif</label>
+                        <input
+                          value={editForm.appDbUser}
+                          onChange={(e) => setEditForm({ ...editForm, appDbUser: e.target.value })}
+                          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-neutral-400">Mot de passe applicatif</label>
+                        <input
+                          type="password"
+                          value={editForm.appDbPassword}
+                          onChange={(e) => setEditForm({ ...editForm, appDbPassword: e.target.value })}
+                          placeholder="inchangé si vide"
+                          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+                <div className="flex gap-2 border-t border-neutral-800 pt-3">
+                  <button
+                    onClick={() => saveEdit(r)}
+                    disabled={busyId === r.id}
+                    className="rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+                  >
+                    Enregistrer
+                  </button>
+                  <button
+                    onClick={cancelEdit}
+                    className="rounded border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+                  >
+                    Annuler
+                  </button>
+                </div>
+              </div>
+            )}
+
             {confirmingId === r.id && (
               <div className="mt-3 rounded border border-amber-800 bg-amber-950/30 p-3 text-sm text-amber-200">
                 <p className="mb-2">
@@ -809,6 +1084,13 @@ export default function HaPage() {
             )}
 
             <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                onClick={() => (editingId === r.id ? cancelEdit() : startEdit(r))}
+                disabled={busyId === r.id}
+                className="rounded border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+              >
+                {editingId === r.id ? "Fermer l'édition" : "Modifier"}
+              </button>
               <button
                 onClick={() => runSetup(r)}
                 disabled={busyId === r.id || r.status === "setting_up"}

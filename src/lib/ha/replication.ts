@@ -253,24 +253,63 @@ export function setReplicationEnabled(id: string, enabled: boolean): void {
   getDb().prepare(`UPDATE ha_replications SET enabled = ? WHERE id = ?`).run(enabled ? 1 : 0, id);
 }
 
-/** 'folder' only — updates the rsync target options on an already-created replication (owner/mode
- * were previously create-only, same as targetNeedsSudo: this panel regenerates lsyncd's config in
- * full on every change anyway, so there's no reason these couldn't be edited after the fact too —
- * the caller is responsible for reconciling the source host's lsyncd config afterwards). */
-export function setReplicationTargetOptions(
-  id: string,
-  options: { targetOwner?: string | null; targetMode?: string | null; targetNeedsSudo?: boolean }
-): void {
-  const current = getReplication(id);
-  if (!current) return;
-  getDb()
-    .prepare(`UPDATE ha_replications SET target_owner = ?, target_mode = ?, target_needs_sudo = ? WHERE id = ?`)
-    .run(
-      options.targetOwner !== undefined ? options.targetOwner?.trim() || null : current.targetOwner,
-      options.targetMode !== undefined ? options.targetMode?.trim() || null : current.targetMode,
-      options.targetNeedsSudo !== undefined ? (options.targetNeedsSudo ? 1 : 0) : current.targetNeedsSudo ? 1 : 0,
-      id
-    );
+/** Everything about a replication *except* kind/sourceHostId/targetHostId can be edited after
+ * creation — those three drive which SSH keys/dirs were provisioned and on which machines, so
+ * changing them means a genuinely different replication, not an edit of this one (delete and
+ * recreate instead). A password field left unset keeps whatever's already stored — same convention
+ * as every other credential-edit form in this panel, so leaving a password blank while fixing an
+ * unrelated typo doesn't wipe it out. */
+export type UpdateReplicationInput = {
+  name?: string;
+  sourcePath?: string;
+  targetPath?: string;
+  dbPort?: number | null;
+  dbUser?: string | null;
+  dbPassword?: string;
+  targetDbUser?: string | null;
+  targetDbPassword?: string;
+  targetOwner?: string | null;
+  targetMode?: string | null;
+  targetNeedsSudo?: boolean;
+  appDbUser?: string | null;
+  appDbPassword?: string;
+  targetDbContainer?: string | null;
+  sourceDbContainer?: string | null;
+};
+
+/** `undefined` on any field here means "leave as stored" — only fields the caller actually
+ * included in the PATCH body are touched, everything else keeps its current row value. Reads the
+ * row directly (rather than through getReplication/getReplicationSecrets) since it needs the raw
+ * encrypted password columns to preserve them untouched. */
+export function updateReplication(id: string, input: UpdateReplicationInput): void {
+  const db = getDb();
+  const row = db.prepare(`SELECT * FROM ha_replications WHERE id = ?`).get(id) as ReplicationRow | undefined;
+  if (!row) return;
+
+  db.prepare(
+    `UPDATE ha_replications SET
+       name = ?, source_path = ?, target_path = ?, db_port = ?, db_user = ?, db_password_encrypted = ?,
+       target_db_user = ?, target_db_password_encrypted = ?, target_owner = ?, target_mode = ?, target_needs_sudo = ?,
+       app_db_user = ?, app_db_password_encrypted = ?, target_db_container = ?, source_db_container = ?
+     WHERE id = ?`
+  ).run(
+    input.name !== undefined ? input.name.trim() : row.name,
+    input.sourcePath !== undefined ? input.sourcePath.trim() : row.source_path,
+    input.targetPath !== undefined ? input.targetPath.trim() : row.target_path,
+    input.dbPort !== undefined ? input.dbPort : row.db_port,
+    input.dbUser !== undefined ? input.dbUser?.trim() || null : row.db_user,
+    input.dbPassword ? vaultEncrypt(input.dbPassword) : row.db_password_encrypted,
+    input.targetDbUser !== undefined ? input.targetDbUser?.trim() || null : row.target_db_user,
+    input.targetDbPassword ? vaultEncrypt(input.targetDbPassword) : row.target_db_password_encrypted,
+    input.targetOwner !== undefined ? input.targetOwner?.trim() || null : row.target_owner,
+    input.targetMode !== undefined ? input.targetMode?.trim() || null : row.target_mode,
+    input.targetNeedsSudo !== undefined ? (input.targetNeedsSudo ? 1 : 0) : row.target_needs_sudo,
+    input.appDbUser !== undefined ? input.appDbUser?.trim() || null : row.app_db_user,
+    input.appDbPassword ? vaultEncrypt(input.appDbPassword) : row.app_db_password_encrypted,
+    input.targetDbContainer !== undefined ? input.targetDbContainer?.trim() || null : row.target_db_container,
+    input.sourceDbContainer !== undefined ? input.sourceDbContainer?.trim() || null : row.source_db_container,
+    id
+  );
 }
 
 export function setReplicationFailoverLink(id: string, proxyHostId: number | null, targetPort: number | null): void {

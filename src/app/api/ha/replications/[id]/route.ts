@@ -3,32 +3,52 @@ import {
   getReplication,
   setReplicationEnabled,
   setReplicationFailoverLink,
-  setReplicationTargetOptions,
+  updateReplication,
   removeReplication,
+  type UpdateReplicationInput,
 } from "@/lib/ha";
 import { reconcileFolderReplicationsOnHost } from "@/lib/ha/folderReplication";
 import { logAudit } from "@/lib/db";
+
+type PatchBody = UpdateReplicationInput & {
+  enabled?: boolean;
+  proxyHostId?: number | null;
+  targetPort?: number | null;
+};
+
+const EDIT_FIELDS = [
+  "name",
+  "sourcePath",
+  "targetPath",
+  "dbPort",
+  "dbUser",
+  "dbPassword",
+  "targetDbUser",
+  "targetDbPassword",
+  "targetOwner",
+  "targetMode",
+  "targetNeedsSudo",
+  "appDbUser",
+  "appDbPassword",
+  "targetDbContainer",
+  "sourceDbContainer",
+] as const satisfies readonly (keyof UpdateReplicationInput)[];
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const replication = getReplication(id);
   if (!replication) return NextResponse.json({ error: "Réplication introuvable." }, { status: 404 });
 
-  const { enabled, proxyHostId, targetPort, targetOwner, targetMode, targetNeedsSudo } = (await req.json()) as {
-    enabled?: boolean;
-    proxyHostId?: number | null;
-    targetPort?: number | null;
-    targetOwner?: string | null;
-    targetMode?: string | null;
-    targetNeedsSudo?: boolean;
-  };
+  const body = (await req.json()) as PatchBody;
+  const { enabled, proxyHostId, targetPort } = body;
+  const isDbKind = replication.kind === "mysql" || replication.kind === "postgres";
+  const editedFields = EDIT_FIELDS.filter((f) => body[f] !== undefined);
+
   if (
     enabled === undefined &&
     proxyHostId === undefined &&
     targetPort === undefined &&
-    targetOwner === undefined &&
-    targetMode === undefined &&
-    targetNeedsSudo === undefined
+    editedFields.length === 0
   ) {
     return NextResponse.json({ error: "Rien à modifier." }, { status: 400 });
   }
@@ -45,10 +65,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     logAudit(enabled ? "ha.replication_enabled" : "ha.replication_disabled", id);
   }
 
-  if (targetOwner !== undefined || targetMode !== undefined || targetNeedsSudo !== undefined) {
-    setReplicationTargetOptions(id, { targetOwner, targetMode, targetNeedsSudo });
+  if (editedFields.length > 0) {
+    // Native mysql/postgres replication can't rename a database in flight (see the create route's
+    // own comment) — a new sourcePath keeps mirroring straight into targetPath here too, same as at
+    // creation, instead of leaving the two to silently drift apart.
+    const update: UpdateReplicationInput = {};
+    for (const field of editedFields) (update as Record<string, unknown>)[field] = body[field];
+    if (isDbKind && update.sourcePath !== undefined) update.targetPath = update.sourcePath;
+    else if (isDbKind) delete update.targetPath;
+
+    updateReplication(id, update);
     needsReconcile = true;
-    logAudit("ha.replication_target_options_updated", id);
+    logAudit("ha.replication_updated", id);
   }
 
   if (needsReconcile && replication.kind === "folder") {
