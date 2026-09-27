@@ -263,6 +263,20 @@ export default function HaPage() {
     load();
   }
 
+  async function toggleNeedsSudo(r: Replication) {
+    setBusyId(r.id);
+    try {
+      await fetch(`/api/ha/replications/${r.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetNeedsSudo: !r.targetNeedsSudo }),
+      });
+      load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function remove(r: Replication) {
     if (!confirm(`Supprimer la réplication "${r.name}" ? Pour mysql/postgres, la réplication déjà démarrée côté base de données continuera de tourner — seule la fiche dans le panel disparaît.`))
       return;
@@ -822,6 +836,20 @@ export default function HaPage() {
                 <input type="checkbox" checked={r.enabled} onChange={() => toggleEnabled(r)} />
                 Actif
               </label>
+              {r.kind === "folder" && (
+                <label
+                  className="flex items-center gap-1.5 text-xs text-neutral-400"
+                  title="Passe par sudo côté cible pour écrire (CyberPanel, cPanel...) — nécessite une règle sudoers NOPASSWD pour rsync sur ce compte, à poser manuellement sur la machine cible."
+                >
+                  <input
+                    type="checkbox"
+                    checked={r.targetNeedsSudo}
+                    disabled={busyId === r.id}
+                    onChange={() => toggleNeedsSudo(r)}
+                  />
+                  Sudo côté cible
+                </label>
+              )}
               <button
                 onClick={() => remove(r)}
                 className="ml-auto rounded border border-red-900 px-2.5 py-1 text-xs text-red-300 hover:bg-red-950/40"

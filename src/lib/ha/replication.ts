@@ -253,6 +253,26 @@ export function setReplicationEnabled(id: string, enabled: boolean): void {
   getDb().prepare(`UPDATE ha_replications SET enabled = ? WHERE id = ?`).run(enabled ? 1 : 0, id);
 }
 
+/** 'folder' only — updates the rsync target options on an already-created replication (owner/mode
+ * were previously create-only, same as targetNeedsSudo: this panel regenerates lsyncd's config in
+ * full on every change anyway, so there's no reason these couldn't be edited after the fact too —
+ * the caller is responsible for reconciling the source host's lsyncd config afterwards). */
+export function setReplicationTargetOptions(
+  id: string,
+  options: { targetOwner?: string | null; targetMode?: string | null; targetNeedsSudo?: boolean }
+): void {
+  const current = getReplication(id);
+  if (!current) return;
+  getDb()
+    .prepare(`UPDATE ha_replications SET target_owner = ?, target_mode = ?, target_needs_sudo = ? WHERE id = ?`)
+    .run(
+      options.targetOwner !== undefined ? options.targetOwner?.trim() || null : current.targetOwner,
+      options.targetMode !== undefined ? options.targetMode?.trim() || null : current.targetMode,
+      options.targetNeedsSudo !== undefined ? (options.targetNeedsSudo ? 1 : 0) : current.targetNeedsSudo ? 1 : 0,
+      id
+    );
+}
+
 export function setReplicationFailoverLink(id: string, proxyHostId: number | null, targetPort: number | null): void {
   getDb()
     .prepare(`UPDATE ha_replications SET proxy_host_id = ?, target_port = ? WHERE id = ?`)
