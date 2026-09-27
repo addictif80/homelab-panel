@@ -216,22 +216,51 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   if (transferCode !== 0) throw new Error(transferErr || "Échec du transfert de l'export vers la machine cible.");
 
   updateReplicationStatus(r.id, "setting_up", "Préparation de la base sur la machine cible…");
-  // Drops and recreates each target database from scratch before restoring into it — a previous
-  // "Configurer" attempt that failed partway (a permission/network issue interrupting the restore
-  // mid-stream, for instance) can leave the target with some tables created and others missing,
-  // which then makes a fresh restore fail confusingly on whichever statement comes first for a
-  // table that's still around from that earlier partial run. Starting from a guaranteed-empty
-  // database makes every "Configurer"/"Reconfigurer" idempotent regardless of how many times a
-  // prior attempt broke down midway — the same "wipe and rebuild from the source" behavior this
-  // panel already tells the user to expect for PostgreSQL, just made explicit here instead of
-  // relying on mysqldump's own per-table DROP TABLE IF EXISTS to cover every case.
-  const dropRecreateSql = databases.map((db) => `DROP DATABASE IF EXISTS ${sqlIdent(db)}; CREATE DATABASE ${sqlIdent(db)};`).join(" ");
-  const { code: dropRecreateCode, stderr: dropRecreateErr } = await runSshCommand(
+  // Makes sure each target database exists, and — separately — that it starts out with no leftover
+  // tables from a previous "Configurer" attempt that failed partway (a permission/network issue
+  // interrupting the restore mid-stream, for instance), which otherwise makes a fresh restore fail
+  // confusingly on whichever table survived that earlier partial run. This clears tables one by one
+  // rather than DROP DATABASE + CREATE DATABASE on the whole schema: dropping and recreating the
+  // schema itself touches the database's on-disk directory, and on at least one real box that left
+  // MariaDB insisting the (just-dropped, no longer listed) database still existed on the very next
+  // CREATE DATABASE — some leftover artifact of the directory removal not being as instant/complete
+  // as the catalog update. Dropping individual tables never has to touch the schema directory at
+  // all, so it can't hit that failure mode.
+  const createDbSql = databases.map((db) => `CREATE DATABASE IF NOT EXISTS ${sqlIdent(db)};`).join(" ");
+  const { code: createDbCode, stderr: createDbErr } = await runSshCommand(
     r.targetHostId,
-    `echo ${shellQuote(dropRecreateSql)} | ${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)}`,
+    `echo ${shellQuote(createDbSql)} | ${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)}`,
     { timeoutMs: SETUP_TIMEOUT_MS, sudo: !!r.targetDbContainer }
   );
-  if (dropRecreateCode !== 0) throw new Error(dropRecreateErr || "Impossible de préparer la base sur la machine cible.");
+  if (createDbCode !== 0) throw new Error(createDbErr || "Impossible de préparer la base sur la machine cible.");
+
+  const schemaList = databases.map((db) => shellQuote(db)).join(", ");
+  const listTablesSql = `SELECT CONCAT(table_schema, '.', table_name) FROM information_schema.tables WHERE table_schema IN (${schemaList});`;
+  const { code: listTablesCode, stdout: existingTablesOut, stderr: listTablesErr } = await runSshCommand(
+    r.targetHostId,
+    `echo ${shellQuote(listTablesSql)} | ${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)} --batch --raw -N`,
+    { timeoutMs: STATUS_TIMEOUT_MS, sudo: !!r.targetDbContainer }
+  );
+  if (listTablesCode !== 0) throw new Error(listTablesErr || "Impossible de lister les tables existantes sur la machine cible.");
+  const existingTables = existingTablesOut
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (existingTables.length > 0) {
+    const dropList = existingTables
+      .map((qualified) => {
+        const [schema, table] = qualified.split(".");
+        return `${sqlIdent(schema)}.${sqlIdent(table)}`;
+      })
+      .join(", ");
+    const dropTablesSql = `SET FOREIGN_KEY_CHECKS = 0; DROP TABLE IF EXISTS ${dropList}; SET FOREIGN_KEY_CHECKS = 1;`;
+    const { code: dropTablesCode, stderr: dropTablesErr } = await runSshCommand(
+      r.targetHostId,
+      `echo ${shellQuote(dropTablesSql)} | ${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)}`,
+      { timeoutMs: SETUP_TIMEOUT_MS, sudo: !!r.targetDbContainer }
+    );
+    if (dropTablesCode !== 0) throw new Error(dropTablesErr || "Impossible de vider la base sur la machine cible avant restauration.");
+  }
 
   updateReplicationStatus(r.id, "setting_up", "Restauration sur la machine cible…");
   const restoreCmd = `${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)} < ${shellQuote(targetDumpPath)}`;
