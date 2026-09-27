@@ -77,7 +77,24 @@ const activeRuns = new Map<string, AbortController>();
  * A no-op, not an error, for a run that already finished or was never tracked here (already gone by
  * the time the request arrived is an unremarkable race, not a bug to report). */
 export function cancelBackupRun(runId: string): void {
-  activeRuns.get(runId)?.abort();
+  const controller = activeRuns.get(runId);
+  if (controller) {
+    controller.abort();
+    return;
+  }
+  // No controller tracked for this run — either it already finished (the caller already checked
+  // status === "running" before calling this, but a race between that check and this call is
+  // harmless either way), or, more commonly in practice, the panel's own process restarted
+  // (redeploy, crash) while this run was still going: the in-memory tracking is gone, but nothing
+  // ever went back and marked the DB row as anything other than "running", so it sits there looking
+  // perpetually in-progress with no real process left to cancel. Force-finish it here rather than
+  // silently no-op — leaving "Interrompre" do nothing with no explanation is worse than a slightly
+  // approximate failure record for a run that's actually long dead.
+  appendRunLog(
+    runId,
+    "\nSauvegarde marquée comme interrompue — son suivi a été perdu (probablement un redémarrage du panel pendant qu'elle tournait), il n'y avait plus de processus réel à annuler.\n"
+  );
+  finishRun(runId, "failed", null, []);
 }
 
 /** Runs one backup plan end to end: resolves its source into plain paths, rsyncs each into a
