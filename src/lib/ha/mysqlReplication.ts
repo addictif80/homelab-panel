@@ -215,6 +215,21 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   await runSshCommand(r.sourceHostId, `rm -f ${shellQuote(dumpPath)}`);
   if (transferCode !== 0) throw new Error(transferErr || "Échec du transfert de l'export vers la machine cible.");
 
+  updateReplicationStatus(r.id, "setting_up", "Arrêt d'une éventuelle réplication déjà active sur la machine cible…");
+  // A previous "Configurer" attempt might have reached START SLAVE successfully even if a status
+  // check made right afterward somehow missed it (or the very next attempt started before that
+  // status was even checked) — an already-running slave thread on the target would then keep
+  // replaying binlog events from the source *while* this fresh attempt tries to wipe and restore
+  // the same tables underneath it, racing to recreate whatever this run just dropped. Unconditional
+  // and best-effort: on a target with no replication configured at all this errors harmlessly
+  // ("no replication configured"), which is exactly the common case and is not worth failing setup
+  // over.
+  await runSshCommand(
+    r.targetHostId,
+    `echo ${shellQuote("STOP SLAVE; RESET SLAVE ALL;")} | ${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)}`,
+    { timeoutMs: STATUS_TIMEOUT_MS, sudo: !!r.targetDbContainer }
+  ).catch(() => {});
+
   updateReplicationStatus(r.id, "setting_up", "Préparation de la base sur la machine cible…");
   // Makes sure each target database exists, and — separately — that it starts out with no leftover
   // tables from a previous "Configurer" attempt that failed partway (a permission/network issue
