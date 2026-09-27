@@ -23,7 +23,14 @@ function parseDatabaseNames(sourcePath: string): string[] {
     .filter(Boolean);
 }
 
-const SETUP_TIMEOUT_MS = 5 * 60_000;
+// Covers every step of a first-time setup, including the dump/transfer/restore trio — the only
+// ones whose duration actually scales with how much data is in the database being replicated. Five
+// minutes was fine for a small test database but is nowhere near enough for a real production
+// database with a meaningful number of rows, where the SSH channel would still be busy finishing a
+// legitimately successful restore when this fired and killed it out from under it (the data lands
+// on the target regardless — mysqldump/mysql are unaffected by *this* client giving up — but the
+// panel then wrongly reports the whole setup as failed).
+const SETUP_TIMEOUT_MS = 30 * 60_000;
 const STATUS_TIMEOUT_MS = 15_000;
 
 /** Debian/Ubuntu's MariaDB and MySQL packages (and the official Docker images, internally built the
