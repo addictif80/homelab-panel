@@ -882,6 +882,7 @@ export function migrate(db: Database.Database) {
       target_port INTEGER,
       target_owner TEXT,
       target_mode TEXT,
+      target_needs_sudo INTEGER NOT NULL DEFAULT 0,
       app_db_user TEXT,
       app_db_password_encrypted TEXT,
       target_db_container TEXT,
@@ -955,6 +956,16 @@ export function migrate(db: Database.Database) {
   // replication can independently be native or Docker-containerized.
   if (!haReplicationColumns.some((c) => c.name === "source_db_container")) {
     db.exec(`ALTER TABLE ha_replications ADD COLUMN source_db_container TEXT`);
+  }
+
+  // 'folder' only, optional — when set, the target-side rsync runs through `sudo rsync` instead of
+  // directly, needed on hosting-panel-managed targets (CyberPanel, cPanel...) where each site is
+  // isolated under its own dedicated system account and the shared replication account otherwise
+  // hits "Permission denied" on every site it doesn't itself own — with often no root SSH login to
+  // fall back to either. Defaults to 0 (off), unchanged behavior for every replication created
+  // before this.
+  if (!haReplicationColumns.some((c) => c.name === "target_needs_sudo")) {
+    db.exec(`ALTER TABLE ha_replications ADD COLUMN target_needs_sudo INTEGER NOT NULL DEFAULT 0`);
   }
 
   // Optional fixed wall-clock time (e.g. "03:00") for daily/weekly plans — null keeps the original

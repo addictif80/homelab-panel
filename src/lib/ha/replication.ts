@@ -25,6 +25,12 @@ export type Replication = {
   targetPort: number | null;
   targetOwner: string | null;
   targetMode: string | null;
+  /** 'folder' only — when true, the target-side rsync process runs through `sudo rsync` instead of
+   * directly, needed on hosting-panel-managed targets (CyberPanel, cPanel...) where each site is
+   * isolated under its own dedicated system account and the shared replication account has no
+   * direct access — and often no root SSH login either. Requires a passwordless sudoers rule for
+   * rsync on the target for that account, set up manually (this panel won't touch sudoers itself). */
+  targetNeedsSudo: boolean;
   appDbUser: string | null;
   hasAppDbPassword: boolean;
   /** 'mysql' only — when set, every admin SQL command on the target host routes through
@@ -86,6 +92,7 @@ type ReplicationRow = {
   target_port: number | null;
   target_owner: string | null;
   target_mode: string | null;
+  target_needs_sudo: number;
   app_db_user: string | null;
   app_db_password_encrypted: string | null;
   target_db_container: string | null;
@@ -117,6 +124,7 @@ function rowToReplication(row: ReplicationRow): Replication {
     targetPort: row.target_port,
     targetOwner: row.target_owner,
     targetMode: row.target_mode,
+    targetNeedsSudo: row.target_needs_sudo === 1,
     appDbUser: row.app_db_user,
     hasAppDbPassword: !!row.app_db_password_encrypted,
     targetDbContainer: row.target_db_container,
@@ -189,6 +197,8 @@ export type CreateReplicationInput = {
   targetOwner?: string;
   /** 'folder'/'sqlite' only — passed to rsync's --chmod (e.g. "D755,F644"). */
   targetMode?: string;
+  /** 'folder' only — run the target-side rsync through sudo (see Replication.targetNeedsSudo). */
+  targetNeedsSudo?: boolean;
   /** 'mysql' only — the application's own database login, created/updated on the target with the
    * same password so it can connect there after a failover (separate from dbUser/dbPassword, the
    * admin credential used only during setup). PostgreSQL needs no equivalent: pg_basebackup
@@ -206,8 +216,8 @@ export function createReplication(input: CreateReplicationInput): Replication {
   const id = randomUUID();
   getDb()
     .prepare(
-      `INSERT INTO ha_replications (id, name, kind, source_host_id, target_host_id, source_path, target_path, db_port, db_user, db_password_encrypted, target_db_user, target_db_password_encrypted, proxy_host_id, target_port, target_owner, target_mode, app_db_user, app_db_password_encrypted, target_db_container, source_db_container)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO ha_replications (id, name, kind, source_host_id, target_host_id, source_path, target_path, db_port, db_user, db_password_encrypted, target_db_user, target_db_password_encrypted, proxy_host_id, target_port, target_owner, target_mode, target_needs_sudo, app_db_user, app_db_password_encrypted, target_db_container, source_db_container)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -226,6 +236,7 @@ export function createReplication(input: CreateReplicationInput): Replication {
       input.targetPort ?? null,
       input.targetOwner?.trim() || null,
       input.targetMode?.trim() || null,
+      input.targetNeedsSudo ? 1 : 0,
       input.appDbUser?.trim() || null,
       input.appDbPassword ? vaultEncrypt(input.appDbPassword) : null,
       input.targetDbContainer?.trim() || null,

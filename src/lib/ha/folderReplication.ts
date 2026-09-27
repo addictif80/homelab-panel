@@ -25,6 +25,7 @@ function buildLsyncdConfig(
     keyPath: string;
     targetOwner: string | null;
     targetMode: string | null;
+    targetNeedsSudo: boolean;
   }[]
 ): string {
   const syncBlocks = entries
@@ -46,6 +47,18 @@ function buildLsyncdConfig(
       if (e.targetOwner) extra.push(luaString(`--chown=${e.targetOwner}`));
       if (e.targetMode) extra.push(luaString(`--chmod=${e.targetMode}`));
 
+      // Hosting-panel-managed targets (CyberPanel, cPanel, Plesk...) isolate every site under its
+      // own dedicated system account with restrictive permissions — a single shared, unprivileged
+      // SSH account for replication hits "Permission denied" on every site whose directory it
+      // doesn't itself own, and there's often no direct root SSH login to fall back to (root login
+      // disabled being the security-hardened default on most cloud images). rsync_path runs the
+      // *remote* rsync process through sudo instead of directly — the SSH authentication itself
+      // stays the regular, unprivileged account; only the file operations on the target run
+      // elevated. Requires a passwordless sudoers rule for rsync on that account (documented in the
+      // panel's UI next to this option) — with none, sudo would block waiting on a password this
+      // non-interactive SSH exec can never supply.
+      const rsyncPath = e.targetNeedsSudo ? `\n    rsync_path = ${luaString("sudo rsync")},` : "";
+
       return `sync {
   default.rsyncssh,
   source = ${luaString(e.sourcePath)},
@@ -54,7 +67,7 @@ function buildLsyncdConfig(
   delay = 1,
   rsync = {
     archive = true,
-    compress = true,
+    compress = true,${rsyncPath}
     _extra = {
       ${extra.join(",\n      ")}
     }
@@ -108,6 +121,7 @@ async function reconcileLsyncdOnHost(hostId: number): Promise<void> {
         keyPath,
         targetOwner: r.targetOwner,
         targetMode: r.targetMode,
+        targetNeedsSudo: r.targetNeedsSudo,
       };
     })
   );

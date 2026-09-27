@@ -20,6 +20,7 @@ type Replication = {
   targetPort: number | null;
   targetOwner: string | null;
   targetMode: string | null;
+  targetNeedsSudo: boolean;
   appDbUser: string | null;
   targetDbContainer: string | null;
   sourceDbContainer: string | null;
@@ -71,6 +72,7 @@ const EMPTY_FORM = {
   targetPort: "",
   targetOwner: "",
   targetMode: "",
+  targetNeedsSudo: false,
   appDbUser: "",
   appDbPassword: "",
   targetDbContainer: "",
@@ -493,6 +495,26 @@ export default function HaPage() {
                   />
                 </div>
               </div>
+              {form.kind === "folder" && (
+                <label className="flex items-start gap-2 pt-1 text-xs text-neutral-400">
+                  <input
+                    type="checkbox"
+                    checked={form.targetNeedsSudo}
+                    onChange={(e) => setForm({ ...form, targetNeedsSudo: e.target.checked })}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    Le compte SSH cible a besoin de sudo pour écrire (CyberPanel, cPanel, Plesk…) — chaque site y est
+                    isolé sous son propre compte système, inaccessible au compte de réplication partagé. Nécessite une
+                    règle sudoers sans mot de passe sur la machine cible pour ce compte, par ex. :{" "}
+                    <code className="text-neutral-300">
+                      echo &quot;utilisateur ALL=(ALL) NOPASSWD: /usr/bin/rsync&quot; | sudo tee
+                      /etc/sudoers.d/homelab-panel-rsync
+                    </code>{" "}
+                    (à faire une fois, manuellement — le panel ne touche pas aux sudoers).
+                  </span>
+                </label>
+              )}
             </div>
           )}
           {isDbKind && (

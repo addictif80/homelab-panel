@@ -23,6 +23,7 @@ export async function POST(req: NextRequest) {
     targetPort?: number;
     targetOwner?: string;
     targetMode?: string;
+    targetNeedsSudo?: boolean;
     appDbUser?: string;
     appDbPassword?: string;
     targetDbContainer?: string;
@@ -75,6 +76,7 @@ export async function POST(req: NextRequest) {
     targetPort: body.targetPort,
     targetOwner: body.targetOwner,
     targetMode: body.targetMode,
+    targetNeedsSudo: body.targetNeedsSudo,
     appDbUser: body.appDbUser,
     appDbPassword: body.appDbPassword,
     targetDbContainer: body.targetDbContainer,
