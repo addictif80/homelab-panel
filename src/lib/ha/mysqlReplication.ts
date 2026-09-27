@@ -168,7 +168,12 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   await restartMysqlService(r.sourceHostId, r.sourceDbContainer);
 
   updateReplicationStatus(r.id, "setting_up", "Création du rôle de réplication…");
-  const grantSql = `CREATE USER IF NOT EXISTS ${shellQuote(cred.user)}@'%' IDENTIFIED BY ${shellQuote(cred.password)}; GRANT REPLICATION SLAVE ON *.* TO ${shellQuote(cred.user)}@'%'; FLUSH PRIVILEGES;`;
+  // REQUIRE NONE explicitly, so this account's own row can't inherit a server-wide default (e.g.
+  // require_secure_transport, or a password-validation plugin default) that would otherwise force
+  // every future connection attempt — including this replication stream, which neither expects nor
+  // needs SSL — to negotiate TLS against a source that most homelab MariaDB installs never actually
+  // configure certificates for.
+  const grantSql = `CREATE USER IF NOT EXISTS ${shellQuote(cred.user)}@'%' IDENTIFIED BY ${shellQuote(cred.password)} REQUIRE NONE; GRANT REPLICATION SLAVE ON *.* TO ${shellQuote(cred.user)}@'%'; FLUSH PRIVILEGES;`;
   const { code: grantCode, stderr: grantErr } = await runSshCommand(
     r.sourceHostId,
     `echo ${shellQuote(grantSql)} | ${resolvedMysqlCommand(r.sourceDbContainer, sourceAdminHost, port, r.dbUser, secrets.dbPassword)}`,
@@ -309,10 +314,18 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   }
 
   updateReplicationStatus(r.id, "setting_up", "Démarrage de la réplication…");
+  // MASTER_SSL=0 explicitly, rather than leaving it unspecified: MariaDB carries a slave
+  // connection's SSL setting over from whatever it was set to the *last* time CHANGE MASTER TO ran
+  // for this instance unless a fresh value is given — on a target that's been reconfigured several
+  // times already (or that was ever pointed at a different, SSL-requiring source in the past), that
+  // makes the *previous* attempt's SSL setting silently stick instead of a clean, predictable
+  // default. Neither this panel's replication role nor the CREATE USER above ever asks for SSL, and
+  // most homelab MariaDB installs don't have it configured for replication at all, so this keeps
+  // every setup/reconfigure deterministic instead of depending on leftover connection state.
   const changeMasterSql =
     `CHANGE MASTER TO MASTER_HOST=${shellQuote(source.address)}, MASTER_PORT=${port}, ` +
     `MASTER_USER=${shellQuote(cred.user)}, MASTER_PASSWORD=${shellQuote(cred.password)}, ` +
-    `MASTER_LOG_FILE=${shellQuote(logFile)}, MASTER_LOG_POS=${logPos}; START SLAVE;`;
+    `MASTER_LOG_FILE=${shellQuote(logFile)}, MASTER_LOG_POS=${logPos}, MASTER_SSL=0; START SLAVE;`;
   const { code: startCode, stderr: startErr } = await runSshCommand(
     r.targetHostId,
     `echo ${shellQuote(changeMasterSql)} | ${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)}`,
