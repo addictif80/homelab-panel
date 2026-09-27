@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { parseSqliteUtc } from "@/lib/sqliteDate";
 
 type Host = { id: number; name: string; lan_ip: string | null; router_provider: string | null };
 type ProviderField = { key: string; label: string; placeholder?: string; secret?: boolean };
@@ -547,7 +548,7 @@ type OutageSummary = {
 };
 
 function formatOutageDate(iso: string): string {
-  return new Date(`${iso}Z`).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" });
+  return parseSqliteUtc(iso).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" });
 }
 
 function formatOutageDuration(minutes: number | null): string {

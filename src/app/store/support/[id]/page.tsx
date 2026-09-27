@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
+import { parseSqliteUtc } from "@/lib/sqliteDate";
 
 type Ticket = { id: string; email: string; subject: string; status: "open" | "closed"; createdAt: string };
 type Message = { id: string; sender: "customer" | "seller"; body: string; createdAt: string };
@@ -109,7 +110,7 @@ export default function SupportTicketPage({
                 >
                   <p className="whitespace-pre-wrap leading-relaxed">{m.body}</p>
                   <p className="mt-2 text-[11px] text-neutral-500">
-                    {m.sender === "seller" ? "Support" : "Toi"} · {new Date(`${m.createdAt}Z`).toLocaleString("fr-FR")}
+                    {m.sender === "seller" ? "Support" : "Toi"} · {parseSqliteUtc(m.createdAt).toLocaleString("fr-FR")}
                   </p>
                 </div>
               ))}

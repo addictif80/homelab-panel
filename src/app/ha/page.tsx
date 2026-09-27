@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { parseSqliteUtc } from "@/lib/sqliteDate";
 
 type Host = { id: number; name: string };
 type ProxyHost = { id: number; domainNames: string[]; forwardPort: number };
@@ -891,7 +892,7 @@ export default function HaPage() {
               </p>
             )}
             {r.lastSyncedAt && (
-              <p className="mt-1 text-xs text-neutral-600">Dernière synchro confirmée : {new Date(`${r.lastSyncedAt}Z`).toLocaleString("fr-FR")}</p>
+              <p className="mt-1 text-xs text-neutral-600">Dernière synchro confirmée : {parseSqliteUtc(r.lastSyncedAt).toLocaleString("fr-FR")}</p>
             )}
 
             {editingId === r.id && (

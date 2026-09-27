@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import DirectoryPicker from "@/components/DirectoryPicker";
+import { parseSqliteUtc } from "@/lib/sqliteDate";
 
 type Host = { id: number; name: string; kind: string; docker_enabled: number; proxmox_node: string | null };
 type SourceType = "paths" | "docker" | "database" | "proxmox_vm" | "panel_config";
@@ -57,8 +58,8 @@ const INPUT_CLASS = "w-full rounded border border-neutral-700 bg-neutral-950 px-
 function statusLabel(run: BackupRun | null): { text: string; color: string } {
   if (!run) return { text: "Jamais exécuté", color: "text-neutral-500" };
   if (run.status === "running") return { text: "En cours...", color: "text-blue-400" };
-  if (run.status === "success") return { text: `OK · ${new Date(`${run.startedAt}Z`).toLocaleString("fr-FR")}`, color: "text-emerald-400" };
-  return { text: `Échec · ${new Date(`${run.startedAt}Z`).toLocaleString("fr-FR")}`, color: "text-red-400" };
+  if (run.status === "success") return { text: `OK · ${parseSqliteUtc(run.startedAt).toLocaleString("fr-FR")}`, color: "text-emerald-400" };
+  return { text: `Échec · ${parseSqliteUtc(run.startedAt).toLocaleString("fr-FR")}`, color: "text-red-400" };
 }
 
 export default function BackupsPage() {

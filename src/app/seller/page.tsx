@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import ReleasesPanel from "@/components/ReleasesPanel";
 import SupportTicketsPanel from "@/components/SupportTicketsPanel";
 import DirectorySubmissionsPanel from "@/components/DirectorySubmissionsPanel";
+import { parseSqliteUtc } from "@/lib/sqliteDate";
 
 type PlanKey = "lifetime" | "monthly" | "annual";
 const PLAN_KEYS: PlanKey[] = ["lifetime", "monthly", "annual"];
@@ -554,7 +555,7 @@ export default function SellerPage() {
               {sales?.map((s) => (
                 <tr key={s.id} className="border-t border-neutral-900">
                   <td className="whitespace-nowrap px-3 py-2 text-neutral-500">
-                    {new Date(`${s.createdAt}Z`).toLocaleString("fr-FR")}
+                    {parseSqliteUtc(s.createdAt).toLocaleString("fr-FR")}
                   </td>
                   <td className="px-3 py-2 text-neutral-300">{s.customerEmail}</td>
                   <td className="px-3 py-2 text-neutral-200">
@@ -659,7 +660,7 @@ export default function SellerPage() {
                     )}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-neutral-500">
-                    {new Date(`${k.createdAt}Z`).toLocaleString("fr-FR")}
+                    {parseSqliteUtc(k.createdAt).toLocaleString("fr-FR")}
                   </td>
                   <td className="px-3 py-2">
                     {k.usedAt ? (
@@ -669,7 +670,7 @@ export default function SellerPage() {
                     )}
                   </td>
                   <td className="px-3 py-2 text-neutral-500">
-                    {k.usedAt ? new Date(`${k.usedAt}Z`).toLocaleString("fr-FR") : "—"}
+                    {k.usedAt ? parseSqliteUtc(k.usedAt).toLocaleString("fr-FR") : "—"}
                   </td>
                 </tr>
               ))}
@@ -879,7 +880,7 @@ export default function SellerPage() {
               {recoveryOrders?.map((o) => (
                 <tr key={o.id} className="border-t border-neutral-900">
                   <td className="whitespace-nowrap px-3 py-2 text-neutral-500">
-                    {new Date(`${o.createdAt}Z`).toLocaleString("fr-FR")}
+                    {parseSqliteUtc(o.createdAt).toLocaleString("fr-FR")}
                   </td>
                   <td className="px-3 py-2 text-neutral-300">{o.email}</td>
                   <td className="px-3 py-2 text-neutral-200">

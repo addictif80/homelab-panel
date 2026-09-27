@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { parseSqliteUtc } from "@/lib/sqliteDate";
 
 type Entry = { id: number; action: string; target: string | null; detail: string | null; created_at: string };
 
@@ -74,7 +75,7 @@ export default function AuditPage() {
             {entries.map((e) => (
               <tr key={e.id} className="border-t border-neutral-900">
                 <td className="whitespace-nowrap px-3 py-2 text-neutral-500">
-                  {new Date(`${e.created_at}Z`).toLocaleString("fr-FR")}
+                  {parseSqliteUtc(e.created_at).toLocaleString("fr-FR")}
                 </td>
                 <td className="px-3 py-2 font-mono text-xs text-neutral-200">{e.action}</td>
                 <td className="px-3 py-2 text-neutral-400">{e.target || "—"}</td>

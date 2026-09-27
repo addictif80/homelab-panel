@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import JobLog from "@/components/JobLog";
+import { parseSqliteUtc } from "@/lib/sqliteDate";
 
 type Job = {
   id: string;
@@ -67,7 +68,7 @@ export default function JobsPage() {
             >
               <div className="min-w-0">
                 <p className="truncate text-sm text-neutral-100">{j.label}</p>
-                <p className="text-xs text-neutral-500">{new Date(`${j.startedAt}Z`).toLocaleString("fr-FR")}</p>
+                <p className="text-xs text-neutral-500">{parseSqliteUtc(j.startedAt).toLocaleString("fr-FR")}</p>
               </div>
               <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${STATUS_STYLES[j.status]}`}>{STATUS_LABELS[j.status]}</span>
             </button>

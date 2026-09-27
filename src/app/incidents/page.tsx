@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { parseSqliteUtc } from "@/lib/sqliteDate";
 
 type Incident = {
   id: string;
@@ -85,7 +86,7 @@ export default function IncidentsPage() {
                   </p>
                 </div>
                 <span className="shrink-0 text-xs text-neutral-500">
-                  {new Date(`${incident.startedAt}Z`).toLocaleString("fr-FR")}
+                  {parseSqliteUtc(incident.startedAt).toLocaleString("fr-FR")}
                 </span>
               </button>
               {open && <div className="border-t border-neutral-800 px-4 py-3">{renderStory(incident.story)}</div>}

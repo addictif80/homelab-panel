@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { parseSqliteUtc } from "@/lib/sqliteDate";
 
 type ProxyHost = {
   id: number;
@@ -663,7 +664,7 @@ export default function ProxyPage() {
                 Ajoute un bloc nginx dans la config avancée : si la cible principale répond en erreur (502/503/504),
                 nginx bascule automatiquement et immédiatement, sans intervention du panel. Une vérification
                 périodique (badge ci-dessus) affiche juste l&apos;état actuel.
-                {failover?.lastCheckedAt && ` Dernière vérification : ${new Date(`${failover.lastCheckedAt}Z`).toLocaleString("fr-FR")}.`}
+                {failover?.lastCheckedAt && ` Dernière vérification : ${parseSqliteUtc(failover.lastCheckedAt).toLocaleString("fr-FR")}.`}
               </p>
 
               <div className="flex gap-1.5 text-xs">

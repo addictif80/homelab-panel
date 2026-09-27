@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
+import { parseSqliteUtc } from "@/lib/sqliteDate";
 
 type UserSummary = {
   id: number;
@@ -275,7 +276,7 @@ export default function UsersPage() {
                       <span className="text-xs text-neutral-600">Actif</span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-neutral-400">{new Date(`${u.createdAt}Z`).toLocaleDateString()}</td>
+                  <td className="px-3 py-2 text-neutral-400">{parseSqliteUtc(u.createdAt).toLocaleDateString()}</td>
                   <td className="px-3 py-2">
                     <div className="flex gap-2">
                       {u.locked && (

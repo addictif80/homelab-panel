@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { parseSqliteUtc } from "@/lib/sqliteDate";
 
 type FleetHost = { hostId: number; hostName: string; reachable: boolean; latencyMs: number | null };
 type Activity = { action: string; target: string | null; createdAt: string };
@@ -123,7 +124,7 @@ export default function MissionControlPage() {
                     {a.action}
                     {a.target && <span className="text-neutral-600"> · {a.target}</span>}
                   </span>
-                  <span className="text-neutral-600">{new Date(`${a.createdAt}Z`).toLocaleTimeString("fr-FR")}</span>
+                  <span className="text-neutral-600">{parseSqliteUtc(a.createdAt).toLocaleTimeString("fr-FR")}</span>
                 </div>
               ))}
               {data.recentActivity.length === 0 && <p className="text-sm text-neutral-600">Aucune activité récente.</p>}
