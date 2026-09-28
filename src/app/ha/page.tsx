@@ -32,6 +32,16 @@ type Replication = {
   lastSyncedAt: string | null;
 };
 
+type HaStateEntry = {
+  replicationId: string;
+  proxyHostId: number;
+  sourceHostName: string;
+  targetHostName: string;
+  servedBy: "source" | "target" | "unknown";
+  needsResyncReminder: boolean;
+  lastFailbackAt: string | null;
+};
+
 const KIND_LABELS: Record<Kind, string> = {
   folder: "Dossier (lsyncd, continu)",
   mysql: "MySQL / MariaDB (réplication native)",
@@ -121,12 +131,15 @@ export default function HaPage() {
   const [availableDatabases, setAvailableDatabases] = useState<string[] | null>(null);
   const [listingDatabases, setListingDatabases] = useState(false);
   const [listDatabasesError, setListDatabasesError] = useState("");
+  const [haState, setHaState] = useState<HaStateEntry[]>([]);
+  const [dismissingReminder, setDismissingReminder] = useState<number | null>(null);
 
   const load = useCallback(async () => {
-    const [hostsRes, replRes, proxyRes] = await Promise.all([
+    const [hostsRes, replRes, proxyRes, stateRes] = await Promise.all([
       fetch("/api/hosts"),
       fetch("/api/ha/replications"),
       fetch("/api/npm/hosts").catch(() => null),
+      fetch("/api/ha/state").catch(() => null),
     ]);
     const hostsData = await hostsRes.json();
     const replData = await replRes.json();
@@ -136,7 +149,21 @@ export default function HaPage() {
       const proxyData = await proxyRes.json();
       setProxyHosts(proxyData.hosts ?? []);
     }
+    if (stateRes?.ok) {
+      const stateData = await stateRes.json();
+      setHaState(stateData.entries ?? []);
+    }
   }, []);
+
+  async function dismissReminder(proxyHostId: number) {
+    setDismissingReminder(proxyHostId);
+    try {
+      await fetch(`/api/ha/state/${proxyHostId}/dismiss-reminder`, { method: "POST" });
+      await load();
+    } finally {
+      setDismissingReminder(null);
+    }
+  }
 
   useEffect(() => {
     load();
@@ -896,6 +923,46 @@ export default function HaPage() {
                     {r.targetPort ? ` (port ${r.targetPort})` : ""}
                   </p>
                 )}
+                {(() => {
+                  const state = haState.find((s) => s.replicationId === r.id);
+                  if (!state) return null;
+                  return (
+                    <>
+                      <p className="mt-0.5 text-xs">
+                        Actuellement servi par :{" "}
+                        <span
+                          className={
+                            state.servedBy === "source"
+                              ? "text-emerald-400"
+                              : state.servedBy === "target"
+                                ? "text-amber-400"
+                                : "text-neutral-500"
+                          }
+                        >
+                          {state.servedBy === "source"
+                            ? state.sourceHostName
+                            : state.servedBy === "target"
+                              ? `${state.targetHostName} (secours)`
+                              : "inconnu"}
+                        </span>
+                      </p>
+                      {state.needsResyncReminder && (
+                        <p className="mt-1 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs text-amber-400">
+                          <span>
+                            {state.sourceHostName} a repris la main — penser à vérifier si une resynchro depuis {state.targetHostName} est nécessaire.
+                          </span>
+                          <button
+                            onClick={() => dismissReminder(state.proxyHostId)}
+                            disabled={dismissingReminder === state.proxyHostId}
+                            className="text-neutral-400 hover:underline disabled:opacity-50"
+                          >
+                            {dismissingReminder === state.proxyHostId ? "..." : "Marquer comme vérifié"}
+                          </button>
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
                 {(r.sourceDbContainer || r.targetDbContainer) && (
                   <p className="mt-0.5 text-xs text-neutral-600">
                     Admin SQL via docker exec —

@@ -179,3 +179,109 @@ export function MaintenanceWidget() {
 
   return <MiniStat value={String(plans.length)} label="fenêtre(s) de maintenance configurée(s)" href="/updates" />;
 }
+
+type HaStateEntry = {
+  replicationId: string;
+  name: string;
+  proxyHostId: number;
+  sourceHostName: string;
+  targetHostName: string;
+  servedBy: "source" | "target" | "unknown";
+  needsResyncReminder: boolean;
+  lastFailbackAt: string | null;
+};
+
+export function HaStateWidget() {
+  const [entries, setEntries] = useState<HaStateEntry[] | null>(null);
+  const [dismissing, setDismissing] = useState<number | null>(null);
+
+  const load = () =>
+    fetch("/api/ha/state")
+      .then((r) => r.json())
+      .then((d) => setEntries(d.entries ?? []))
+      .catch(() => setEntries([]));
+
+  useEffect(() => {
+    load();
+    const interval = setInterval(load, 30_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  async function dismiss(proxyHostId: number) {
+    setDismissing(proxyHostId);
+    try {
+      await fetch(`/api/ha/state/${proxyHostId}/dismiss-reminder`, { method: "POST" });
+      await load();
+    } finally {
+      setDismissing(null);
+    }
+  }
+
+  if (entries === null) return <WidgetLoading />;
+  if (entries.length === 0) {
+    return (
+      <p className="text-xs text-neutral-500">
+        Aucun plan HA n&apos;a de failover NPM branché.{" "}
+        <a href="/ha" className="text-blue-600 hover:underline">
+          Configurer →
+        </a>
+      </p>
+    );
+  }
+
+  const reminders = entries.filter((e) => e.needsResyncReminder);
+
+  return (
+    <div className="space-y-3">
+      {reminders.length > 0 && (
+        <ul className="space-y-2">
+          {reminders.map((e) => (
+            <li key={e.replicationId} className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs">
+              <p className="text-amber-400">
+                <strong>{e.name}</strong> : {e.sourceHostName} a repris la main sur {e.targetHostName}.
+              </p>
+              <p className="mt-0.5 text-neutral-400">Penser à vérifier si une resynchro depuis la cible est nécessaire.</p>
+              <div className="mt-1.5 flex gap-3">
+                <a href="/ha" className="text-blue-600 hover:underline">
+                  Aller sur /ha →
+                </a>
+                <button
+                  onClick={() => dismiss(e.proxyHostId)}
+                  disabled={dismissing === e.proxyHostId}
+                  className="text-neutral-400 hover:underline disabled:opacity-50"
+                >
+                  {dismissing === e.proxyHostId ? "..." : "Marquer comme vérifié"}
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <ul className="space-y-1.5 text-xs">
+        {entries.map((e) => (
+          <li key={e.replicationId} className="flex items-center justify-between gap-2">
+            <span className="truncate text-neutral-400">{e.name}</span>
+            <span
+              className={
+                e.servedBy === "source"
+                  ? "text-emerald-400"
+                  : e.servedBy === "target"
+                    ? "text-amber-400"
+                    : "text-neutral-500"
+              }
+            >
+              {e.servedBy === "source"
+                ? `servi par ${e.sourceHostName}`
+                : e.servedBy === "target"
+                  ? `⚠ servi par ${e.targetHostName}`
+                  : "état inconnu"}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <a href="/ha" className="inline-block text-xs text-blue-600 hover:underline">
+        Voir /ha →
+      </a>
+    </div>
+  );
+}

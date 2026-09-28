@@ -26,6 +26,7 @@ export const WIDGET_CATALOG: WidgetDef[] = [
   { id: "backups", title: "Sauvegardes", category: "Fiabilité", description: "Statut du dernier run de chaque plan de sauvegarde." },
   { id: "backupRule321", title: "Règle 3-2-1", category: "Fiabilité", description: "Vérifie que chaque machine sauvegardée a bien 3 copies, sur 2 supports, dont 1 hors-site." },
   { id: "certificates", title: "Certificats SSL", category: "Fiabilité", description: "Domaines surveillés proches de l'expiration." },
+  { id: "haState", title: "État de la HA", category: "Fiabilité", description: "Qui sert actuellement chaque site protégé par un failover, et rappel de resynchro après un retour au serveur principal." },
   { id: "uptime", title: "Uptime Kuma", category: "Fiabilité", description: "Aperçu embarqué de ton instance Uptime Kuma." },
   { id: "maintenance", title: "Maintenance", category: "Fiabilité", description: "Nombre de fenêtres de maintenance configurées." },
   { id: "updates", title: "Mises à jour", category: "Fiabilité", description: "Machines avec une méthode de mise à jour configurée." },

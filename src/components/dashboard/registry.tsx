@@ -2,7 +2,7 @@ import { AlertsWidget, MachinesWidget, ResourcesWidget } from "./widgets/Resourc
 import { QuickAccessWidget } from "./widgets/QuickAccessWidget";
 import { DockerWidget, ElectricityCostWidget, ProxmoxWidget, UpdatesWidget } from "./widgets/InfraWidgets";
 import { BlockedIpsWidget, LockdownWidget, MailEventsWidget, SecurityFindingsWidget } from "./widgets/SecurityWidgets";
-import { BackupRule321Widget, BackupsWidget, CertificatesWidget, MaintenanceWidget, UptimeWidget } from "./widgets/ReliabilityWidgets";
+import { BackupRule321Widget, BackupsWidget, CertificatesWidget, HaStateWidget, MaintenanceWidget, UptimeWidget } from "./widgets/ReliabilityWidgets";
 import { IspOutagesWidget, PublicIpWidget, TailscaleWidget } from "./widgets/NetworkWidgets";
 import { AuditWidget } from "./widgets/AuditWidget";
 import { LicenseWidget } from "./widgets/LicenseWidget";
@@ -27,6 +27,7 @@ export const WIDGET_COMPONENTS: Record<string, React.ComponentType> = {
   backups: BackupsWidget,
   backupRule321: BackupRule321Widget,
   certificates: CertificatesWidget,
+  haState: HaStateWidget,
   uptime: UptimeWidget,
   maintenance: MaintenanceWidget,
   updates: UpdatesWidget,

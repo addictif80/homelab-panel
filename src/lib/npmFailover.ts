@@ -1,5 +1,6 @@
 import { getDb } from "./db";
 import { getProxyHost, updateProxyHost, type ProxyHost } from "./npm";
+import { notifyAll, hasAnyNotificationChannel } from "./notifications/notify";
 
 /**
  * Automatic web failover for an NPM proxy host, implemented as a pure nginx-level mechanism
@@ -105,6 +106,8 @@ export type FailoverConfig = {
   lastStatus: "unknown" | "primary" | "failover" | "error";
   lastCheckedAt: string | null;
   lastError: string | null;
+  needsResyncReminder: boolean;
+  lastFailbackAt: string | null;
 };
 
 type FailoverRow = {
@@ -119,6 +122,8 @@ type FailoverRow = {
   last_status: FailoverConfig["lastStatus"];
   last_checked_at: string | null;
   last_error: string | null;
+  needs_resync_reminder: number;
+  last_failback_at: string | null;
 };
 
 function rowToConfig(row: FailoverRow): FailoverConfig {
@@ -134,6 +139,8 @@ function rowToConfig(row: FailoverRow): FailoverConfig {
     lastStatus: row.last_status,
     lastCheckedAt: row.last_checked_at,
     lastError: row.last_error,
+    needsResyncReminder: row.needs_resync_reminder === 1,
+    lastFailbackAt: row.last_failback_at,
   };
 }
 
@@ -237,6 +244,26 @@ export async function checkAllFailovers(): Promise<void> {
         getDb()
           .prepare(`UPDATE proxy_failovers SET last_status = ?, last_checked_at = datetime('now'), last_error = NULL WHERE proxy_host_id = ?`)
           .run(status, config.proxyHostId);
+
+        // The primary just came back after actually being replaced by the backup (not merely
+        // "erreur" — that never sent traffic anywhere else) — real writes may have landed on the
+        // backup in the meantime, and nothing resyncs that back to the primary automatically. Flag
+        // it so the reminder survives past this one check, instead of a notification that's easy
+        // to miss and forget by the time someone gets around to it.
+        if (config.lastStatus === "failover" && status === "primary") {
+          getDb()
+            .prepare(
+              `UPDATE proxy_failovers SET needs_resync_reminder = 1, last_failback_at = datetime('now') WHERE proxy_host_id = ?`
+            )
+            .run(config.proxyHostId);
+          if (hasAnyNotificationChannel()) {
+            const domain = host.domainNames[0] ?? `hôte NPM #${host.id}`;
+            notifyAll(
+              `↩ Retour au serveur principal : ${domain}`,
+              `Le serveur principal de "${domain}" répond de nouveau et reprend la main sur le serveur de secours.\n\nDes données ont pu changer sur le serveur de secours pendant la bascule — pense à vérifier s'il faut resynchroniser depuis lui avant de considérer le principal à jour.`
+            ).catch(() => {});
+          }
+        }
       } catch (err) {
         getDb()
           .prepare(`UPDATE proxy_failovers SET last_status = 'error', last_checked_at = datetime('now'), last_error = ? WHERE proxy_host_id = ?`)
@@ -244,4 +271,11 @@ export async function checkAllFailovers(): Promise<void> {
       }
     })
   );
+}
+
+/** Clears the reminder — either because the linked HA replication's reverse sync just succeeded
+ * (see lib/ha's runReverseSync), or because the user manually checked and confirmed no resync was
+ * actually needed. A no-op for a proxy host with no reminder set. */
+export function clearResyncReminder(proxyHostId: number): void {
+  getDb().prepare(`UPDATE proxy_failovers SET needs_resync_reminder = 0 WHERE proxy_host_id = ?`).run(proxyHostId);
 }

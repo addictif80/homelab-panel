@@ -16,6 +16,7 @@ import { setupSqliteReplication, runSqliteSync } from "./sqliteReplication";
 import { setupMysqlReplication, checkMysqlReplicationStatus, reverseSyncMysqlReplication } from "./mysqlReplication";
 import { setupPostgresReplication, checkPostgresReplicationStatus } from "./postgresReplication";
 import { wireFailoverForReplication } from "./failoverWiring";
+import { clearResyncReminder } from "../npmFailover";
 import { notifyAll, hasAnyNotificationChannel } from "../notifications/notify";
 import { getDb } from "../db";
 
@@ -102,6 +103,10 @@ export async function runReverseSync(id: string): Promise<void> {
     try {
       if (r.kind === "folder") await reverseSyncFolderReplication(r);
       else await reverseSyncMysqlReplication(r);
+      // The whole point of a manual reverse sync is fixing exactly the situation the failback
+      // reminder warns about — clear it now rather than leaving it flagged after the user already
+      // did the thing it was reminding them to do.
+      if (r.proxyHostId) clearResyncReminder(r.proxyHostId);
     } catch (err) {
       updateReplicationStatus(id, "error", err instanceof Error ? err.message : "Erreur inconnue lors de la resynchronisation.");
       throw err;

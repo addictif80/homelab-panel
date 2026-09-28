@@ -1094,6 +1094,16 @@ export function migrate(db: Database.Database) {
     // the site root.
     db.exec(`ALTER TABLE proxy_failovers ADD COLUMN backup_path TEXT NOT NULL DEFAULT '/'`);
   }
+  if (!proxyFailoverColumns.some((c) => c.name === "needs_resync_reminder")) {
+    // Set the instant a check sees the primary answer again after a stretch of failover — real
+    // writes may have landed on the backup while the primary was down, and nothing resyncs that
+    // back automatically (see lib/ha's reverse-sync action), so this flags it as unchecked instead
+    // of silently letting the primary's stale data quietly become the source of truth again.
+    // last_failback_at records when that happened, for display; both cleared either by a
+    // successful reverse sync for the linked HA replication or by manually dismissing the reminder.
+    db.exec(`ALTER TABLE proxy_failovers ADD COLUMN needs_resync_reminder INTEGER NOT NULL DEFAULT 0`);
+    db.exec(`ALTER TABLE proxy_failovers ADD COLUMN last_failback_at TEXT`);
+  }
 
   ensureVaultKdfSalt(db);
 }
