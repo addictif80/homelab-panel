@@ -100,6 +100,8 @@ const EMPTY_EDIT_FORM = {
   appDbPassword: "",
   targetDbContainer: "",
   sourceDbContainer: "",
+  proxyHostId: "" as number | "",
+  targetPort: "",
 };
 
 export default function HaPage() {
@@ -354,6 +356,8 @@ export default function HaPage() {
       appDbPassword: "",
       targetDbContainer: r.targetDbContainer ?? "",
       sourceDbContainer: r.sourceDbContainer ?? "",
+      proxyHostId: r.proxyHostId ?? "",
+      targetPort: r.targetPort ? String(r.targetPort) : "",
     });
   }
 
@@ -386,6 +390,8 @@ export default function HaPage() {
           appDbPassword: editForm.appDbPassword || undefined,
           targetDbContainer: editForm.targetDbContainer,
           sourceDbContainer: editForm.sourceDbContainer,
+          proxyHostId: editForm.proxyHostId || null,
+          targetPort: editForm.targetPort ? Number(editForm.targetPort) : null,
         }),
       });
       const data = await res.json();
@@ -1089,6 +1095,40 @@ export default function HaPage() {
                     </div>
                   </>
                 )}
+                <div className="space-y-2 border-t border-neutral-800 pt-3">
+                  <p className="text-xs text-neutral-500">
+                    Branchement failover NPM — une fois enregistré, "Rebrancher le failover" applique la nouvelle
+                    cible/port au reverse proxy.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-xs text-neutral-400">Redirection NPM à protéger</label>
+                      <select
+                        value={editForm.proxyHostId}
+                        onChange={(e) => setEditForm({ ...editForm, proxyHostId: e.target.value ? Number(e.target.value) : "" })}
+                        className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                      >
+                        <option value="">Aucune</option>
+                        {proxyHosts.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.domainNames.join(", ")}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-neutral-400">Port sur la machine cible (si différent)</label>
+                      <input
+                        value={editForm.targetPort}
+                        onChange={(e) => setEditForm({ ...editForm, targetPort: e.target.value })}
+                        placeholder="identique à la redirection"
+                        inputMode="numeric"
+                        disabled={!editForm.proxyHostId}
+                        className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600 disabled:opacity-50"
+                      />
+                    </div>
+                  </div>
+                </div>
                 <div className="flex gap-2 border-t border-neutral-800 pt-3">
                   <button
                     onClick={() => saveEdit(r)}
