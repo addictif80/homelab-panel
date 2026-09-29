@@ -144,9 +144,15 @@ async function finishReplicationSetup(id: string, r: Replication): Promise<void>
 // while it stays there (which is how often this runs — see checkAllReplications).
 const ALERT_STATES: ReplicationStatus[] = ["error", "stopped"];
 
-export async function checkReplicationStatus(id: string): Promise<void> {
+type StatusTransition = { direction: "down" | "up"; before: Replication; after: Replication };
+
+/** Runs the actual per-kind check and reports whether that just flipped this replication into or
+ * out of an alert-worthy state — without sending anything itself, so callers can either notify
+ * immediately (a single manual check) or batch several transitions from the same sweep into one
+ * notification per target host (see checkAllReplications). */
+async function runStatusCheck(id: string): Promise<StatusTransition | null> {
   const before = getReplication(id);
-  if (!before) return;
+  if (!before) return null;
   try {
     if (before.kind === "folder") await checkFolderReplicationStatus(before);
     else if (before.kind === "sqlite") await runSqliteSync(before);
@@ -156,22 +162,61 @@ export async function checkReplicationStatus(id: string): Promise<void> {
     updateReplicationStatus(id, "error", err instanceof Error ? err.message : "Erreur inconnue lors de la vérification.");
   }
 
-  if (!hasAnyNotificationChannel()) return;
   const after = getReplication(id);
-  if (!after) return;
+  if (!after) return null;
   const wasDown = ALERT_STATES.includes(before.status);
   const isDown = ALERT_STATES.includes(after.status);
-  if (!wasDown && isDown) {
-    notifyAll(
-      `⚠ Réplication en échec : ${after.name}`,
-      `La réplication "${after.name}" (${after.kind}, ${hostLabel(after.sourceHostId)} → ${hostLabel(after.targetHostId)}) vient de passer en erreur.\n\n${after.statusDetail ?? ""}`
-    ).catch(() => {});
-  } else if (wasDown && !isDown) {
-    notifyAll(
-      `✅ Réplication rétablie : ${after.name}`,
-      `La réplication "${after.name}" (${after.kind}, ${hostLabel(after.sourceHostId)} → ${hostLabel(after.targetHostId)}) est de nouveau opérationnelle.`
-    ).catch(() => {});
+  if (!wasDown && isDown) return { direction: "down", before, after };
+  if (wasDown && !isDown) return { direction: "up", before, after };
+  return null;
+}
+
+/** Single-replication check (the "Vérifier maintenant" action) — notifies straight away, since
+ * there's no batch of sibling checks here to group with. */
+export async function checkReplicationStatus(id: string): Promise<void> {
+  const transition = await runStatusCheck(id);
+  if (!transition || !hasAnyNotificationChannel()) return;
+  await notifyTransitionGroup(transition.direction, [transition.after]);
+}
+
+/** One replication's alert email, or — when several land in the same sweep with the same
+ * direction and the same target host — a single grouped one. Several replications sharing a
+ * target machine flip together whenever that machine itself has a shared, short-lived incident
+ * (a scheduled reboot, a crashed MariaDB restarting...); that's one real event, not N separate
+ * ones, and reading N near-identical emails in the same few seconds is exactly what "an alert
+ * that's looping" feels like even though each one fired correctly on its own transition. */
+async function notifyTransitionGroup(direction: "down" | "up", replications: Replication[]): Promise<void> {
+  const byTargetHost = new Map<number, Replication[]>();
+  for (const r of replications) {
+    const list = byTargetHost.get(r.targetHostId) ?? [];
+    list.push(r);
+    byTargetHost.set(r.targetHostId, list);
   }
+
+  await Promise.all(
+    Array.from(byTargetHost.values()).map(async (group) => {
+      const targetLabel = hostLabel(group[0].targetHostId);
+      if (group.length === 1) {
+        const r = group[0];
+        await notifyAll(
+          direction === "down" ? `⚠ Réplication en échec : ${r.name}` : `✅ Réplication rétablie : ${r.name}`,
+          direction === "down"
+            ? `La réplication "${r.name}" (${r.kind}, ${hostLabel(r.sourceHostId)} → ${targetLabel}) vient de passer en erreur.\n\n${r.statusDetail ?? ""}`
+            : `La réplication "${r.name}" (${r.kind}, ${hostLabel(r.sourceHostId)} → ${targetLabel}) est de nouveau opérationnelle.`
+        ).catch(() => {});
+        return;
+      }
+      const list = group.map((r) => `- ${r.name} (${r.kind}, depuis ${hostLabel(r.sourceHostId)})`).join("\n");
+      await notifyAll(
+        direction === "down"
+          ? `⚠ ${group.length} réplications en échec sur ${targetLabel}`
+          : `✅ ${group.length} réplications rétablies sur ${targetLabel}`,
+        direction === "down"
+          ? `${group.length} réplications ciblant "${targetLabel}" viennent de passer en erreur en même temps — probablement un incident commun à cette machine (redémarrage, coupure réseau, service en cours de récupération...) plutôt que ${group.length} pannes distinctes :\n\n${list}`
+          : `${group.length} réplications ciblant "${targetLabel}" sont de nouveau opérationnelles :\n\n${list}`
+      ).catch(() => {});
+    })
+  );
 }
 
 /**
@@ -199,7 +244,21 @@ export async function removeReplication(id: string): Promise<void> {
  * all, so this is what actually performs its next sync, not just a status check. */
 export async function checkAllReplications(): Promise<void> {
   const replications = listReplications().filter((r) => r.enabled && r.status !== "setting_up");
-  await Promise.all(replications.map((r) => checkReplicationStatus(r.id)));
+  const transitions = (await Promise.all(replications.map((r) => runStatusCheck(r.id)))).filter(
+    (t): t is StatusTransition => t !== null
+  );
+  if (transitions.length === 0 || !hasAnyNotificationChannel()) return;
+
+  await Promise.all([
+    notifyTransitionGroup(
+      "down",
+      transitions.filter((t) => t.direction === "down").map((t) => t.after)
+    ),
+    notifyTransitionGroup(
+      "up",
+      transitions.filter((t) => t.direction === "up").map((t) => t.after)
+    ),
+  ]);
 }
 
 const CHECK_INTERVAL_MS = 30_000;

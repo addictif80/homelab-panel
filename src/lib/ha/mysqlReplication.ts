@@ -2,7 +2,7 @@ import { runSshCommand, getHostConnectionInfo, shellQuote } from "../ssh";
 import { ensurePrivateKeyDeployed, ensurePublicKeyAuthorized } from "../backup/keys";
 import { ensureRemoteDir, ensureRsyncReachable } from "../backup/transfer";
 import { restartService } from "../hostCompat";
-import { resolveMysqlAdminHost } from "./mysqlAdminHost";
+import { resolveMysqlAdminHost, resolveMysqlAdminHostOrUnreachable } from "./mysqlAdminHost";
 import {
   generateReplicationCredential,
   setReplicationCredential,
@@ -359,9 +359,28 @@ export async function checkMysqlReplicationStatus(r: Replication): Promise<void>
   }
   const port = r.dbPort || 3306;
   const target = getHostConnectionInfo(r.targetHostId);
-  const targetAdminHost = r.targetDbContainer
-    ? target.address
-    : await resolveMysqlAdminHost(r.targetHostId, port, targetCred.user, targetCred.password, target.address);
+  let targetAdminHost: string;
+  if (r.targetDbContainer) {
+    targetAdminHost = target.address;
+  } else {
+    // Docker-container admin (above) always has a real network address to dial, but a plain
+    // process on the target host might genuinely not be answering *anywhere* right now — see
+    // resolveMysqlAdminHostOrUnreachable's own doc comment. Reporting that plainly here, instead
+    // of running the real query against a fallback address we already know won't work, is what
+    // stops this recurring background check from alerting about a misleading "can't reach this
+    // IP" on every native install (bind-address left at its loopback-only default) whenever
+    // MariaDB is simply still starting up or mid crash-recovery after an unclean shutdown.
+    const admin = await resolveMysqlAdminHostOrUnreachable(r.targetHostId, port, targetCred.user, targetCred.password, target.address);
+    if (!admin.reachable) {
+      updateReplicationStatus(
+        r.id,
+        "error",
+        "MariaDB/MySQL semble indisponible ou toujours en train de redémarrer sur la machine cible (aucune connexion possible pour l'instant) — nouvelle tentative au prochain contrôle."
+      );
+      return;
+    }
+    targetAdminHost = admin.host;
+  }
   const { stdout, code, stderr } = await runSshCommand(
     r.targetHostId,
     `${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)} -B -e "SHOW SLAVE STATUS"`,
