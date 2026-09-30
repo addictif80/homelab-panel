@@ -519,7 +519,7 @@ export default function HaPage() {
               ))}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-xs text-neutral-400">Machine source</label>
               <select
@@ -663,7 +663,7 @@ export default function HaPage() {
                 Optionnel — sans ça, les fichiers arrivent sur la machine cible appartenant au compte SSH dédié à la
                 réplication, pas forcément au compte qui fait tourner le serveur web là-bas.
               </p>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="mb-1 block text-xs text-neutral-400">Propriétaire sur la cible (user:groupe)</label>
                   <input
@@ -746,7 +746,7 @@ export default function HaPage() {
                 réplication dédié, jamais réutilisés ensuite. Si le mot de passe admin est différent sur la machine
                 cible, coche la case ci-dessous pour le préciser séparément — sinon celui-ci est réutilisé tel quel.
               </p>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="mb-1 block text-xs text-neutral-400">Port</label>
                   <input
@@ -789,7 +789,7 @@ export default function HaPage() {
                 Identifiants admin différents sur la machine cible
               </label>
               {differentTargetCreds && (
-                <div className="grid grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
                   <div>
                     <label className="mb-1 block text-xs text-neutral-400">Utilisateur admin (cible)</label>
                     <input
@@ -818,7 +818,7 @@ export default function HaPage() {
                 </p>
               )}
               {form.kind === "mysql" && (
-                <div className="grid grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
                   <div>
                     <label className="mb-1 block text-xs text-neutral-400">
                       Container Docker sur la machine source (optionnel)
@@ -853,7 +853,7 @@ export default function HaPage() {
                 </div>
               )}
               {form.kind === "mysql" && (
-                <div className="grid grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
                   <div className="col-span-2">
                     <p className="text-xs text-neutral-500">
                       Optionnel — identifiant de connexion de l&apos;application elle-même (différent de l&apos;admin
@@ -898,7 +898,7 @@ export default function HaPage() {
               succès, la machine cible est automatiquement branchée comme serveur de secours dans le failover NPM déjà
               existant pour cette redirection (bascule automatique si la source tombe).
             </p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="mb-1 block text-xs text-neutral-400">Redirection NPM à protéger</label>
                 <select
@@ -1051,7 +1051,7 @@ export default function HaPage() {
                   />
                 </div>
                 {(r.kind === "folder" || r.kind === "sqlite") && (
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="mb-1 block text-xs text-neutral-400">Chemin source</label>
                       <input
@@ -1071,7 +1071,7 @@ export default function HaPage() {
                   </div>
                 )}
                 {(r.kind === "folder" || r.kind === "sqlite") && (
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="mb-1 block text-xs text-neutral-400">Propriétaire sur la cible</label>
                       <input
@@ -1140,7 +1140,7 @@ export default function HaPage() {
                         className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 font-mono text-sm"
                       />
                     </div>
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div>
                         <label className="mb-1 block text-xs text-neutral-400">Port</label>
                         <input
@@ -1169,7 +1169,7 @@ export default function HaPage() {
                         />
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
                       <div>
                         <label className="mb-1 block text-xs text-neutral-400">Utilisateur admin (cible, si différent)</label>
                         <input
@@ -1193,7 +1193,7 @@ export default function HaPage() {
                 )}
                 {r.kind === "mysql" && (
                   <>
-                    <div className="grid grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
                       <div>
                         <label className="mb-1 block text-xs text-neutral-400">Container Docker (source)</label>
                         <input
@@ -1213,7 +1213,7 @@ export default function HaPage() {
                         />
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
                       <div>
                         <label className="mb-1 block text-xs text-neutral-400">Utilisateur applicatif</label>
                         <input
@@ -1240,7 +1240,7 @@ export default function HaPage() {
                     Branchement failover NPM — une fois enregistré, "Rebrancher le failover" applique la nouvelle
                     cible/port au reverse proxy.
                   </p>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="mb-1 block text-xs text-neutral-400">Redirection NPM à protéger</label>
                       <select

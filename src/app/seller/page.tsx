@@ -336,7 +336,7 @@ export default function SellerPage() {
 
       <section className="space-y-3 rounded border border-neutral-800 bg-neutral-900 p-4">
         <h2 className="text-sm font-semibold text-neutral-100">Configuration Stripe</h2>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="block">
             <span className="mb-1 block text-xs text-neutral-400">
               Clé secrète Stripe {hasSecretKey && <span className="text-emerald-500">(déjà définie)</span>}
@@ -429,7 +429,7 @@ export default function SellerPage() {
 
         <div>
           <p className="mb-2 text-xs font-semibold text-neutral-300">Offres proposées</p>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {PLAN_KEYS.map((k) => (
               <div key={k} className="rounded border border-neutral-700 p-3">
                 <label className="mb-2 flex items-center gap-2 text-sm text-neutral-200">

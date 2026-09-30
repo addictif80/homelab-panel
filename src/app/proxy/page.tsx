@@ -565,7 +565,7 @@ export default function ProxyPage() {
                   className={INPUT_CLASS}
                 />
               </label>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <label className="block">
                   <span className="mb-1 block text-xs text-neutral-400">Protocole</span>
                   <select
@@ -683,7 +683,7 @@ export default function ProxyPage() {
               </div>
 
               {failoverForm.mode === "server" ? (
-                <div className="grid grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <label className="block">
                     <span className="mb-1 block text-xs text-neutral-400">Protocole</span>
                     <select

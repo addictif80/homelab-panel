@@ -281,7 +281,7 @@ export default function DnsPage() {
 
       {editingId && activeZone && (
         <form onSubmit={submitForm} className="max-w-2xl space-y-3 rounded border border-neutral-800 p-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="block">
               <span className="mb-1 block text-xs text-neutral-400">Type</span>
               <select

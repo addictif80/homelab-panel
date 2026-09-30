@@ -439,7 +439,7 @@ export default function ProxmoxPage() {
             Crée une VM QEMU avec un disque, une carte réseau et éventuellement un ISO monté — pour tout réglage plus
             fin (BIOS, disques multiples...), édite-la ensuite depuis l&apos;UI Proxmox elle-même.
           </p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="block">
               <span className="mb-1 block text-xs text-neutral-400">Nœud Proxmox</span>
               <select
@@ -732,7 +732,7 @@ export default function ProxmoxPage() {
             {snapError && <p className="mb-2 text-sm text-red-400">{snapError}</p>}
 
             <form onSubmit={createSnapshot} className="mb-4 space-y-2 rounded border border-neutral-800 p-3">
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <input
                   value={newSnapName}
                   onChange={(e) => setNewSnapName(e.target.value)}

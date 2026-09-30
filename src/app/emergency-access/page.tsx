@@ -73,7 +73,7 @@ export default function EmergencyAccessPage() {
               Si tout correspond, l&apos;accès sera activé après un délai de sécurité — la personne concernée en sera avertie
               par email et pourra l&apos;annuler si nécessaire.
             </p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="mb-1 block text-sm text-neutral-300">Prénom</label>
                 <input className="input" value={firstName} onChange={(e) => setFirstName(e.target.value)} required />

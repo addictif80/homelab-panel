@@ -26,6 +26,25 @@ html {
 }
 body {
   touch-action: manipulation;
+  /* A single element wider than the viewport (an unwrapped table, a long unbreakable string in a
+     code/mono block) used to drag the *whole page* sideways on a phone — nothing here should
+     ever need that, so it's clipped at the body level as a safety net on top of fixing the
+     individual offenders below. */
+  overflow-x: hidden;
+}
+
+/* Every raw <table> across the app (host lists, run history, audit log...) used to be laid out
+   full-width with no way to shrink past its natural column widths — on a ~360-400px phone that
+   either crushed the text unreadably or pushed the table (and the page with it, before the rule
+   above) wider than the screen. overflow-x here makes the table itself a horizontal-scroll strip
+   when it doesn't fit — modern browsers apply overflow to a table element directly (this doesn't
+   need `display: block`, which would also strip out the table's own row/column layout and risk
+   misaligning header cells against body cells). Desktop is unaffected: a table that already fits
+   its container simply never triggers the scrollbar. */
+table {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 @theme inline {

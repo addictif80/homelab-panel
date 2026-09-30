@@ -1170,7 +1170,7 @@ function CreatePlanForm({
   return (
     <div className="space-y-3 rounded border border-neutral-800 bg-neutral-900 p-4">
       {editingPlan && <h2 className="text-sm font-semibold text-neutral-100">Modifier le plan</h2>}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label className="block">
           <span className="mb-1 block text-xs text-neutral-400">Nom du plan</span>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="ex: Configs Mailcow" className={INPUT_CLASS} />
@@ -1347,7 +1347,7 @@ function CreatePlanForm({
       )}
 
       {sourceType === "database" && (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="col-span-2 block">
             <span className="mb-1 block text-xs text-neutral-400">Installation</span>
             <select
@@ -1455,7 +1455,7 @@ function CreatePlanForm({
       )}
 
       {sourceType === "mailbox" && (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="col-span-2 block">
             <span className="mb-1 block text-xs text-neutral-400">Installation</span>
             <select
