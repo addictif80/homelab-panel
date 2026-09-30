@@ -103,7 +103,14 @@ function luaString(value: string): string {
  * sourced from `hostId`, then (re)starts the service — called after any change to make sure the
  * live config always matches what's configured in the panel. */
 async function reconcileLsyncdOnHost(hostId: number): Promise<void> {
-  const entries = listReplications().filter((r) => r.kind === "folder" && r.enabled && r.sourceHostId === hostId);
+  // Replications set to a fixed daily schedule (syncScheduleTime) manage their own rsync pass
+  // directly (see runScheduledFolderSync) and are deliberately left out of lsyncd's config —
+  // that's the whole point of that mode, trading lsyncd's continuous, near-instant propagation
+  // for one cheap pass a day on a site that doesn't need (and, in practice, couldn't afford) the
+  // former.
+  const entries = listReplications().filter(
+    (r) => r.kind === "folder" && r.enabled && r.sourceHostId === hostId && !r.syncScheduleTime
+  );
 
   if (entries.length === 0) {
     // Nothing left to sync from this host — stop and disable the service rather than leave it
@@ -169,6 +176,15 @@ export async function setupFolderReplication(r: Replication): Promise<void> {
   await ensureRsyncReachable(r.sourceHostId, r.targetHostId, keyPath);
   await ensureRemoteDir(r.sourceHostId, r.targetHostId, r.targetPath, keyPath);
 
+  // Scheduled mode never installs/touches lsyncd at all — it does its own rsync pass directly
+  // (see runScheduledFolderSync), so this first pass doubles as both the initial clone and the
+  // setup step's own completion check.
+  if (r.syncScheduleTime) {
+    updateReplicationStatus(r.id, "setting_up", "Clonage initial des fichiers vers la machine cible…");
+    await runScheduledFolderSync(r);
+    return;
+  }
+
   updateReplicationStatus(
     r.id,
     "setting_up",
@@ -187,6 +203,56 @@ export async function setupFolderReplication(r: Replication): Promise<void> {
   await reconcileLsyncdOnHost(r.sourceHostId);
 
   updateReplicationStatus(r.id, "in_sync", "lsyncd actif — synchronisation continue en cours.", true);
+}
+
+/** One rsync pass, source → target, for a replication set to a fixed daily schedule instead of
+ * continuous lsyncd — `--delete` keeps the target a true mirror (removals propagate too, not just
+ * additions/changes), and rsync's own delta-transfer means a day's worth of changes on an
+ * otherwise-large, mostly-static site costs a directory-tree comparison plus the actual diff, not
+ * a full retransfer. Reuses the same dedicated key/identity as continuous mode. */
+async function runScheduledFolderSync(r: Replication): Promise<void> {
+  const keyPath = await ensurePrivateKeyDeployed(r.sourceHostId);
+  const target = getHostConnectionInfo(r.targetHostId);
+  const sshOpts = `-i ${keyPath} -p ${target.port} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10`;
+  const extra = [`-e`, shellQuote(`ssh ${sshOpts}`)];
+  if (r.targetNeedsSudo) extra.push(`--rsync-path=${shellQuote("sudo rsync")}`);
+  if (r.targetOwner) extra.push(`--chown=${shellQuote(r.targetOwner)}`);
+  if (r.targetMode) extra.push(`--chmod=${shellQuote(r.targetMode)}`);
+  const cmd =
+    `rsync -az --delete ${extra.join(" ")} ` +
+    `${shellQuote(`${r.sourcePath}/`)} ${shellQuote(`${target.user}@${target.address}:${r.targetPath}/`)}`;
+  const { code, stderr } = await runSshCommand(r.sourceHostId, cmd, { timeoutMs: REVERSE_SYNC_TIMEOUT_MS });
+  if (code !== 0) {
+    updateReplicationStatus(r.id, "error", stderr || "Échec de la synchronisation planifiée.");
+    throw new Error(stderr || "Échec de la synchronisation planifiée.");
+  }
+  updateReplicationStatus(r.id, "in_sync", `Synchronisation planifiée effectuée (prochaine à ${r.syncScheduleTime}).`, true);
+}
+
+/** Has today's scheduled pass already run? Compares calendar dates in the server's local
+ * timezone — same one syncScheduleTime ("HH:MM") is entered and interpreted in — rather than UTC,
+ * so "tous les jours à 3h" means 3h local, not 3h UTC. */
+function alreadySyncedToday(lastSyncedAt: string | null): boolean {
+  if (!lastSyncedAt) return false;
+  const last = new Date(`${lastSyncedAt.replace(" ", "T")}Z`);
+  const now = new Date();
+  return (
+    last.getFullYear() === now.getFullYear() && last.getMonth() === now.getMonth() && last.getDate() === now.getDate()
+  );
+}
+
+/** Runs the scheduled pass if today's hasn't happened yet and the configured time has passed —
+ * called from the same ~30s scheduler tick as every other replication kind's check, so the actual
+ * trigger granularity is that tick interval, not to-the-minute. */
+async function checkScheduledFolderSync(r: Replication): Promise<void> {
+  if (alreadySyncedToday(r.lastSyncedAt)) return;
+  const [h, m] = (r.syncScheduleTime ?? "").split(":").map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return;
+  const now = new Date();
+  const dueMinutes = h * 60 + m;
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  if (nowMinutes < dueMinutes) return;
+  await runScheduledFolderSync(r);
 }
 
 /**
@@ -210,6 +276,15 @@ export async function reverseSyncFolderReplication(r: Replication): Promise<void
   const { code, stderr } = await runSshCommand(r.sourceHostId, cmd, { timeoutMs: REVERSE_SYNC_TIMEOUT_MS });
   if (code !== 0) throw new Error(stderr || "Échec de la resynchronisation depuis la machine cible.");
 
+  if (r.syncScheduleTime) {
+    updateReplicationStatus(
+      r.id,
+      "in_sync",
+      `Resynchronisé depuis la machine cible — réplication normale (source → cible) reprise (prochaine synchro planifiée à ${r.syncScheduleTime}).`,
+      true
+    );
+    return;
+  }
   updateReplicationStatus(r.id, "setting_up", "Reprise de la réplication normale…");
   await reconcileLsyncdOnHost(r.sourceHostId);
   updateReplicationStatus(r.id, "in_sync", "Resynchronisé depuis la machine cible — réplication normale (source → cible) reprise.", true);
@@ -223,8 +298,15 @@ export async function reconcileFolderReplicationsOnHost(hostId: number): Promise
 
 /** lsyncd runs continuously and pushes changes itself — there's nothing for this panel to trigger
  * on a timer, only status to observe: is the service actually up, and does its own status log show
- * anything alarming (a persistent rsync error would keep reappearing there). */
+ * anything alarming (a persistent rsync error would keep reappearing there). A replication on a
+ * fixed daily schedule instead has nothing continuous to observe — this is what actually performs
+ * its due pass, same as 'sqlite''s periodic copy. */
 export async function checkFolderReplicationStatus(r: Replication): Promise<void> {
+  if (r.syncScheduleTime) {
+    await checkScheduledFolderSync(r);
+    return;
+  }
+
   const { active, raw } = await serviceIsActive(r.sourceHostId, "lsyncd");
   if (!active) {
     // Same reasoning as reconcileLsyncdOnHost's setup-time error: "non actif" alone gives no way

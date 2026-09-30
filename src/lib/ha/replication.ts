@@ -31,6 +31,9 @@ export type Replication = {
    * direct access — and often no root SSH login either. Requires a passwordless sudoers rule for
    * rsync on the target for that account, set up manually (this panel won't touch sudoers itself). */
   targetNeedsSudo: boolean;
+  /** 'folder' only — a fixed daily time ("HH:MM", 24h) for a scheduled rsync pass instead of
+   * continuous lsyncd. Null (the default) keeps the original continuous behavior. */
+  syncScheduleTime: string | null;
   appDbUser: string | null;
   hasAppDbPassword: boolean;
   /** 'mysql' only — when set, every admin SQL command on the target host routes through
@@ -93,6 +96,7 @@ type ReplicationRow = {
   target_owner: string | null;
   target_mode: string | null;
   target_needs_sudo: number;
+  sync_schedule_time: string | null;
   app_db_user: string | null;
   app_db_password_encrypted: string | null;
   target_db_container: string | null;
@@ -125,6 +129,7 @@ function rowToReplication(row: ReplicationRow): Replication {
     targetOwner: row.target_owner,
     targetMode: row.target_mode,
     targetNeedsSudo: row.target_needs_sudo === 1,
+    syncScheduleTime: row.sync_schedule_time,
     appDbUser: row.app_db_user,
     hasAppDbPassword: !!row.app_db_password_encrypted,
     targetDbContainer: row.target_db_container,
@@ -199,6 +204,8 @@ export type CreateReplicationInput = {
   targetMode?: string;
   /** 'folder' only — run the target-side rsync through sudo (see Replication.targetNeedsSudo). */
   targetNeedsSudo?: boolean;
+  /** 'folder' only — see Replication.syncScheduleTime. Unset/empty keeps continuous lsyncd. */
+  syncScheduleTime?: string;
   /** 'mysql' only — the application's own database login, created/updated on the target with the
    * same password so it can connect there after a failover (separate from dbUser/dbPassword, the
    * admin credential used only during setup). PostgreSQL needs no equivalent: pg_basebackup
@@ -216,8 +223,8 @@ export function createReplication(input: CreateReplicationInput): Replication {
   const id = randomUUID();
   getDb()
     .prepare(
-      `INSERT INTO ha_replications (id, name, kind, source_host_id, target_host_id, source_path, target_path, db_port, db_user, db_password_encrypted, target_db_user, target_db_password_encrypted, proxy_host_id, target_port, target_owner, target_mode, target_needs_sudo, app_db_user, app_db_password_encrypted, target_db_container, source_db_container)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO ha_replications (id, name, kind, source_host_id, target_host_id, source_path, target_path, db_port, db_user, db_password_encrypted, target_db_user, target_db_password_encrypted, proxy_host_id, target_port, target_owner, target_mode, target_needs_sudo, sync_schedule_time, app_db_user, app_db_password_encrypted, target_db_container, source_db_container)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -237,6 +244,7 @@ export function createReplication(input: CreateReplicationInput): Replication {
       input.targetOwner?.trim() || null,
       input.targetMode?.trim() || null,
       input.targetNeedsSudo ? 1 : 0,
+      input.syncScheduleTime?.trim() || null,
       input.appDbUser?.trim() || null,
       input.appDbPassword ? vaultEncrypt(input.appDbPassword) : null,
       input.targetDbContainer?.trim() || null,
@@ -277,6 +285,7 @@ export function duplicateReplication(id: string): Replication | null {
     targetOwner: original.targetOwner ?? undefined,
     targetMode: original.targetMode ?? undefined,
     targetNeedsSudo: original.targetNeedsSudo,
+    syncScheduleTime: original.syncScheduleTime ?? undefined,
     appDbUser: original.appDbUser ?? undefined,
     appDbPassword: secrets.appDbPassword ?? undefined,
     targetDbContainer: original.targetDbContainer ?? undefined,
@@ -306,6 +315,8 @@ export type UpdateReplicationInput = {
   targetOwner?: string | null;
   targetMode?: string | null;
   targetNeedsSudo?: boolean;
+  /** 'folder' only — see Replication.syncScheduleTime. Empty string clears it back to continuous. */
+  syncScheduleTime?: string | null;
   appDbUser?: string | null;
   appDbPassword?: string;
   targetDbContainer?: string | null;
@@ -325,7 +336,7 @@ export function updateReplication(id: string, input: UpdateReplicationInput): vo
     `UPDATE ha_replications SET
        name = ?, source_path = ?, target_path = ?, db_port = ?, db_user = ?, db_password_encrypted = ?,
        target_db_user = ?, target_db_password_encrypted = ?, target_owner = ?, target_mode = ?, target_needs_sudo = ?,
-       app_db_user = ?, app_db_password_encrypted = ?, target_db_container = ?, source_db_container = ?
+       sync_schedule_time = ?, app_db_user = ?, app_db_password_encrypted = ?, target_db_container = ?, source_db_container = ?
      WHERE id = ?`
   ).run(
     input.name !== undefined ? input.name.trim() : row.name,
@@ -339,6 +350,7 @@ export function updateReplication(id: string, input: UpdateReplicationInput): vo
     input.targetOwner !== undefined ? input.targetOwner?.trim() || null : row.target_owner,
     input.targetMode !== undefined ? input.targetMode?.trim() || null : row.target_mode,
     input.targetNeedsSudo !== undefined ? (input.targetNeedsSudo ? 1 : 0) : row.target_needs_sudo,
+    input.syncScheduleTime !== undefined ? input.syncScheduleTime?.trim() || null : row.sync_schedule_time,
     input.appDbUser !== undefined ? input.appDbUser?.trim() || null : row.app_db_user,
     input.appDbPassword ? vaultEncrypt(input.appDbPassword) : row.app_db_password_encrypted,
     input.targetDbContainer !== undefined ? input.targetDbContainer?.trim() || null : row.target_db_container,

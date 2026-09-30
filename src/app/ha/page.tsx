@@ -22,6 +22,7 @@ type Replication = {
   targetOwner: string | null;
   targetMode: string | null;
   targetNeedsSudo: boolean;
+  syncScheduleTime: string | null;
   appDbUser: string | null;
   targetDbContainer: string | null;
   sourceDbContainer: string | null;
@@ -84,6 +85,7 @@ const EMPTY_FORM = {
   targetOwner: "",
   targetMode: "",
   targetNeedsSudo: false,
+  syncScheduleTime: "",
   appDbUser: "",
   appDbPassword: "",
   targetDbContainer: "",
@@ -106,6 +108,7 @@ const EMPTY_EDIT_FORM = {
   targetOwner: "",
   targetMode: "",
   targetNeedsSudo: false,
+  syncScheduleTime: "",
   appDbUser: "",
   appDbPassword: "",
   targetDbContainer: "",
@@ -379,6 +382,7 @@ export default function HaPage() {
       targetOwner: r.targetOwner ?? "",
       targetMode: r.targetMode ?? "",
       targetNeedsSudo: r.targetNeedsSudo,
+      syncScheduleTime: r.syncScheduleTime ?? "",
       appDbUser: r.appDbUser ?? "",
       appDbPassword: "",
       targetDbContainer: r.targetDbContainer ?? "",
@@ -413,6 +417,7 @@ export default function HaPage() {
           targetOwner: editForm.targetOwner,
           targetMode: editForm.targetMode,
           targetNeedsSudo: r.kind === "folder" ? editForm.targetNeedsSudo : undefined,
+          syncScheduleTime: r.kind === "folder" ? editForm.syncScheduleTime : undefined,
           appDbUser: editForm.appDbUser,
           appDbPassword: editForm.appDbPassword || undefined,
           targetDbContainer: editForm.targetDbContainer,
@@ -698,6 +703,40 @@ export default function HaPage() {
                   </span>
                 </label>
               )}
+              {form.kind === "folder" && (
+                <div className="space-y-2 rounded border border-neutral-800 p-3">
+                  <label className="mb-1 block text-xs text-neutral-400">Mode de synchronisation</label>
+                  <select
+                    value={form.syncScheduleTime ? "scheduled" : "continuous"}
+                    onChange={(e) => setForm({ ...form, syncScheduleTime: e.target.value === "scheduled" ? "03:00" : "" })}
+                    className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                  >
+                    <option value="continuous">Continu (lsyncd — propagation quasi immédiate)</option>
+                    <option value="scheduled">Planifié (un seul passage rsync par jour)</option>
+                  </select>
+                  {form.syncScheduleTime ? (
+                    <>
+                      <label className="mb-1 block text-xs text-neutral-400">Heure du passage quotidien</label>
+                      <input
+                        type="time"
+                        value={form.syncScheduleTime}
+                        onChange={(e) => setForm({ ...form, syncScheduleTime: e.target.value })}
+                        className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                      />
+                      <p className="text-xs text-neutral-500">
+                        Un seul rsync complet par jour à cette heure, au lieu d&apos;un resync continu à chaque
+                        changement de fichier — recommandé pour un site volumineux ou avec beaucoup d&apos;écritures
+                        (cache, sessions…), pour qui lsyncd finit par saturer le CPU de la machine source.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-xs text-neutral-500">
+                      lsyncd surveille le dossier en continu et repousse chaque changement en quasi temps réel — idéal
+                      pour un petit site, coûteux en CPU sur un site gros ou très écrit.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
           {isDbKind && (
@@ -917,6 +956,14 @@ export default function HaPage() {
                     </>
                   )}
                 </p>
+                {r.kind === "folder" && (
+                  <p className="mt-0.5 text-xs text-neutral-600">
+                    Mode :{" "}
+                    <span className="text-neutral-400">
+                      {r.syncScheduleTime ? `Planifié, tous les jours à ${r.syncScheduleTime}` : "Continu (lsyncd)"}
+                    </span>
+                  </p>
+                )}
                 {r.proxyHostId && (
                   <p className="mt-0.5 text-xs text-neutral-600">
                     Failover NPM : <span className="text-neutral-400">{proxyHostLabel(r.proxyHostId)}</span>
@@ -1054,6 +1101,32 @@ export default function HaPage() {
                     />
                     Le compte SSH cible a besoin de sudo pour écrire (CyberPanel, cPanel, Plesk…)
                   </label>
+                )}
+                {r.kind === "folder" && (
+                  <div className="space-y-2 rounded border border-neutral-800 p-3">
+                    <label className="mb-1 block text-xs text-neutral-400">Mode de synchronisation</label>
+                    <select
+                      value={editForm.syncScheduleTime ? "scheduled" : "continuous"}
+                      onChange={(e) =>
+                        setEditForm({ ...editForm, syncScheduleTime: e.target.value === "scheduled" ? "03:00" : "" })
+                      }
+                      className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                    >
+                      <option value="continuous">Continu (lsyncd — propagation quasi immédiate)</option>
+                      <option value="scheduled">Planifié (un seul passage rsync par jour)</option>
+                    </select>
+                    {editForm.syncScheduleTime && (
+                      <>
+                        <label className="mb-1 block text-xs text-neutral-400">Heure du passage quotidien</label>
+                        <input
+                          type="time"
+                          value={editForm.syncScheduleTime}
+                          onChange={(e) => setEditForm({ ...editForm, syncScheduleTime: e.target.value })}
+                          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                        />
+                      </>
+                    )}
+                  </div>
                 )}
                 {(r.kind === "mysql" || r.kind === "postgres") && (
                   <>

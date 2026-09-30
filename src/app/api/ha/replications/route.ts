@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
     targetOwner?: string;
     targetMode?: string;
     targetNeedsSudo?: boolean;
+    syncScheduleTime?: string;
     appDbUser?: string;
     appDbPassword?: string;
     targetDbContainer?: string;
@@ -77,6 +78,7 @@ export async function POST(req: NextRequest) {
     targetOwner: body.targetOwner,
     targetMode: body.targetMode,
     targetNeedsSudo: body.targetNeedsSudo,
+    syncScheduleTime: body.syncScheduleTime,
     appDbUser: body.appDbUser,
     appDbPassword: body.appDbPassword,
     targetDbContainer: body.targetDbContainer,

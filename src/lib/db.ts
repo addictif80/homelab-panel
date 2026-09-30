@@ -968,6 +968,17 @@ export function migrate(db: Database.Database) {
     db.exec(`ALTER TABLE ha_replications ADD COLUMN target_needs_sudo INTEGER NOT NULL DEFAULT 0`);
   }
 
+  // 'folder' only, optional — a fixed wall-clock time ("HH:MM") for a once-daily rsync pass
+  // instead of continuous lsyncd. Null (the default, unchanged for every replication created
+  // before this) keeps the original continuous behavior. Added because lsyncd's delay=1 config
+  // (near-instant resync on every filesystem event, no exclusions) turned out to pin a source
+  // host's CPU continuously on a large, actively-written site — bad enough in one real case to
+  // make SSH itself unresponsive — whereas most sites' uploads don't actually need sub-second
+  // propagation and are far cheaper to reconcile once a day.
+  if (!haReplicationColumns.some((c) => c.name === "sync_schedule_time")) {
+    db.exec(`ALTER TABLE ha_replications ADD COLUMN sync_schedule_time TEXT`);
+  }
+
   // Optional fixed wall-clock time (e.g. "03:00") for daily/weekly plans — null keeps the original
   // elapsed-time-since-last-run behavior (checked every 15 min, no fixed hour) for every plan
   // created before this and for anyone who doesn't set one.

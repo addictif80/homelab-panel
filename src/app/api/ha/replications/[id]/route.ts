@@ -28,6 +28,7 @@ const EDIT_FIELDS = [
   "targetOwner",
   "targetMode",
   "targetNeedsSudo",
+  "syncScheduleTime",
   "appDbUser",
   "appDbPassword",
   "targetDbContainer",
