@@ -1026,9 +1026,11 @@ export function migrate(db: Database.Database) {
         retention_count INTEGER NOT NULL DEFAULT 7,
         enabled INTEGER NOT NULL DEFAULT 1,
         at_time TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        bwlimit_kbps INTEGER
       );
-      INSERT INTO backup_plans_new SELECT * FROM backup_plans;
+      INSERT INTO backup_plans_new (id, name, source_host_id, source_type, source_config, dest_host_id, dest_path, schedule, retention_count, enabled, at_time, created_at, bwlimit_kbps)
+      SELECT id, name, source_host_id, source_type, source_config, dest_host_id, dest_path, schedule, retention_count, enabled, at_time, created_at, bwlimit_kbps FROM backup_plans;
       DROP TABLE backup_plans;
       ALTER TABLE backup_plans_new RENAME TO backup_plans;
       COMMIT;
