@@ -18,13 +18,16 @@ type ProxyHost = {
 type FailoverConfig = {
   proxyHostId: number;
   mode: "server" | "page";
+  hasServer: boolean;
   backupScheme: "http" | "https";
   backupHost: string;
   backupPort: number;
   backupPath: string;
+  backupSource: "manual" | "ha" | "default";
+  hasPage: boolean;
   maintenanceHtml: string | null;
   enabled: boolean;
-  lastStatus: "unknown" | "primary" | "failover" | "error";
+  lastStatus: "unknown" | "primary" | "failover" | "failover_page" | "error";
   lastCheckedAt: string | null;
   lastError: string | null;
 };
@@ -407,6 +410,8 @@ export default function ProxyPage() {
 
       {configured && (
         <>
+          <FailoverDefaultsCard />
+
           <button
             onClick={() => setShowCreate((s) => !s)}
             className="rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-200 hover:bg-neutral-800"
@@ -643,7 +648,7 @@ export default function ProxyPage() {
                     className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
                       failover.lastStatus === "primary"
                         ? "bg-emerald-900/40 text-emerald-300"
-                        : failover.lastStatus === "failover"
+                        : failover.lastStatus === "failover" || failover.lastStatus === "failover_page"
                           ? "bg-amber-900/40 text-amber-300"
                           : failover.lastStatus === "error"
                             ? "bg-red-900/40 text-red-300"
@@ -653,19 +658,28 @@ export default function ProxyPage() {
                     {failover.lastStatus === "primary"
                       ? "Inactif (primaire OK)"
                       : failover.lastStatus === "failover"
-                        ? `Actif vers ${failover.mode === "page" ? "la page de maintenance" : `${failover.backupScheme}://${failover.backupHost}:${failover.backupPort}${failover.backupPath}`}`
-                        : failover.lastStatus === "error"
-                          ? "Primaire et secours injoignables"
-                          : "Statut inconnu"}
+                        ? `Actif vers ${failover.backupScheme}://${failover.backupHost}:${failover.backupPort}${failover.backupPath}`
+                        : failover.lastStatus === "failover_page"
+                          ? "Actif vers la page de maintenance"
+                          : failover.lastStatus === "error"
+                            ? "Primaire et secours injoignables"
+                            : "Statut inconnu"}
                   </span>
                 )}
               </div>
               <p className="text-xs text-neutral-500">
                 Ajoute un bloc nginx dans la config avancée : si la cible principale répond en erreur (502/503/504),
-                nginx bascule automatiquement et immédiatement, sans intervention du panel. Une vérification
-                périodique (badge ci-dessus) affiche juste l&apos;état actuel.
+                nginx bascule automatiquement et immédiatement, sans intervention du panel — puis, si le serveur de
+                secours répond lui aussi en erreur, sur la page de maintenance quand une est configurée. Une
+                vérification périodique (badge ci-dessus) affiche juste l&apos;état actuel.
                 {failover?.lastCheckedAt && ` Dernière vérification : ${parseSqliteUtc(failover.lastCheckedAt).toLocaleString("fr-FR")}.`}
               </p>
+              {failover?.hasServer && failover.backupSource === "ha" && (
+                <p className="rounded border border-blue-900 bg-blue-950/30 p-2 text-xs text-blue-300">
+                  Le serveur de secours est géré automatiquement par une réplication HA — l&apos;enregistrer ici le
+                  remplacera par une valeur fixe (la réplication ne le rebranchera pas tout seul).
+                </p>
+              )}
 
               <div className="flex gap-1.5 text-xs">
                 <button
@@ -776,6 +790,170 @@ export default function ProxyPage() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type FailoverDefaults = { server: { scheme: "http" | "https"; host: string; port: number; path?: string } | null; html: string | null };
+type ApplyAllResult = { applied: number; haPreserved: string[]; failed: { host: string; error: string }[] };
+
+/**
+ * Configures the backup server / maintenance page *once* and pushes it to every NPM proxy host in
+ * one click, instead of repeating the same setup per host. A host whose backup server is already
+ * owned by an HA replication (lib/ha/failoverWiring.ts) keeps that specific target untouched — the
+ * chain becomes primaire → cible HA → page de maintenance par défaut for those, and primaire → page
+ * de maintenance par défaut for everything else (or primaire → serveur par défaut → page, if a
+ * default backup server is also set here).
+ */
+function FailoverDefaultsCard() {
+  const [open, setOpen] = useState(false);
+  const [useServer, setUseServer] = useState(false);
+  const [scheme, setScheme] = useState<"http" | "https">("http");
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState(80);
+  const [path, setPath] = useState("/");
+  const [useHtml, setUseHtml] = useState(true);
+  const [html, setHtml] = useState(DEFAULT_MAINTENANCE_HTML);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState<ApplyAllResult | null>(null);
+
+  useEffect(() => {
+    fetch("/api/npm/failover-defaults")
+      .then((r) => r.json())
+      .then((d) => {
+        const defaults = d.defaults as FailoverDefaults;
+        if (defaults?.server) {
+          setUseServer(true);
+          setScheme(defaults.server.scheme);
+          setHost(defaults.server.host);
+          setPort(defaults.server.port);
+          setPath(defaults.server.path || "/");
+        }
+        if (defaults?.html) {
+          setUseHtml(true);
+          setHtml(defaults.html);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  async function applyAll() {
+    if (!useServer && !useHtml) {
+      setError("Active au moins le serveur de secours par défaut ou la page de maintenance.");
+      return;
+    }
+    if (useServer && !host.trim()) {
+      setError("Adresse du serveur de secours par défaut requise.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setResult(null);
+    try {
+      const res = await fetch("/api/npm/failover-defaults/apply-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scheme: useServer ? scheme : undefined,
+          host: useServer ? host.trim() : undefined,
+          port: useServer ? port : undefined,
+          path: useServer ? path : undefined,
+          html: useHtml ? html : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setResult(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded border border-neutral-800 bg-neutral-900">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between px-4 py-3 text-left"
+      >
+        <div>
+          <h2 className="text-sm font-semibold text-neutral-100">Failover par défaut (tous les hôtes)</h2>
+          <p className="mt-0.5 text-xs text-neutral-500">
+            Configure une fois, applique à tous — au lieu de brancher chaque redirection une par une.
+          </p>
+        </div>
+        <span className="text-xs text-neutral-500">{open ? "Masquer" : "Configurer"}</span>
+      </button>
+
+      {open && (
+        <div className="space-y-3 border-t border-neutral-800 p-4">
+          <p className="text-xs text-neutral-500">
+            Ordre de bascule par site : le primaire, puis — s&apos;il existe — le serveur cible d&apos;une réplication
+            HA branchée sur ce site (prioritaire, jamais remplacé par ce qui suit), sinon le serveur de secours par
+            défaut ci-dessous s&apos;il est activé, puis en dernier recours la page de maintenance par défaut.
+          </p>
+
+          <label className="flex items-center gap-2 text-sm text-neutral-300">
+            <input type="checkbox" checked={useServer} onChange={(e) => setUseServer(e.target.checked)} />
+            Serveur de secours par défaut
+          </label>
+          {useServer && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+              <label className="block">
+                <span className="mb-1 block text-xs text-neutral-400">Schéma</span>
+                <select value={scheme} onChange={(e) => setScheme(e.target.value as "http" | "https")} className={INPUT_CLASS}>
+                  <option value="http">http</option>
+                  <option value="https">https</option>
+                </select>
+              </label>
+              <label className="block sm:col-span-2">
+                <span className="mb-1 block text-xs text-neutral-400">Hôte</span>
+                <input value={host} onChange={(e) => setHost(e.target.value)} placeholder="100.x.x.x" className={INPUT_CLASS} />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs text-neutral-400">Port</span>
+                <input type="number" value={port} onChange={(e) => setPort(Number(e.target.value))} className={INPUT_CLASS} />
+              </label>
+              <label className="block sm:col-span-4">
+                <span className="mb-1 block text-xs text-neutral-400">Chemin</span>
+                <input value={path} onChange={(e) => setPath(e.target.value)} className={INPUT_CLASS} />
+              </label>
+            </div>
+          )}
+
+          <label className="flex items-center gap-2 text-sm text-neutral-300">
+            <input type="checkbox" checked={useHtml} onChange={(e) => setUseHtml(e.target.checked)} />
+            Page de maintenance par défaut
+          </label>
+          {useHtml && (
+            <textarea
+              value={html}
+              onChange={(e) => setHtml(e.target.value)}
+              rows={6}
+              className={`${INPUT_CLASS} font-mono text-xs`}
+            />
+          )}
+
+          {error && <p className="text-sm text-red-400">{error}</p>}
+          {result && (
+            <p className="rounded border border-emerald-900 bg-emerald-950/30 p-2 text-xs text-emerald-300">
+              Appliqué à {result.applied} hôte(s).
+              {result.haPreserved.length > 0 && ` Serveur HA préservé pour : ${result.haPreserved.join(", ")}.`}
+              {result.failed.length > 0 && ` Échecs : ${result.failed.map((f) => `${f.host} (${f.error})`).join(", ")}.`}
+            </p>
+          )}
+
+          <button
+            onClick={applyAll}
+            disabled={busy}
+            className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60 disabled:opacity-50"
+          >
+            {busy ? "Application..." : "Appliquer à tous les hôtes"}
+          </button>
         </div>
       )}
     </div>

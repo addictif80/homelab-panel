@@ -34,9 +34,7 @@ export async function wireFailoverForReplication(r: Replication): Promise<void> 
 
   const proxyHost = await getProxyHost(r.proxyHostId);
   await applyFailover(r.proxyHostId, {
-    mode: "server",
-    scheme: proxyHost.forwardScheme,
-    host: address,
-    port: r.targetPort || proxyHost.forwardPort,
+    server: { scheme: proxyHost.forwardScheme, host: address, port: r.targetPort || proxyHost.forwardPort },
+    source: "ha",
   });
 }

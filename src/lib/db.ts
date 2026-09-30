@@ -652,10 +652,11 @@ export function migrate(db: Database.Database) {
       backup_host TEXT NOT NULL,
       backup_port INTEGER NOT NULL,
       enabled INTEGER NOT NULL DEFAULT 1,
-      last_status TEXT NOT NULL DEFAULT 'unknown' CHECK (last_status IN ('unknown','primary','failover','error')),
+      last_status TEXT NOT NULL DEFAULT 'unknown' CHECK (last_status IN ('unknown','primary','failover','failover_page','error')),
       last_checked_at TEXT,
       last_error TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      backup_source TEXT NOT NULL DEFAULT 'manual' CHECK (backup_source IN ('manual','ha','default'))
     );
 
     -- Private scratchpad on Vue d'ensemble — one per user (keyed by username, same identity the
@@ -1185,6 +1186,57 @@ export function migrate(db: Database.Database) {
     // successful reverse sync for the linked HA replication or by manually dismissing the reminder.
     db.exec(`ALTER TABLE proxy_failovers ADD COLUMN needs_resync_reminder INTEGER NOT NULL DEFAULT 0`);
     db.exec(`ALTER TABLE proxy_failovers ADD COLUMN last_failback_at TEXT`);
+  }
+  if (!proxyFailoverColumns.some((c) => c.name === "backup_source")) {
+    // Who set the current backup-server tier (backup_scheme/host/port), so the "appliquer à tous"
+    // bulk action (lib/npmFailover.ts's applyDefaultFailoverToAll) knows which hosts it's safe to
+    // overwrite: 'ha' means an HA replication (lib/ha/failoverWiring.ts) wired this host's specific
+    // target in — that always takes precedence and is never clobbered by the generic default; 'manual'
+    // is a value set by hand in this host's own failover form; 'default' is a value the bulk action
+    // itself filled in for a host with no more specific backup, and can freely be replaced by a later
+    // bulk run. The maintenance-page tier (maintenance_html) has no equivalent provenance — every
+    // host's page fallback is always whatever the bulk action last set, since there is no
+    // "site-specific" source for it the way an HA target is a site-specific server backup.
+    db.exec(`ALTER TABLE proxy_failovers ADD COLUMN backup_source TEXT NOT NULL DEFAULT 'manual' CHECK (backup_source IN ('manual','ha','default'))`);
+  }
+
+  // Same create-copy-drop-rename dance as backup_plans/mail_log_sources above — widening
+  // last_status's CHECK to add 'failover_page' (a host whose primary is down and whose backup
+  // *server* is also down/absent, now serving the static maintenance page as the last resort in
+  // the chain, distinct from 'failover' which means the backup server itself is answering).
+  const proxyFailoversTableSql = (
+    db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'proxy_failovers'`).get() as
+      | { sql: string }
+      | undefined
+  )?.sql;
+  if (proxyFailoversTableSql && !proxyFailoversTableSql.includes("'failover_page'")) {
+    db.pragma("foreign_keys = OFF");
+    db.exec(`
+      BEGIN;
+      CREATE TABLE proxy_failovers_new (
+        proxy_host_id INTEGER PRIMARY KEY,
+        backup_scheme TEXT NOT NULL,
+        backup_host TEXT NOT NULL,
+        backup_port INTEGER NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_status TEXT NOT NULL DEFAULT 'unknown' CHECK (last_status IN ('unknown','primary','failover','failover_page','error')),
+        last_checked_at TEXT,
+        last_error TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        mode TEXT NOT NULL DEFAULT 'server',
+        maintenance_html TEXT,
+        backup_path TEXT NOT NULL DEFAULT '/',
+        needs_resync_reminder INTEGER NOT NULL DEFAULT 0,
+        last_failback_at TEXT,
+        backup_source TEXT NOT NULL DEFAULT 'manual' CHECK (backup_source IN ('manual','ha','default'))
+      );
+      INSERT INTO proxy_failovers_new (proxy_host_id, backup_scheme, backup_host, backup_port, enabled, last_status, last_checked_at, last_error, created_at, mode, maintenance_html, backup_path, needs_resync_reminder, last_failback_at, backup_source)
+      SELECT proxy_host_id, backup_scheme, backup_host, backup_port, enabled, last_status, last_checked_at, last_error, created_at, mode, maintenance_html, backup_path, needs_resync_reminder, last_failback_at, backup_source FROM proxy_failovers;
+      DROP TABLE proxy_failovers;
+      ALTER TABLE proxy_failovers_new RENAME TO proxy_failovers;
+      COMMIT;
+    `);
+    db.pragma("foreign_keys = ON");
   }
 
   ensureVaultKdfSalt(db);
