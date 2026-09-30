@@ -198,7 +198,7 @@ export function migrate(db: Database.Database) {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       source_host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
-      source_type TEXT NOT NULL CHECK (source_type IN ('paths','docker','database','proxmox_vm')),
+      source_type TEXT NOT NULL CHECK (source_type IN ('paths','docker','database','proxmox_vm','panel_config','mailbox')),
       source_config TEXT NOT NULL,
       dest_host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
       dest_path TEXT NOT NULL,
@@ -986,6 +986,66 @@ export function migrate(db: Database.Database) {
   if (!backupPlanColumns.some((c) => c.name === "at_time")) {
     db.exec(`ALTER TABLE backup_plans ADD COLUMN at_time TEXT`);
   }
+
+  // Same create-copy-drop-rename dance as mail_log_sources above — SQLite can't ALTER a CHECK
+  // constraint, and an existing install's backup_plans table still enforces whatever list was
+  // baked in when it was first created. 'panel_config' was already usable in code (lib/backup's
+  // engine and sources/panelConfig.ts) but had never actually been added here, so creating one of
+  // those plans has been silently failing the INSERT's CHECK on every install until this; caught
+  // and fixed at the same time 'mailbox' is added rather than as a separate migration.
+  const backupPlansTableSql = (
+    db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'backup_plans'`).get() as
+      | { sql: string }
+      | undefined
+  )?.sql;
+  if (backupPlansTableSql && !backupPlansTableSql.includes("'mailbox'")) {
+    // backup_runs/restore_drills/resurrection_jobs.plan_id all REFERENCE backup_plans(id) — foreign
+    // keys have to come off for the recreate (a DROP TABLE would otherwise cascade-delete every
+    // run/drill row tied to an existing plan) and back on right after.
+    db.pragma("foreign_keys = OFF");
+    db.exec(`
+      BEGIN;
+      CREATE TABLE backup_plans_new (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        source_host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+        source_type TEXT NOT NULL CHECK (source_type IN ('paths','docker','database','proxmox_vm','panel_config','mailbox')),
+        source_config TEXT NOT NULL,
+        dest_host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+        dest_path TEXT NOT NULL,
+        schedule TEXT NOT NULL DEFAULT 'manual' CHECK (schedule IN ('manual','hourly','daily','weekly')),
+        retention_count INTEGER NOT NULL DEFAULT 7,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        at_time TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO backup_plans_new SELECT * FROM backup_plans;
+      DROP TABLE backup_plans;
+      ALTER TABLE backup_plans_new RENAME TO backup_plans;
+      COMMIT;
+    `);
+    db.pragma("foreign_keys = ON");
+  }
+
+  // One row per mailbox backup→restore or live migration run (lib/mail/migration.ts) — kept
+  // separate from backup_runs since a migration moves mail directly between two live mail
+  // servers (dump on the source, rsync across, restore on the destination, all in one job) rather
+  // than producing a snapshot under some backup_plans row the way every other backup source does.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS mail_migrations (
+      id TEXT PRIMARY KEY,
+      source_host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+      source_container TEXT,
+      source_mailbox TEXT NOT NULL,
+      dest_host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+      dest_container TEXT,
+      dest_mailbox TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','success','failed')),
+      log TEXT NOT NULL DEFAULT '',
+      started_at TEXT NOT NULL DEFAULT (datetime('now')),
+      finished_at TEXT
+    );
+  `);
 
   const hostColumns = db.prepare(`PRAGMA table_info(hosts)`).all() as { name: string }[];
   if (!hostColumns.some((c) => c.name === "needs_sudo")) {

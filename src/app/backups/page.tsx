@@ -5,7 +5,7 @@ import DirectoryPicker from "@/components/DirectoryPicker";
 import { parseSqliteUtc } from "@/lib/sqliteDate";
 
 type Host = { id: number; name: string; kind: string; docker_enabled: number; proxmox_node: string | null };
-type SourceType = "paths" | "docker" | "database" | "proxmox_vm" | "panel_config";
+type SourceType = "paths" | "docker" | "database" | "proxmox_vm" | "panel_config" | "mailbox";
 type Schedule = "manual" | "hourly" | "daily" | "weekly";
 
 type BackupRun = {
@@ -58,6 +58,7 @@ const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
   database: "Base de données",
   proxmox_vm: "VM / CT Proxmox",
   panel_config: "Configuration du panel",
+  mailbox: "Boîte(s) mail",
 };
 
 const SCHEDULE_LABELS: Record<Schedule, string> = {
@@ -88,6 +89,7 @@ export default function BackupsPage() {
   const [cancelling, setCancelling] = useState(false);
   const [activeRun, setActiveRun] = useState<BackupRun | null>(null);
   const [restoring, setRestoring] = useState<{ plan: BackupPlan; run: BackupRun; path: string } | null>(null);
+  const [restoringMailbox, setRestoringMailbox] = useState<{ plan: BackupPlan; run: BackupRun } | null>(null);
   const [importingRunId, setImportingRunId] = useState<string | null>(null);
   const [importMsg, setImportMsg] = useState("");
   const [resurrecting, setResurrecting] = useState<BackupPlan | null>(null);
@@ -389,6 +391,13 @@ export default function BackupsPage() {
                                   >
                                     {importingRunId === run.id ? "Import..." : "Importer dans le panel"}
                                   </button>
+                                ) : plan.sourceType === "mailbox" ? (
+                                  <button
+                                    onClick={() => setRestoringMailbox({ plan, run })}
+                                    className="rounded border border-amber-800 bg-amber-950/30 px-1.5 py-0.5 text-amber-300 hover:bg-amber-950/60"
+                                  >
+                                    Restaurer une boîte mail
+                                  </button>
                                 ) : (
                                   run.paths.map((p) => (
                                     <button
@@ -478,6 +487,29 @@ export default function BackupsPage() {
         />
       )}
 
+      {restoringMailbox && (
+        <MailboxRestoreModal
+          hosts={hosts}
+          plan={restoringMailbox.plan}
+          run={restoringMailbox.run}
+          onClose={() => setRestoringMailbox(null)}
+          onStarted={(runId) => {
+            setRestoringMailbox(null);
+            setActiveRunId(runId);
+            setActiveRun({
+              id: runId,
+              planId: restoringMailbox.plan.id,
+              status: "running",
+              log: "",
+              snapshotPath: null,
+              paths: [],
+              startedAt: new Date().toISOString(),
+              finishedAt: null,
+            });
+          }}
+        />
+      )}
+
       {resurrecting && (
         <ResurrectModal
           hosts={hosts}
@@ -507,6 +539,8 @@ export default function BackupsPage() {
       )}
 
       {drillJobId && <DrillJobPanel drillId={drillJobId} onClose={() => setDrillJobId(null)} />}
+
+      <MailMigrationSection hosts={hosts} />
     </div>
   );
 }
@@ -659,6 +693,126 @@ function RestoreModal({
   );
 }
 
+function MailboxRestoreModal({
+  hosts,
+  plan,
+  run,
+  onClose,
+  onStarted,
+}: {
+  hosts: Host[];
+  plan: BackupPlan;
+  run: BackupRun;
+  onClose: () => void;
+  onStarted: (runId: string) => void;
+}) {
+  const [mailbox, setMailbox] = useState("");
+  const [targetHostId, setTargetHostId] = useState(plan.sourceHostId);
+  const [targetDeployment, setTargetDeployment] = useState<"docker" | "native">("docker");
+  const [targetContainerId, setTargetContainerId] = useState("");
+  const [targetMailbox, setTargetMailbox] = useState("");
+  const [containers, setContainers] = useState<DockerContainer[]>([]);
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (targetDeployment !== "docker") return;
+    fetch(`/api/docker/${targetHostId}/containers`)
+      .then((r) => r.json())
+      .then((d) => setContainers(d.containers || []))
+      .catch(() => setContainers([]));
+  }, [targetHostId, targetDeployment]);
+
+  async function start() {
+    if (!mailbox.trim()) return setError("Adresse de la boîte source (telle que sauvegardée) requise.");
+    setStarting(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/backups/runs/${run.id}/restore-mailbox`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mailbox: mailbox.trim(),
+          targetHostId,
+          targetDeployment,
+          targetContainerId: targetDeployment === "docker" ? targetContainerId : undefined,
+          targetMailbox: targetMailbox.trim() || mailbox.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      onStarted(data.runId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-md space-y-3 rounded border border-neutral-700 bg-neutral-950 p-4">
+        <h2 className="text-sm font-semibold text-neutral-100">Restaurer une boîte mail</h2>
+        <p className="rounded border border-amber-900 bg-amber-950/30 p-2 text-xs text-amber-300">
+          Fusionne le contenu sauvegardé dans la boîte de destination (les messages déjà présents sont conservés, pas
+          écrasés).
+        </p>
+        <label className="block">
+          <span className="mb-1 block text-xs text-neutral-400">Boîte sauvegardée à restaurer (adresse exacte)</span>
+          <input value={mailbox} onChange={(e) => setMailbox(e.target.value)} placeholder="user@domaine.fr" className={INPUT_CLASS} />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs text-neutral-400">Machine de destination</span>
+          <select value={targetHostId} onChange={(e) => setTargetHostId(Number(e.target.value))} className={INPUT_CLASS}>
+            {hosts.map((h) => (
+              <option key={h.id} value={h.id}>
+                {h.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs text-neutral-400">Installation</span>
+          <select value={targetDeployment} onChange={(e) => setTargetDeployment(e.target.value as "docker" | "native")} className={INPUT_CLASS}>
+            <option value="docker">Dans un conteneur Docker</option>
+            <option value="native">Installée directement sur la machine</option>
+          </select>
+        </label>
+        {targetDeployment === "docker" && (
+          <label className="block">
+            <span className="mb-1 block text-xs text-neutral-400">Conteneur Dovecot</span>
+            <select value={targetContainerId} onChange={(e) => setTargetContainerId(e.target.value)} className={INPUT_CLASS}>
+              <option value="">— choisir —</option>
+              {containers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className="block">
+          <span className="mb-1 block text-xs text-neutral-400">Boîte de destination (laisser vide pour la même adresse)</span>
+          <input value={targetMailbox} onChange={(e) => setTargetMailbox(e.target.value)} placeholder={mailbox || "user@domaine.fr"} className={INPUT_CLASS} />
+        </label>
+        {error && <p className="text-sm text-red-400">{error}</p>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} disabled={starting} className="rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800">
+            Annuler
+          </button>
+          <button
+            onClick={start}
+            disabled={starting}
+            className="rounded border border-amber-700 bg-amber-900/40 px-3 py-1.5 text-sm text-amber-200 hover:bg-amber-900/60 disabled:opacity-50"
+          >
+            {starting ? "Démarrage..." : "Restaurer"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Parses a plan's stored sourceConfig JSON for the one field this form actually needs to
  * prefill, on the matching sourceType only — a plan being edited always has a sourceConfig that
  * matches its own sourceType, but a mismatched call site (or a future sourceType this form
@@ -769,6 +923,55 @@ function CreatePlanForm({
     }
   }
 
+  // mailbox
+  const existingMailboxConfig = parseSourceConfig<{
+    deployment?: "docker" | "native";
+    containerId?: string;
+    mailboxes: "all" | string[];
+  }>(editingPlan, "mailbox");
+  const [mailDeployment, setMailDeployment] = useState<"docker" | "native">(existingMailboxConfig?.deployment ?? "docker");
+  const [mailContainerId, setMailContainerId] = useState(existingMailboxConfig?.containerId ?? "");
+  const [mailAll, setMailAll] = useState(existingMailboxConfig ? existingMailboxConfig.mailboxes === "all" : true);
+  const [mailAddresses, setMailAddresses] = useState(
+    existingMailboxConfig && existingMailboxConfig.mailboxes !== "all" ? existingMailboxConfig.mailboxes.join(", ") : ""
+  );
+  const [mailTesting, setMailTesting] = useState(false);
+  const [mailTestError, setMailTestError] = useState("");
+  const [mailAvailable, setMailAvailable] = useState<string[] | null>(null);
+  const selectedMailboxes = new Set(mailAddresses.split(",").map((m) => m.trim()).filter(Boolean));
+
+  function toggleMailbox(address: string) {
+    const next = new Set(selectedMailboxes);
+    if (next.has(address)) next.delete(address);
+    else next.add(address);
+    setMailAddresses([...next].join(", "));
+  }
+
+  async function testMailConnection() {
+    if (!sourceHostId) return;
+    setMailTesting(true);
+    setMailTestError("");
+    try {
+      const res = await fetch("/api/backups/list-mailboxes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hostId: sourceHostId,
+          deployment: mailDeployment,
+          containerId: mailDeployment === "docker" ? mailContainerId : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setMailAvailable(data.mailboxes);
+      setMailAll(false);
+    } catch (err) {
+      setMailTestError(err instanceof Error ? err.message : "Connexion impossible.");
+    } finally {
+      setMailTesting(false);
+    }
+  }
+
   // proxmox
   const [pveResources, setPveResources] = useState<ProxmoxResource[]>([]);
   const [selectedVmid, setSelectedVmid] = useState<number | null>(
@@ -778,7 +981,7 @@ function CreatePlanForm({
 
   useEffect(() => {
     if (!sourceHostId) return;
-    if (sourceType === "docker" || sourceType === "database") {
+    if (sourceType === "docker" || sourceType === "database" || sourceType === "mailbox") {
       setContainersError("");
       fetch(`/api/docker/${sourceHostId}/containers`)
         .then((r) => r.json())
@@ -835,6 +1038,13 @@ function CreatePlanForm({
       const resource = pveResources.find((r) => r.vmid === selectedVmid);
       if (!resource) return onError("Sélectionne une VM/CT.");
       sourceConfig = { vmid: resource.vmid, vmType: resource.type };
+    } else if (sourceType === "mailbox") {
+      if (mailDeployment === "docker" && !mailContainerId) return onError("Conteneur Dovecot requis.");
+      sourceConfig = {
+        deployment: mailDeployment,
+        containerId: mailDeployment === "docker" ? mailContainerId : undefined,
+        mailboxes: mailAll ? "all" : mailAddresses.split(",").map((m) => m.trim()).filter(Boolean),
+      };
     }
 
     setCreating(true);
@@ -1152,6 +1362,83 @@ function CreatePlanForm({
         </label>
       )}
 
+      {sourceType === "mailbox" && (
+        <div className="grid grid-cols-2 gap-3">
+          <label className="col-span-2 block">
+            <span className="mb-1 block text-xs text-neutral-400">Installation</span>
+            <select
+              value={mailDeployment}
+              onChange={(e) => setMailDeployment(e.target.value as "docker" | "native")}
+              className={INPUT_CLASS}
+            >
+              <option value="docker">Dans un conteneur Docker (Mailcow...)</option>
+              <option value="native">Installée directement sur la machine (sans Docker)</option>
+            </select>
+          </label>
+          {mailDeployment === "docker" && (
+            <label className="col-span-2 block">
+              <span className="mb-1 block text-xs text-neutral-400">Conteneur Dovecot</span>
+              <select value={mailContainerId} onChange={(e) => setMailContainerId(e.target.value)} className={INPUT_CLASS}>
+                <option value="">— choisir —</option>
+                {containers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-1 block text-xs text-neutral-600">
+                Sur Mailcow, c&apos;est le conteneur dont le nom contient &quot;dovecot-mailcow&quot;.
+              </span>
+            </label>
+          )}
+          <label className="col-span-2 flex items-center gap-2 text-sm text-neutral-300">
+            <input
+              type="checkbox"
+              checked={mailAll}
+              onChange={(e) => {
+                setMailAll(e.target.checked);
+                if (e.target.checked) setMailAvailable(null);
+              }}
+            />
+            Toutes les boîtes
+          </label>
+          {!mailAll && (
+            <div className="col-span-2 space-y-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={testMailConnection}
+                  disabled={mailTesting || (mailDeployment === "docker" && !mailContainerId)}
+                  className="rounded border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+                >
+                  {mailTesting ? "Connexion..." : "Lister les boîtes"}
+                </button>
+              </div>
+              {mailTestError && <p className="text-xs text-red-400">{mailTestError}</p>}
+              {mailAvailable ? (
+                mailAvailable.length === 0 ? (
+                  <p className="text-xs text-neutral-500">Aucune boîte trouvée sur ce serveur.</p>
+                ) : (
+                  <div className="max-h-40 space-y-1 overflow-auto rounded border border-neutral-800 p-2">
+                    {mailAvailable.map((m) => (
+                      <label key={m} className="flex items-center gap-2 text-sm text-neutral-300">
+                        <input type="checkbox" checked={selectedMailboxes.has(m)} onChange={() => toggleMailbox(m)} />
+                        {m}
+                      </label>
+                    ))}
+                  </div>
+                )
+              ) : (
+                <label className="block">
+                  <span className="mb-1 block text-xs text-neutral-400">Adresses (séparées par des virgules)</span>
+                  <input value={mailAddresses} onChange={(e) => setMailAddresses(e.target.value)} className={INPUT_CLASS} />
+                </label>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex justify-end gap-2">
         <button onClick={onCancel} disabled={creating} className="rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800">
           Annuler
@@ -1466,6 +1753,292 @@ function DrillJobPanel({ drillId, onClose }: { drillId: string; onClose: () => v
       <pre ref={logRef} className="max-h-64 overflow-auto whitespace-pre-wrap bg-black p-2 font-mono text-[11px] text-neutral-300">
         {drill?.log || "Démarrage..."}
       </pre>
+    </div>
+  );
+}
+
+type MailMigration = {
+  id: string;
+  sourceHostId: number;
+  sourceContainer: string | null;
+  sourceMailbox: string;
+  destHostId: number;
+  destContainer: string | null;
+  destMailbox: string;
+  status: "running" | "success" | "failed";
+  log: string;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
+function migrationStatusLabel(m: MailMigration): { text: string; color: string } {
+  if (m.status === "running") return { text: "En cours...", color: "text-blue-400" };
+  if (m.status === "success") return { text: `OK · ${parseSqliteUtc(m.startedAt).toLocaleString("fr-FR")}`, color: "text-emerald-400" };
+  return { text: `Échec · ${parseSqliteUtc(m.startedAt).toLocaleString("fr-FR")}`, color: "text-red-400" };
+}
+
+/** Moves one mailbox directly between two live mail servers — dump on the source, transfer over
+ * the network (Tailscale, in practice, for the hosts this panel manages), restore into the
+ * destination mailbox, all as one tracked job (lib/mail/migration.ts). Kept as its own section on
+ * this page rather than a separate one: it shares the same hosts list and the same underlying
+ * dump/transfer/restore machinery as mailbox backup/restore just above it. */
+function MailMigrationSection({ hosts }: { hosts: Host[] }) {
+  const [migrations, setMigrations] = useState<MailMigration[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [active, setActive] = useState<MailMigration | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState("");
+  const logRef = useRef<HTMLPreElement>(null);
+
+  const [sourceHostId, setSourceHostId] = useState<number | null>(hosts[0]?.id ?? null);
+  const [sourceDeployment, setSourceDeployment] = useState<"docker" | "native">("docker");
+  const [sourceContainerId, setSourceContainerId] = useState("");
+  const [sourceContainers, setSourceContainers] = useState<DockerContainer[]>([]);
+  const [sourceMailbox, setSourceMailbox] = useState("");
+
+  const [destHostId, setDestHostId] = useState<number | null>(hosts[0]?.id ?? null);
+  const [destDeployment, setDestDeployment] = useState<"docker" | "native">("docker");
+  const [destContainerId, setDestContainerId] = useState("");
+  const [destContainers, setDestContainers] = useState<DockerContainer[]>([]);
+  const [destMailbox, setDestMailbox] = useState("");
+
+  const loadMigrations = useCallback(async () => {
+    const res = await fetch("/api/mail/migrations");
+    const data = await res.json();
+    setMigrations(data.migrations || []);
+  }, []);
+
+  useEffect(() => {
+    loadMigrations();
+  }, [loadMigrations]);
+
+  useEffect(() => {
+    if (!sourceHostId) return;
+    if (sourceDeployment !== "docker") return;
+    fetch(`/api/docker/${sourceHostId}/containers`)
+      .then((r) => r.json())
+      .then((d) => setSourceContainers(d.containers || []))
+      .catch(() => setSourceContainers([]));
+  }, [sourceHostId, sourceDeployment]);
+
+  useEffect(() => {
+    if (!destHostId) return;
+    if (destDeployment !== "docker") return;
+    fetch(`/api/docker/${destHostId}/containers`)
+      .then((r) => r.json())
+      .then((d) => setDestContainers(d.containers || []))
+      .catch(() => setDestContainers([]));
+  }, [destHostId, destDeployment]);
+
+  useEffect(() => {
+    if (!activeId) return;
+    let cancelled = false;
+    const poll = async () => {
+      const res = await fetch(`/api/mail/migrations/${activeId}`);
+      const data = await res.json();
+      if (cancelled || !data.migration) return;
+      setActive(data.migration);
+      requestAnimationFrame(() => {
+        if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+      });
+      if (data.migration.status === "running") setTimeout(poll, 2000);
+      else loadMigrations();
+    };
+    poll();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeId, loadMigrations]);
+
+  function hostName(id: number): string {
+    return hosts.find((h) => h.id === id)?.name || `#${id}`;
+  }
+
+  async function start() {
+    if (!sourceHostId || !destHostId || !sourceMailbox.trim() || !destMailbox.trim()) {
+      setError("Machine source, boîte source, machine de destination et boîte de destination requises.");
+      return;
+    }
+    setStarting(true);
+    setError("");
+    try {
+      const res = await fetch("/api/mail/migrations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceHostId,
+          sourceDeployment,
+          sourceContainerId: sourceDeployment === "docker" ? sourceContainerId : undefined,
+          sourceMailbox: sourceMailbox.trim(),
+          destHostId,
+          destDeployment,
+          destContainerId: destDeployment === "docker" ? destContainerId : undefined,
+          destMailbox: destMailbox.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setActiveId(data.id);
+      setActive({
+        id: data.id,
+        sourceHostId,
+        sourceContainer: sourceContainerId || null,
+        sourceMailbox: sourceMailbox.trim(),
+        destHostId,
+        destContainer: destContainerId || null,
+        destMailbox: destMailbox.trim(),
+        status: "running",
+        log: "",
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3 border-t border-neutral-800 pt-6">
+      <div>
+        <h2 className="text-base font-semibold text-neutral-100">Migration de boîte mail</h2>
+        <p className="text-xs text-neutral-500">
+          Déplace une boîte mail directement d&apos;un serveur à un autre (via Tailscale) — sauvegarde sur la source,
+          transfert, puis restauration dans la boîte de destination.
+        </p>
+      </div>
+
+      <div className="grid gap-3 rounded border border-neutral-800 p-4 md:grid-cols-2">
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Source</p>
+          <label className="block">
+            <span className="mb-1 block text-xs text-neutral-400">Machine</span>
+            <select value={sourceHostId ?? ""} onChange={(e) => setSourceHostId(Number(e.target.value))} className={INPUT_CLASS}>
+              {hosts.map((h) => (
+                <option key={h.id} value={h.id}>
+                  {h.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs text-neutral-400">Installation</span>
+            <select value={sourceDeployment} onChange={(e) => setSourceDeployment(e.target.value as "docker" | "native")} className={INPUT_CLASS}>
+              <option value="docker">Dans un conteneur Docker</option>
+              <option value="native">Installée directement sur la machine</option>
+            </select>
+          </label>
+          {sourceDeployment === "docker" && (
+            <label className="block">
+              <span className="mb-1 block text-xs text-neutral-400">Conteneur Dovecot</span>
+              <select value={sourceContainerId} onChange={(e) => setSourceContainerId(e.target.value)} className={INPUT_CLASS}>
+                <option value="">— choisir —</option>
+                {sourceContainers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className="block">
+            <span className="mb-1 block text-xs text-neutral-400">Boîte à migrer</span>
+            <input value={sourceMailbox} onChange={(e) => setSourceMailbox(e.target.value)} placeholder="user@domaine.fr" className={INPUT_CLASS} />
+          </label>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Destination</p>
+          <label className="block">
+            <span className="mb-1 block text-xs text-neutral-400">Machine</span>
+            <select value={destHostId ?? ""} onChange={(e) => setDestHostId(Number(e.target.value))} className={INPUT_CLASS}>
+              {hosts.map((h) => (
+                <option key={h.id} value={h.id}>
+                  {h.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs text-neutral-400">Installation</span>
+            <select value={destDeployment} onChange={(e) => setDestDeployment(e.target.value as "docker" | "native")} className={INPUT_CLASS}>
+              <option value="docker">Dans un conteneur Docker</option>
+              <option value="native">Installée directement sur la machine</option>
+            </select>
+          </label>
+          {destDeployment === "docker" && (
+            <label className="block">
+              <span className="mb-1 block text-xs text-neutral-400">Conteneur Dovecot</span>
+              <select value={destContainerId} onChange={(e) => setDestContainerId(e.target.value)} className={INPUT_CLASS}>
+                <option value="">— choisir —</option>
+                {destContainers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className="block">
+            <span className="mb-1 block text-xs text-neutral-400">Boîte de destination</span>
+            <input value={destMailbox} onChange={(e) => setDestMailbox(e.target.value)} placeholder="user@domaine.fr" className={INPUT_CLASS} />
+          </label>
+        </div>
+
+        <div className="md:col-span-2">
+          {error && <p className="mb-2 text-sm text-red-400">{error}</p>}
+          <button
+            onClick={start}
+            disabled={starting || active?.status === "running"}
+            className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60 disabled:opacity-50"
+          >
+            {starting ? "Démarrage..." : "Lancer la migration"}
+          </button>
+        </div>
+      </div>
+
+      {active && (
+        <div className="rounded border border-neutral-800">
+          <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
+            <span className={`text-sm ${migrationStatusLabel(active).color}`}>
+              {active.sourceMailbox} → {active.destMailbox} · {migrationStatusLabel(active).text}
+            </span>
+          </div>
+          <pre ref={logRef} className="max-h-64 overflow-auto whitespace-pre-wrap bg-black p-2 font-mono text-[11px] text-neutral-300">
+            {active.log || "Démarrage..."}
+          </pre>
+        </div>
+      )}
+
+      {migrations.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Historique</p>
+          <ul className="space-y-1">
+            {migrations.map((m) => {
+              const s = migrationStatusLabel(m);
+              return (
+                <li key={m.id} className="flex items-center justify-between rounded border border-neutral-800 p-2 text-xs">
+                  <span className="text-neutral-400">
+                    {m.sourceMailbox} ({hostName(m.sourceHostId)}) → {m.destMailbox} ({hostName(m.destHostId)})
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={s.color}>{s.text}</span>
+                    {m.status === "running" && m.id !== activeId && (
+                      <button
+                        onClick={() => setActiveId(m.id)}
+                        className="rounded border border-blue-800 bg-blue-950/30 px-1.5 py-0.5 text-blue-300 hover:bg-blue-950/60"
+                      >
+                        Suivre en direct
+                      </button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

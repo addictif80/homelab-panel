@@ -5,6 +5,7 @@ import { resolveDockerPaths, type DockerBackupConfig } from "./sources/docker";
 import { dumpDatabase, type DatabaseBackupConfig } from "./sources/database";
 import { dumpProxmoxVm, type ProxmoxVmBackupConfig } from "./sources/proxmox";
 import { dumpPanelConfig, type PanelConfigBackupConfig } from "./sources/panelConfig";
+import { dumpMailboxes, type MailboxBackupConfig } from "./sources/mailbox";
 import { runSshCommand } from "../ssh";
 
 export function joinRemote(base: string, sub: string): string {
@@ -150,6 +151,13 @@ export async function runBackupPlan(planId: string): Promise<string> {
         case "panel_config": {
           const cfg = JSON.parse(plan.sourceConfig || "{}") as PanelConfigBackupConfig;
           const resolved = await dumpPanelConfig(plan.sourceHostId, cfg, append);
+          paths = resolved.paths;
+          cleanup = resolved.cleanup;
+          break;
+        }
+        case "mailbox": {
+          const cfg = JSON.parse(plan.sourceConfig) as MailboxBackupConfig;
+          const resolved = await dumpMailboxes(plan.sourceHostId, cfg, append);
           paths = resolved.paths;
           cleanup = resolved.cleanup;
           break;
