@@ -78,6 +78,35 @@ function statusLabel(run: BackupRun | null): { text: string; color: string } {
   return { text: `Échec · ${parseSqliteUtc(run.startedAt).toLocaleString("fr-FR")}`, color: "text-red-400" };
 }
 
+type BackupEstimate = {
+  totalBytes: number | null;
+  effectiveRateBytesPerSec: number | null;
+  rateSource: "bwlimit" | "history" | "unknown";
+  estimatedSeconds: number | null;
+  note: string | null;
+};
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} o`;
+  const units = ["Ko", "Mo", "Go", "To"];
+  let value = bytes / 1024;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i++;
+  }
+  return `${value.toFixed(1)} ${units[i]}`;
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return "< 1 min";
+  const totalMinutes = Math.round(seconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `≈ ${minutes} min`;
+  return `≈ ${hours} h ${minutes.toString().padStart(2, "0")}`;
+}
+
 export default function BackupsPage() {
   const [hosts, setHosts] = useState<Host[]>([]);
   const [plans, setPlans] = useState<BackupPlan[] | null>(null);
@@ -86,6 +115,7 @@ export default function BackupsPage() {
   const [editingPlan, setEditingPlan] = useState<BackupPlan | null>(null);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [runHistory, setRunHistory] = useState<Record<string, BackupRun[]>>({});
+  const [estimates, setEstimates] = useState<Record<string, { loading: boolean; result?: BackupEstimate; error?: string }>>({});
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [activeRun, setActiveRun] = useState<BackupRun | null>(null);
@@ -225,6 +255,18 @@ export default function BackupsPage() {
     }
   }
 
+  async function estimatePlan(planId: string) {
+    setEstimates((e) => ({ ...e, [planId]: { loading: true } }));
+    try {
+      const res = await fetch(`/api/backups/${planId}/estimate`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setEstimates((e) => ({ ...e, [planId]: { loading: false, result: data.estimate } }));
+    } catch (err) {
+      setEstimates((e) => ({ ...e, [planId]: { loading: false, error: err instanceof Error ? err.message : "Erreur." } }));
+    }
+  }
+
   function hostName(id: number): string {
     return hosts.find((h) => h.id === id)?.name || `#${id}`;
   }
@@ -304,6 +346,29 @@ export default function BackupsPage() {
                     {plan.bwlimitKbps ? ` · bridé à ${plan.bwlimitKbps} Ko/s` : ""}
                   </p>
                   <p className={`mt-0.5 text-xs ${status.color}`}>{status.text}</p>
+                  {estimates[plan.id] && (
+                    <p className="mt-0.5 text-xs text-neutral-400">
+                      {estimates[plan.id].loading ? (
+                        "Estimation en cours (parcours des chemins sur la machine source)..."
+                      ) : estimates[plan.id].error ? (
+                        <span className="text-red-400">{estimates[plan.id].error}</span>
+                      ) : (
+                        (() => {
+                          const r = estimates[plan.id].result!;
+                          if (r.estimatedSeconds === null) return <span className="text-neutral-500">{r.note}</span>;
+                          return (
+                            <>
+                              Durée estimée : <span className="text-neutral-200">{formatDuration(r.estimatedSeconds)}</span>
+                              {r.totalBytes !== null && ` (${formatBytes(r.totalBytes)}`}
+                              {r.effectiveRateBytesPerSec !== null &&
+                                `, ${formatBytes(r.effectiveRateBytesPerSec)}/s${r.rateSource === "bwlimit" ? " — limite fixée" : " — moyenne des runs précédents"}`}
+                              {r.totalBytes !== null && ")"}
+                            </>
+                          );
+                        })()
+                      )}
+                    </p>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <button
@@ -338,6 +403,13 @@ export default function BackupsPage() {
                       </button>
                     </>
                   )}
+                  <button
+                    onClick={() => estimatePlan(plan.id)}
+                    disabled={estimates[plan.id]?.loading}
+                    className="rounded border border-neutral-600 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800 disabled:opacity-50"
+                  >
+                    Estimer la durée
+                  </button>
                   <button
                     onClick={() => loadHistory(plan.id)}
                     className="rounded border border-neutral-600 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
