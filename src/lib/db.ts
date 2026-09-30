@@ -986,6 +986,15 @@ export function migrate(db: Database.Database) {
   if (!backupPlanColumns.some((c) => c.name === "at_time")) {
     db.exec(`ALTER TABLE backup_plans ADD COLUMN at_time TEXT`);
   }
+  // Optional rsync --bwlimit (KB/s) — null (the default, unchanged for every plan created before
+  // this) keeps rsync at full speed. Added for a large/active site whose full-speed transfer was
+  // saturating the source host's disk/network enough to make everything else on it (including
+  // this panel itself, hosted on that same box) unresponsive during a run, even though local CPU
+  // and iowait both looked unremarkable — throttling the transfer at the source is the fix
+  // regardless of which specific resource (NIC, virtualized storage IOPS) actually saturated.
+  if (!backupPlanColumns.some((c) => c.name === "bwlimit_kbps")) {
+    db.exec(`ALTER TABLE backup_plans ADD COLUMN bwlimit_kbps INTEGER`);
+  }
 
   // Same create-copy-drop-rename dance as mail_log_sources above — SQLite can't ALTER a CHECK
   // constraint, and an existing install's backup_plans table still enforces whatever list was

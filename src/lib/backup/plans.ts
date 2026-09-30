@@ -19,6 +19,12 @@ export type BackupPlan = {
    * manual/hourly schedules. */
   atTime: string | null;
   retentionCount: number;
+  /** Optional rsync --bwlimit in KB/s — null (the default) transfers at full speed. Throttles the
+   * transfer itself, which paces both the network send rate and (since rsync only reads as fast
+   * as it can send) how hard the source host's disk gets hit, regardless of whether a saturated
+   * NIC, a virtualized-storage IOPS cap, or plain disk contention is the actual bottleneck for a
+   * given host. */
+  bwlimitKbps: number | null;
   enabled: boolean;
   createdAt: string;
 };
@@ -34,6 +40,7 @@ type PlanRow = {
   schedule: Schedule;
   at_time: string | null;
   retention_count: number;
+  bwlimit_kbps: number | null;
   enabled: number;
   created_at: string;
 };
@@ -50,6 +57,7 @@ function rowToPlan(row: PlanRow): BackupPlan {
     schedule: row.schedule,
     atTime: row.at_time,
     retentionCount: row.retention_count,
+    bwlimitKbps: row.bwlimit_kbps,
     enabled: !!row.enabled,
     createdAt: row.created_at,
   };
@@ -68,8 +76,8 @@ export function createPlan(input: Omit<BackupPlan, "id" | "createdAt">): BackupP
   const id = randomUUID();
   getDb()
     .prepare(
-      `INSERT INTO backup_plans (id, name, source_host_id, source_type, source_config, dest_host_id, dest_path, schedule, at_time, retention_count, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO backup_plans (id, name, source_host_id, source_type, source_config, dest_host_id, dest_path, schedule, at_time, retention_count, bwlimit_kbps, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -82,6 +90,7 @@ export function createPlan(input: Omit<BackupPlan, "id" | "createdAt">): BackupP
       input.schedule,
       input.atTime,
       input.retentionCount,
+      input.bwlimitKbps,
       input.enabled ? 1 : 0
     );
   return getPlan(id)!;
@@ -99,7 +108,7 @@ export function updatePlan(id: string, patch: Partial<Omit<BackupPlan, "id" | "c
   const merged = { ...current, ...definedPatch };
   getDb()
     .prepare(
-      `UPDATE backup_plans SET name=?, source_host_id=?, source_type=?, source_config=?, dest_host_id=?, dest_path=?, schedule=?, at_time=?, retention_count=?, enabled=? WHERE id=?`
+      `UPDATE backup_plans SET name=?, source_host_id=?, source_type=?, source_config=?, dest_host_id=?, dest_path=?, schedule=?, at_time=?, retention_count=?, bwlimit_kbps=?, enabled=? WHERE id=?`
     )
     .run(
       merged.name,
@@ -111,6 +120,7 @@ export function updatePlan(id: string, patch: Partial<Omit<BackupPlan, "id" | "c
       merged.schedule,
       merged.atTime,
       merged.retentionCount,
+      merged.bwlimitKbps,
       merged.enabled ? 1 : 0,
       id
     );

@@ -39,6 +39,7 @@ export async function POST(req: NextRequest) {
     schedule?: Schedule;
     atTime?: string | null;
     retentionCount?: number;
+    bwlimitKbps?: number | null;
   };
 
   if (!body.name || !body.sourceHostId || !body.sourceType || !body.destHostId || !body.destPath) {
@@ -66,6 +67,7 @@ export async function POST(req: NextRequest) {
     schedule: body.schedule || "manual",
     atTime: body.atTime?.trim() || null,
     retentionCount: body.retentionCount || 7,
+    bwlimitKbps: body.bwlimitKbps || null,
     enabled: true,
   });
 

@@ -44,6 +44,7 @@ type BackupPlan = {
   schedule: Schedule;
   atTime: string | null;
   retentionCount: number;
+  bwlimitKbps: number | null;
   enabled: boolean;
   hasPassword?: boolean;
   latestRun: BackupRun | null;
@@ -300,6 +301,7 @@ export default function BackupsPage() {
                     {plan.atTime && (plan.schedule === "daily" || plan.schedule === "weekly") ? ` à ${plan.atTime}` : ""}
                     {" · "}
                     {plan.retentionCount} versions conservées
+                    {plan.bwlimitKbps ? ` · bridé à ${plan.bwlimitKbps} Ko/s` : ""}
                   </p>
                   <p className={`mt-0.5 text-xs ${status.color}`}>{status.text}</p>
                 </div>
@@ -847,6 +849,7 @@ function CreatePlanForm({
   const [schedule, setSchedule] = useState<Schedule>(editingPlan?.schedule ?? "daily");
   const [atTime, setAtTime] = useState(editingPlan?.atTime ?? "");
   const [retentionCount, setRetentionCount] = useState(editingPlan?.retentionCount ?? 7);
+  const [bwlimitKbps, setBwlimitKbps] = useState(editingPlan?.bwlimitKbps ? String(editingPlan.bwlimitKbps) : "");
   const [creating, setCreating] = useState(false);
   const showAtTime = schedule === "daily" || schedule === "weekly";
 
@@ -1060,6 +1063,7 @@ function CreatePlanForm({
               schedule,
               atTime: showAtTime ? atTime || null : null,
               retentionCount,
+              bwlimitKbps: bwlimitKbps ? Number(bwlimitKbps) : null,
               sourceConfig,
               password,
             }),
@@ -1078,6 +1082,7 @@ function CreatePlanForm({
               schedule,
               atTime: showAtTime ? atTime || null : null,
               retentionCount,
+              bwlimitKbps: bwlimitKbps ? Number(bwlimitKbps) : null,
             }),
           });
       const data = await res.json();
@@ -1181,6 +1186,21 @@ function CreatePlanForm({
             onChange={(e) => setRetentionCount(Number(e.target.value))}
             className={INPUT_CLASS}
           />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs text-neutral-400">Limite de bande passante en Ko/s (optionnel)</span>
+          <input
+            type="number"
+            min={0}
+            value={bwlimitKbps}
+            onChange={(e) => setBwlimitKbps(e.target.value)}
+            placeholder="illimité"
+            className={INPUT_CLASS}
+          />
+          <span className="mt-1 block text-xs text-neutral-600">
+            Bride le transfert rsync — utile pour un site volumineux dont la sauvegarde à pleine vitesse ralentit ou
+            rend indisponibles les sites hébergés sur la machine source pendant l&apos;exécution.
+          </span>
         </label>
       </div>
 

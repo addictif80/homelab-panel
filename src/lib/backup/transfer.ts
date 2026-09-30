@@ -118,10 +118,14 @@ export async function rsyncTransfer(opts: {
   sourcePath: string;
   destDir: string;
   linkDestDir?: string | null;
+  /** rsync --bwlimit in KB/s — paces both the network send rate and, since rsync only reads as
+   * fast as it can send, how hard the source host's disk gets hit. Unset/null/0 means full speed
+   * (rsync's own default), unchanged from before this option existed. */
+  bwlimitKbps?: number | null;
   append: (text: string) => void;
   signal?: AbortSignal;
 }): Promise<void> {
-  const { fromHostId, toHostId, sourcePath, destDir, linkDestDir, append, signal } = opts;
+  const { fromHostId, toHostId, sourcePath, destDir, linkDestDir, bwlimitKbps, append, signal } = opts;
 
   const keyPath = await ensurePrivateKeyDeployed(fromHostId);
   await ensurePublicKeyAuthorized(toHostId);
@@ -162,7 +166,8 @@ export async function rsyncTransfer(opts: {
   // the stored log stays readable and a percentage can be parsed back out of it (see
   // BackupRunProgress in the backups page) instead of one file's worth of characters overwriting
   // each other into an unreadable smear.
-  const command = `rsync -a --delete --stats --info=progress2 ${linkFlag}-e ${shellQuote(sshOpts)} ${shellQuote(sourcePath)} ${shellQuote(`${dest.user}@${dest.address}:${destDirSlash}`)}`;
+  const bwlimitFlag = bwlimitKbps ? `--bwlimit=${bwlimitKbps} ` : "";
+  const command = `rsync -a --delete --stats --info=progress2 ${bwlimitFlag}${linkFlag}-e ${shellQuote(sshOpts)} ${shellQuote(sourcePath)} ${shellQuote(`${dest.user}@${dest.address}:${destDirSlash}`)}`;
 
   append(`\n$ copie de ${sourcePath} vers ${dest.user}@${dest.address}:${destDirSlash}\n`);
   // Mirrored locally as well as streamed to the job log, purely so the error thrown below can

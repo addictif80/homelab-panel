@@ -29,7 +29,8 @@ async function copyPathsIntoSnapshot(
   snapshotDir: string,
   previousSnapshotDir: string | null,
   append: (text: string) => void,
-  signal: AbortSignal
+  signal: AbortSignal,
+  bwlimitKbps: number | null
 ): Promise<void> {
   for (const raw of paths) {
     if (signal.aborted) throw new Error("Annulé par l'utilisateur.");
@@ -44,6 +45,7 @@ async function copyPathsIntoSnapshot(
       sourcePath: clean,
       destDir,
       linkDestDir,
+      bwlimitKbps,
       append,
       signal,
     });
@@ -168,7 +170,16 @@ export async function runBackupPlan(planId: string): Promise<string> {
 
       if (paths.length === 0) throw new Error("Rien à sauvegarder (aucun chemin résolu).");
 
-      await copyPathsIntoSnapshot(plan.sourceHostId, plan.destHostId, paths, newSnapshotDir, previousSnapshotDir, append, controller.signal);
+      await copyPathsIntoSnapshot(
+        plan.sourceHostId,
+        plan.destHostId,
+        paths,
+        newSnapshotDir,
+        previousSnapshotDir,
+        append,
+        controller.signal,
+        plan.bwlimitKbps
+      );
 
       if (cleanup) {
         await runSshCommand(plan.sourceHostId, cleanup, { sudo: true }).catch(() => {});

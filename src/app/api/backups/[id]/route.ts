@@ -17,6 +17,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     schedule?: Schedule;
     atTime?: string | null;
     retentionCount?: number;
+    bwlimitKbps?: number | null;
     enabled?: boolean;
     sourceConfig?: Record<string, unknown>;
     password?: string;
@@ -43,6 +44,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     schedule: body.schedule,
     atTime: body.atTime === undefined ? undefined : body.atTime?.trim() || null,
     retentionCount: body.retentionCount,
+    bwlimitKbps: body.bwlimitKbps === undefined ? undefined : body.bwlimitKbps || null,
     enabled: body.enabled,
     sourceConfig,
   });
