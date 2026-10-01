@@ -71,7 +71,8 @@ function buildLsyncdConfig(
   delay = 1,
   rsync = {
     archive = true,
-    compress = true,${rsyncPath}
+    compress = true,
+    timeout = 300,${rsyncPath}
     _extra = {
       ${extra.join(",\n      ")}
     }
@@ -219,7 +220,7 @@ async function runScheduledFolderSync(r: Replication): Promise<void> {
   if (r.targetOwner) extra.push(`--chown=${shellQuote(r.targetOwner)}`);
   if (r.targetMode) extra.push(`--chmod=${shellQuote(r.targetMode)}`);
   const cmd =
-    `rsync -az --delete ${extra.join(" ")} ` +
+    `rsync -az --delete --timeout=300 ${extra.join(" ")} ` +
     `${shellQuote(`${r.sourcePath}/`)} ${shellQuote(`${target.user}@${target.address}:${r.targetPath}/`)}`;
   const { code, stderr } = await runSshCommand(r.sourceHostId, cmd, { timeoutMs: REVERSE_SYNC_TIMEOUT_MS });
   if (code !== 0) {
@@ -271,7 +272,7 @@ export async function reverseSyncFolderReplication(r: Replication): Promise<void
   const target = getHostConnectionInfo(r.targetHostId);
   const sshOpts = `-i ${keyPath} -p ${target.port} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10`;
   const cmd =
-    `rsync -az --delete -e ${shellQuote(`ssh ${sshOpts}`)} ` +
+    `rsync -az --delete --timeout=300 -e ${shellQuote(`ssh ${sshOpts}`)} ` +
     `${shellQuote(`${target.user}@${target.address}:${r.targetPath}/`)} ${shellQuote(`${r.sourcePath}/`)}`;
   const { code, stderr } = await runSshCommand(r.sourceHostId, cmd, { timeoutMs: REVERSE_SYNC_TIMEOUT_MS });
   if (code !== 0) throw new Error(stderr || "Échec de la resynchronisation depuis la machine cible.");

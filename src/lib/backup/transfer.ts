@@ -167,7 +167,15 @@ export async function rsyncTransfer(opts: {
   // BackupRunProgress in the backups page) instead of one file's worth of characters overwriting
   // each other into an unreadable smear.
   const bwlimitFlag = bwlimitKbps ? `--bwlimit=${bwlimitKbps} ` : "";
-  const command = `rsync -a --delete --stats --info=progress2 ${bwlimitFlag}${linkFlag}-e ${shellQuote(sshOpts)} ${shellQuote(sourcePath)} ${shellQuote(`${dest.user}@${dest.address}:${destDirSlash}`)}`;
+  // rsync's own I/O timeout: if no data moves for this long, rsync exits itself with "timeout
+  // waiting for daemon connection". Without it, a connection that stalls mid-transfer (the
+  // destination dropping off Tailscale, a NAT silently swallowing the connection with no RST...)
+  // hangs this command forever — the SSH keepalive on the *outer* connection (this panel to the
+  // source host, see lib/ssh.ts) only proves that host is still reachable, it says nothing about
+  // the health of rsync's own, separate connection from the source *to the destination*, which is
+  // where a stall like that actually happens. Five minutes tolerates a slow stat-heavy directory
+  // scan on a huge tree without false-positiving on a transfer that's merely slow, not stuck.
+  const command = `rsync -a --delete --stats --info=progress2 --timeout=300 ${bwlimitFlag}${linkFlag}-e ${shellQuote(sshOpts)} ${shellQuote(sourcePath)} ${shellQuote(`${dest.user}@${dest.address}:${destDirSlash}`)}`;
 
   append(`\n$ copie de ${sourcePath} vers ${dest.user}@${dest.address}:${destDirSlash}\n`);
   // Mirrored locally as well as streamed to the job log, purely so the error thrown below can
