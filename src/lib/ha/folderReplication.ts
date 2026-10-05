@@ -3,6 +3,19 @@ import { ensurePrivateKeyDeployed, ensurePublicKeyAuthorized } from "../backup/k
 import { ensureRemoteDir, ensureRsyncReachable } from "../backup/transfer";
 import { listReplications, updateReplicationStatus, type Replication } from "./replication";
 import { installPackageUniversal, restartService, stopService, serviceIsActive, diagnoseServiceFailure } from "../hostCompat";
+import { runProvisioning } from "./provisioning";
+
+/** Runs the configured web-server provisioning (if any — see provisioning.ts) and folds its result
+ * into the success message already written for this sync, rather than overwriting it: the sync
+ * itself succeeding is what actually matters, provisioning is a best-effort extra step on top. */
+async function appendProvisioningResult(r: Replication, baseMessage: string): Promise<string> {
+  const result = await runProvisioning(r).catch((err) => ({
+    ok: false,
+    detail: err instanceof Error ? err.message : "Erreur inconnue lors du provisioning.",
+  }));
+  if (!result) return baseMessage;
+  return `${baseMessage} ${result.ok ? "✓" : "⚠ Provisioning échoué :"} ${result.detail}`.trim();
+}
 
 const SETUP_TIMEOUT_MS = 60_000;
 const STATUS_TIMEOUT_MS = 15_000;
@@ -183,6 +196,11 @@ export async function setupFolderReplication(r: Replication): Promise<void> {
   if (r.syncScheduleTime) {
     updateReplicationStatus(r.id, "setting_up", "Clonage initial des fichiers vers la machine cible…");
     await runScheduledFolderSync(r);
+    if (r.provisionPreset) {
+      updateReplicationStatus(r.id, "setting_up", "Provisioning du serveur web sur la machine cible…");
+      const detail = await appendProvisioningResult(r, "Synchronisation planifiée effectuée.");
+      updateReplicationStatus(r.id, "in_sync", detail, true);
+    }
     return;
   }
 
@@ -202,6 +220,13 @@ export async function setupFolderReplication(r: Replication): Promise<void> {
 
   updateReplicationStatus(r.id, "setting_up", "Application de la configuration de réplication…");
   await reconcileLsyncdOnHost(r.sourceHostId);
+
+  if (r.provisionPreset) {
+    updateReplicationStatus(r.id, "setting_up", "Provisioning du serveur web sur la machine cible…");
+    const detail = await appendProvisioningResult(r, "lsyncd actif — synchronisation continue en cours.");
+    updateReplicationStatus(r.id, "in_sync", detail, true);
+    return;
+  }
 
   updateReplicationStatus(r.id, "in_sync", "lsyncd actif — synchronisation continue en cours.", true);
 }

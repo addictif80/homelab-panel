@@ -26,12 +26,27 @@ type Replication = {
   appDbUser: string | null;
   targetDbContainer: string | null;
   sourceDbContainer: string | null;
+  provisionPreset: ProvisionPreset | null;
+  provisionDomain: string | null;
+  provisionPhpVersion: string | null;
+  provisionCommand: string | null;
   enabled: boolean;
   status: "unknown" | "setting_up" | "in_sync" | "lagging" | "error" | "stopped";
   statusDetail: string | null;
   lastCheckedAt: string | null;
   lastSyncedAt: string | null;
 };
+
+type ProvisionPreset = "docker_lemp" | "apache_native" | "nginx_native" | "custom";
+
+const PROVISION_PRESET_LABELS: Record<ProvisionPreset, string> = {
+  docker_lemp: "Docker (nginx + php-fpm + mysql)",
+  apache_native: "Apache natif",
+  nginx_native: "Nginx natif",
+  custom: "Commande personnalisée (avancé)",
+};
+
+const PROVISION_PHP_VERSIONS = ["7.4", "8.0", "8.1", "8.2", "8.3"];
 
 type HaStateEntry = {
   replicationId: string;
@@ -90,6 +105,10 @@ const EMPTY_FORM = {
   appDbPassword: "",
   targetDbContainer: "",
   sourceDbContainer: "",
+  provisionPreset: "" as ProvisionPreset | "",
+  provisionDomain: "",
+  provisionPhpVersion: "8.2",
+  provisionCommand: "",
 };
 
 // Deliberately no kind/sourceHostId/targetHostId here — those drive which SSH keys/dirs were
@@ -113,6 +132,10 @@ const EMPTY_EDIT_FORM = {
   appDbPassword: "",
   targetDbContainer: "",
   sourceDbContainer: "",
+  provisionPreset: "" as ProvisionPreset | "",
+  provisionDomain: "",
+  provisionPhpVersion: "8.2",
+  provisionCommand: "",
   proxyHostId: "" as number | "",
   targetPort: "",
 };
@@ -251,6 +274,7 @@ export default function HaPage() {
           dbPort: form.dbPort ? Number(form.dbPort) : undefined,
           targetDbUser: differentTargetCreds ? form.targetDbUser : undefined,
           targetDbPassword: differentTargetCreds ? form.targetDbPassword : undefined,
+          provisionPreset: form.provisionPreset || undefined,
           proxyHostId: form.proxyHostId || undefined,
           targetPort: form.targetPort ? Number(form.targetPort) : undefined,
         }),
@@ -342,6 +366,21 @@ export default function HaPage() {
     }
   }
 
+  async function runProvisioningNow(id: string) {
+    setBusyId(id);
+    setError("");
+    try {
+      const res = await fetch(`/api/ha/replications/${id}/provision`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function toggleEnabled(r: Replication) {
     await fetch(`/api/ha/replications/${r.id}`, {
       method: "PATCH",
@@ -387,6 +426,10 @@ export default function HaPage() {
       appDbPassword: "",
       targetDbContainer: r.targetDbContainer ?? "",
       sourceDbContainer: r.sourceDbContainer ?? "",
+      provisionPreset: r.provisionPreset ?? "",
+      provisionDomain: r.provisionDomain ?? "",
+      provisionPhpVersion: r.provisionPhpVersion ?? "8.2",
+      provisionCommand: r.provisionCommand ?? "",
       proxyHostId: r.proxyHostId ?? "",
       targetPort: r.targetPort ? String(r.targetPort) : "",
     });
@@ -422,6 +465,10 @@ export default function HaPage() {
           appDbPassword: editForm.appDbPassword || undefined,
           targetDbContainer: editForm.targetDbContainer,
           sourceDbContainer: editForm.sourceDbContainer,
+          provisionPreset: r.kind === "folder" ? editForm.provisionPreset || null : undefined,
+          provisionDomain: r.kind === "folder" ? editForm.provisionDomain : undefined,
+          provisionPhpVersion: r.kind === "folder" ? editForm.provisionPhpVersion : undefined,
+          provisionCommand: r.kind === "folder" ? editForm.provisionCommand : undefined,
           proxyHostId: editForm.proxyHostId || null,
           targetPort: editForm.targetPort ? Number(editForm.targetPort) : null,
         }),
@@ -739,6 +786,92 @@ export default function HaPage() {
               )}
             </div>
           )}
+          {form.kind === "folder" && (
+            <div className="space-y-2 rounded border border-neutral-800 p-3">
+              <label className="mb-1 block text-xs text-neutral-400">Provisionner le serveur web sur la cible</label>
+              <select
+                value={form.provisionPreset}
+                onChange={(e) => setForm({ ...form, provisionPreset: e.target.value as ProvisionPreset | "" })}
+                className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+              >
+                <option value="">Aucun (je gère le vhost moi-même)</option>
+                {(Object.entries(PROVISION_PRESET_LABELS) as [ProvisionPreset, string][]).map(([id, label]) => (
+                  <option key={id} value={id}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              {form.provisionPreset && form.provisionPreset !== "custom" && (
+                <>
+                  <p className="text-xs text-neutral-500">
+                    Une fois la première synchronisation réussie, le panel configure automatiquement le vhost sur la
+                    machine cible (domaine + version PHP ci-dessous) — plus besoin d&apos;éditer de fichier nginx/Apache à
+                    la main.
+                    {form.provisionPreset === "docker_lemp" && (
+                      <>
+                        {" "}
+                        Suppose une stack Docker déjà en place sur la cible avec un conteneur nginx nommé{" "}
+                        <code className="text-neutral-300">failover-web</code> servant{" "}
+                        <code className="text-neutral-300">/opt/failover-site/nginx/conf.d</code>, et un conteneur
+                        php-fpm par version nommé <code className="text-neutral-300">failover-php82</code> (pour PHP
+                        8.2), etc.
+                      </>
+                    )}
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-xs text-neutral-400">Nom de domaine du site</label>
+                      <input
+                        value={form.provisionDomain}
+                        onChange={(e) => setForm({ ...form, provisionDomain: e.target.value })}
+                        placeholder="site1.tld"
+                        className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-neutral-400">Version PHP</label>
+                      <select
+                        value={form.provisionPhpVersion}
+                        onChange={(e) => setForm({ ...form, provisionPhpVersion: e.target.value })}
+                        className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                      >
+                        {PROVISION_PHP_VERSIONS.map((v) => (
+                          <option key={v} value={v}>
+                            {v}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </>
+              )}
+              {form.provisionPreset === "custom" && (
+                <>
+                  <p className="text-xs text-neutral-500">
+                    Commande exécutée sur la machine cible via SSH juste après la première synchronisation réussie.
+                    Variables disponibles : <code className="text-neutral-300">${"{DOMAIN}"}</code>,{" "}
+                    <code className="text-neutral-300">${"{TARGET_PATH}"}</code>,{" "}
+                    <code className="text-neutral-300">${"{SOURCE_PATH}"}</code>,{" "}
+                    <code className="text-neutral-300">${"{PHP_VERSION}"}</code>,{" "}
+                    <code className="text-neutral-300">${"{REPLICATION_NAME}"}</code>.
+                  </p>
+                  <input
+                    value={form.provisionDomain}
+                    onChange={(e) => setForm({ ...form, provisionDomain: e.target.value })}
+                    placeholder="Domaine (optionnel, pour ${DOMAIN})"
+                    className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                  />
+                  <textarea
+                    value={form.provisionCommand}
+                    onChange={(e) => setForm({ ...form, provisionCommand: e.target.value })}
+                    rows={4}
+                    placeholder="/opt/failover-site/add-site.sh ${DOMAIN} failover-php82"
+                    className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 font-mono text-xs placeholder:text-neutral-600"
+                  />
+                </>
+              )}
+            </div>
+          )}
           {isDbKind && (
             <div className="space-y-3 rounded border border-neutral-800 p-3">
               <p className="text-xs text-neutral-500">
@@ -1027,6 +1160,15 @@ export default function HaPage() {
                     )}
                   </p>
                 )}
+                {r.provisionPreset && (
+                  <p className="mt-0.5 text-xs text-neutral-600">
+                    Provisioning web :{" "}
+                    <span className="text-neutral-400">
+                      {PROVISION_PRESET_LABELS[r.provisionPreset]}
+                      {r.provisionDomain ? ` — ${r.provisionDomain}` : ""}
+                    </span>
+                  </p>
+                )}
               </div>
               <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${STATUS_STYLES[r.status]}`}>{STATUS_LABELS[r.status]}</span>
             </div>
@@ -1123,6 +1265,67 @@ export default function HaPage() {
                           value={editForm.syncScheduleTime}
                           onChange={(e) => setEditForm({ ...editForm, syncScheduleTime: e.target.value })}
                           className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                        />
+                      </>
+                    )}
+                  </div>
+                )}
+                {r.kind === "folder" && (
+                  <div className="space-y-2 rounded border border-neutral-800 p-3">
+                    <label className="mb-1 block text-xs text-neutral-400">Provisionner le serveur web sur la cible</label>
+                    <select
+                      value={editForm.provisionPreset}
+                      onChange={(e) => setEditForm({ ...editForm, provisionPreset: e.target.value as ProvisionPreset | "" })}
+                      className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                    >
+                      <option value="">Aucun (je gère le vhost moi-même)</option>
+                      {(Object.entries(PROVISION_PRESET_LABELS) as [ProvisionPreset, string][]).map(([id, label]) => (
+                        <option key={id} value={id}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    {editForm.provisionPreset && editForm.provisionPreset !== "custom" && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="mb-1 block text-xs text-neutral-400">Nom de domaine du site</label>
+                          <input
+                            value={editForm.provisionDomain}
+                            onChange={(e) => setEditForm({ ...editForm, provisionDomain: e.target.value })}
+                            placeholder="site1.tld"
+                            className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs text-neutral-400">Version PHP</label>
+                          <select
+                            value={editForm.provisionPhpVersion}
+                            onChange={(e) => setEditForm({ ...editForm, provisionPhpVersion: e.target.value })}
+                            className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                          >
+                            {PROVISION_PHP_VERSIONS.map((v) => (
+                              <option key={v} value={v}>
+                                {v}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    )}
+                    {editForm.provisionPreset === "custom" && (
+                      <>
+                        <input
+                          value={editForm.provisionDomain}
+                          onChange={(e) => setEditForm({ ...editForm, provisionDomain: e.target.value })}
+                          placeholder="Domaine (optionnel, pour ${DOMAIN})"
+                          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                        />
+                        <textarea
+                          value={editForm.provisionCommand}
+                          onChange={(e) => setEditForm({ ...editForm, provisionCommand: e.target.value })}
+                          rows={4}
+                          placeholder="/opt/failover-site/add-site.sh ${DOMAIN} failover-php82"
+                          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 font-mono text-xs placeholder:text-neutral-600"
                         />
                       </>
                     )}
@@ -1374,6 +1577,16 @@ export default function HaPage() {
                   className="rounded border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
                 >
                   Rebrancher le failover
+                </button>
+              )}
+              {r.provisionPreset && (
+                <button
+                  onClick={() => runProvisioningNow(r.id)}
+                  disabled={busyId === r.id || r.status === "setting_up"}
+                  title="Rejoue uniquement la configuration du vhost sur la machine cible, sans retoucher à la synchronisation des fichiers."
+                  className="rounded border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+                >
+                  Relancer le provisioning
                 </button>
               )}
               {(r.kind === "folder" || r.kind === "mysql") && (

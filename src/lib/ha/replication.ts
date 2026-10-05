@@ -4,6 +4,8 @@ import { vaultEncrypt, vaultDecrypt } from "../crypto";
 
 export type ReplicationKind = "folder" | "mysql" | "postgres" | "sqlite";
 export type ReplicationStatus = "unknown" | "setting_up" | "in_sync" | "lagging" | "error" | "stopped";
+/** 'folder' only — see provisioning.ts for what each preset actually runs. */
+export type ProvisionPreset = "docker_lemp" | "apache_native" | "nginx_native" | "custom";
 
 export type Replication = {
   id: string;
@@ -45,6 +47,14 @@ export type Replication = {
    * config, replication role and initial dump are all issued through `docker exec` into this
    * container instead of a native client/service on the source host itself. */
   sourceDbContainer: string | null;
+  /** 'folder' only — see provisioning.ts. Null (the default) skips web-server provisioning on the
+   * target entirely, unchanged behavior for every replication created before this existed. */
+  provisionPreset: ProvisionPreset | null;
+  provisionDomain: string | null;
+  provisionPhpVersion: string | null;
+  /** Only meaningful for provisionPreset === "custom" — the raw command template for every other
+   * preset is built in provisioning.ts, not stored here. */
+  provisionCommand: string | null;
   enabled: boolean;
   status: ReplicationStatus;
   statusDetail: string | null;
@@ -101,6 +111,10 @@ type ReplicationRow = {
   app_db_password_encrypted: string | null;
   target_db_container: string | null;
   source_db_container: string | null;
+  provision_preset: ProvisionPreset | null;
+  provision_domain: string | null;
+  provision_php_version: string | null;
+  provision_command: string | null;
   enabled: number;
   status: ReplicationStatus;
   status_detail: string | null;
@@ -134,6 +148,10 @@ function rowToReplication(row: ReplicationRow): Replication {
     hasAppDbPassword: !!row.app_db_password_encrypted,
     targetDbContainer: row.target_db_container,
     sourceDbContainer: row.source_db_container,
+    provisionPreset: row.provision_preset,
+    provisionDomain: row.provision_domain,
+    provisionPhpVersion: row.provision_php_version,
+    provisionCommand: row.provision_command,
     enabled: row.enabled === 1,
     status: row.status,
     statusDetail: row.status_detail,
@@ -217,14 +235,19 @@ export type CreateReplicationInput = {
   targetDbContainer?: string;
   /** 'mysql' only — same as targetDbContainer, but for the source host. */
   sourceDbContainer?: string;
+  /** 'folder' only — see Replication.provisionPreset. */
+  provisionPreset?: ProvisionPreset;
+  provisionDomain?: string;
+  provisionPhpVersion?: string;
+  provisionCommand?: string;
 };
 
 export function createReplication(input: CreateReplicationInput): Replication {
   const id = randomUUID();
   getDb()
     .prepare(
-      `INSERT INTO ha_replications (id, name, kind, source_host_id, target_host_id, source_path, target_path, db_port, db_user, db_password_encrypted, target_db_user, target_db_password_encrypted, proxy_host_id, target_port, target_owner, target_mode, target_needs_sudo, sync_schedule_time, app_db_user, app_db_password_encrypted, target_db_container, source_db_container)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO ha_replications (id, name, kind, source_host_id, target_host_id, source_path, target_path, db_port, db_user, db_password_encrypted, target_db_user, target_db_password_encrypted, proxy_host_id, target_port, target_owner, target_mode, target_needs_sudo, sync_schedule_time, app_db_user, app_db_password_encrypted, target_db_container, source_db_container, provision_preset, provision_domain, provision_php_version, provision_command)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -248,7 +271,11 @@ export function createReplication(input: CreateReplicationInput): Replication {
       input.appDbUser?.trim() || null,
       input.appDbPassword ? vaultEncrypt(input.appDbPassword) : null,
       input.targetDbContainer?.trim() || null,
-      input.sourceDbContainer?.trim() || null
+      input.sourceDbContainer?.trim() || null,
+      input.provisionPreset || null,
+      input.provisionDomain?.trim() || null,
+      input.provisionPhpVersion?.trim() || null,
+      input.provisionCommand?.trim() || null
     );
   return getReplication(id)!;
 }
@@ -290,6 +317,10 @@ export function duplicateReplication(id: string): Replication | null {
     appDbPassword: secrets.appDbPassword ?? undefined,
     targetDbContainer: original.targetDbContainer ?? undefined,
     sourceDbContainer: original.sourceDbContainer ?? undefined,
+    provisionPreset: original.provisionPreset ?? undefined,
+    provisionDomain: original.provisionDomain ?? undefined,
+    provisionPhpVersion: original.provisionPhpVersion ?? undefined,
+    provisionCommand: original.provisionCommand ?? undefined,
   });
 }
 
@@ -321,6 +352,12 @@ export type UpdateReplicationInput = {
   appDbPassword?: string;
   targetDbContainer?: string | null;
   sourceDbContainer?: string | null;
+  /** 'folder' only — see Replication.provisionPreset. Empty string clears it back to "no
+   * provisioning". */
+  provisionPreset?: ProvisionPreset | null;
+  provisionDomain?: string | null;
+  provisionPhpVersion?: string | null;
+  provisionCommand?: string | null;
 };
 
 /** `undefined` on any field here means "leave as stored" — only fields the caller actually
@@ -336,7 +373,8 @@ export function updateReplication(id: string, input: UpdateReplicationInput): vo
     `UPDATE ha_replications SET
        name = ?, source_path = ?, target_path = ?, db_port = ?, db_user = ?, db_password_encrypted = ?,
        target_db_user = ?, target_db_password_encrypted = ?, target_owner = ?, target_mode = ?, target_needs_sudo = ?,
-       sync_schedule_time = ?, app_db_user = ?, app_db_password_encrypted = ?, target_db_container = ?, source_db_container = ?
+       sync_schedule_time = ?, app_db_user = ?, app_db_password_encrypted = ?, target_db_container = ?, source_db_container = ?,
+       provision_preset = ?, provision_domain = ?, provision_php_version = ?, provision_command = ?
      WHERE id = ?`
   ).run(
     input.name !== undefined ? input.name.trim() : row.name,
@@ -355,6 +393,10 @@ export function updateReplication(id: string, input: UpdateReplicationInput): vo
     input.appDbPassword ? vaultEncrypt(input.appDbPassword) : row.app_db_password_encrypted,
     input.targetDbContainer !== undefined ? input.targetDbContainer?.trim() || null : row.target_db_container,
     input.sourceDbContainer !== undefined ? input.sourceDbContainer?.trim() || null : row.source_db_container,
+    input.provisionPreset !== undefined ? input.provisionPreset || null : row.provision_preset,
+    input.provisionDomain !== undefined ? input.provisionDomain?.trim() || null : row.provision_domain,
+    input.provisionPhpVersion !== undefined ? input.provisionPhpVersion?.trim() || null : row.provision_php_version,
+    input.provisionCommand !== undefined ? input.provisionCommand?.trim() || null : row.provision_command,
     id
   );
 }

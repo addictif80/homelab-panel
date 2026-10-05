@@ -33,6 +33,10 @@ const EDIT_FIELDS = [
   "appDbPassword",
   "targetDbContainer",
   "sourceDbContainer",
+  "provisionPreset",
+  "provisionDomain",
+  "provisionPhpVersion",
+  "provisionCommand",
 ] as const satisfies readonly (keyof UpdateReplicationInput)[];
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

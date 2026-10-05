@@ -27,6 +27,7 @@ function hostLabel(hostId: number): string {
 
 export * from "./replication";
 export { wireFailoverForReplication } from "./failoverWiring";
+export { PROVISION_PRESETS, PROVISION_PHP_VERSIONS, runProvisioning } from "./provisioning";
 
 /** Only 'postgres' setup is destructive to the target today (it wipes and rebuilds the target's
  * data directory from scratch — see postgresReplication.ts's own doc comment for why that's

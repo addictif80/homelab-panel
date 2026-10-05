@@ -29,6 +29,10 @@ export async function POST(req: NextRequest) {
     appDbPassword?: string;
     targetDbContainer?: string;
     sourceDbContainer?: string;
+    provisionPreset?: "docker_lemp" | "apache_native" | "nginx_native" | "custom";
+    provisionDomain?: string;
+    provisionPhpVersion?: string;
+    provisionCommand?: string;
   };
 
   const isDbKind = body.kind === "mysql" || body.kind === "postgres";
@@ -83,6 +87,10 @@ export async function POST(req: NextRequest) {
     appDbPassword: body.appDbPassword,
     targetDbContainer: body.targetDbContainer,
     sourceDbContainer: body.sourceDbContainer,
+    provisionPreset: body.kind === "folder" ? body.provisionPreset : undefined,
+    provisionDomain: body.kind === "folder" ? body.provisionDomain : undefined,
+    provisionPhpVersion: body.kind === "folder" ? body.provisionPhpVersion : undefined,
+    provisionCommand: body.kind === "folder" ? body.provisionCommand : undefined,
   });
   logAudit("ha.replication_created", replication.id, `${body.kind} ${body.sourceHostId}->${body.targetHostId}`);
   return NextResponse.json({ replication });

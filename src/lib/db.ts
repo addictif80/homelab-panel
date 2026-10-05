@@ -888,6 +888,10 @@ export function migrate(db: Database.Database) {
       app_db_password_encrypted TEXT,
       target_db_container TEXT,
       source_db_container TEXT,
+      provision_preset TEXT CHECK (provision_preset IN ('docker_lemp','apache_native','nginx_native','custom')),
+      provision_domain TEXT,
+      provision_php_version TEXT,
+      provision_command TEXT,
       enabled INTEGER NOT NULL DEFAULT 1,
       status TEXT NOT NULL DEFAULT 'unknown' CHECK (status IN ('unknown','setting_up','in_sync','lagging','error','stopped')),
       status_detail TEXT,
@@ -978,6 +982,22 @@ export function migrate(db: Database.Database) {
   // propagation and are far cheaper to reconcile once a day.
   if (!haReplicationColumns.some((c) => c.name === "sync_schedule_time")) {
     db.exec(`ALTER TABLE ha_replications ADD COLUMN sync_schedule_time TEXT`);
+  }
+
+  // 'folder' only, optional — provisions the web server vhost on the target automatically once the
+  // first sync succeeds, so a novice user doesn't have to hand-edit nginx/Apache config over SSH
+  // just to get a usable failover target. provision_preset picks a built-in template (a Docker
+  // stack, native Apache, native Nginx) that only needs a domain + PHP version to fill in; 'custom'
+  // instead runs provision_command verbatim (with ${DOMAIN}/${TARGET_PATH}/etc. placeholders
+  // substituted) for anyone whose setup doesn't match any preset. Null (the default, unchanged for
+  // every replication created before this) skips provisioning entirely — same as before this existed.
+  if (!haReplicationColumns.some((c) => c.name === "provision_preset")) {
+    db.exec(
+      `ALTER TABLE ha_replications ADD COLUMN provision_preset TEXT CHECK (provision_preset IN ('docker_lemp','apache_native','nginx_native','custom'))`
+    );
+    db.exec(`ALTER TABLE ha_replications ADD COLUMN provision_domain TEXT`);
+    db.exec(`ALTER TABLE ha_replications ADD COLUMN provision_php_version TEXT`);
+    db.exec(`ALTER TABLE ha_replications ADD COLUMN provision_command TEXT`);
   }
 
   // Optional fixed wall-clock time (e.g. "03:00") for daily/weekly plans — null keeps the original
