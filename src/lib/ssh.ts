@@ -184,8 +184,26 @@ function connectToAddress(hostId: number, address: string): Promise<SshClient> {
   const config = buildSshConfig(hostId, address);
   const conn = new SshClient();
   return new Promise<SshClient>((resolve, reject) => {
-    conn.once("ready", () => resolve(conn));
-    conn.once("error", reject);
+    let settled = false;
+    conn.once("ready", () => {
+      settled = true;
+      resolve(conn);
+    });
+    // A failed handshake can make ssh2's Client emit 'error' more than once for the same attempt
+    // (e.g. a transport-level error followed by a client-level one). A plain `.once("error", reject)`
+    // consumes its listener on the first of those and leaves none for the second — and an
+    // EventEmitter that emits 'error' with zero listeners left makes Node throw it as a process-wide
+    // uncaughtException. With dozens of hosts polled every 30s/60s by the HA and failover schedulers,
+    // that turned into a sustained storm of "Connection lost before handshake" crashes-that-don't-quite-
+    // crash (caught by server.ts's global handler, but never cleanly) for every persistently-unreachable
+    // host — real CPU/socket churn with no backoff, exactly the kind of background load that can grind
+    // a VM down without any single manual action to point at. A permanent listener here absorbs every
+    // one of them; only the first ever settles the promise.
+    conn.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    });
     conn.connect(config);
   });
 }

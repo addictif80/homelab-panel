@@ -146,6 +146,31 @@ const ALERT_STATES: ReplicationStatus[] = ["error", "stopped"];
 
 type StatusTransition = { direction: "down" | "up"; before: Replication; after: Replication };
 
+// Backs off the automatic 30s sweep (checkAllReplications only — never the manual "Vérifier
+// maintenant" action) for a replication whose host keeps failing, instead of retrying it on every
+// single tick forever. A replication pointed at a host that's genuinely gone (renamed, decommissioned,
+// a stale Tailscale address) used to get a fresh SSH connection attempt every 30s indefinitely, in
+// parallel with every other replication/host this sweep touches — exactly the kind of unthrottled
+// background load that can grind a VM down over hours with no single action to point at. Doubles the
+// wait after each consecutive failure, capped at 10 minutes; a success clears it immediately.
+const failureBackoff = new Map<string, { until: number; failCount: number }>();
+const BACKOFF_CAP_MS = 10 * 60_000;
+
+function isBackedOff(id: string): boolean {
+  const entry = failureBackoff.get(id);
+  return !!entry && Date.now() < entry.until;
+}
+
+function recordCheckResult(id: string, ok: boolean): void {
+  if (ok) {
+    failureBackoff.delete(id);
+    return;
+  }
+  const failCount = (failureBackoff.get(id)?.failCount ?? 0) + 1;
+  const delay = Math.min(CHECK_INTERVAL_MS * 2 ** (failCount - 1), BACKOFF_CAP_MS);
+  failureBackoff.set(id, { until: Date.now() + delay, failCount });
+}
+
 /** Runs the actual per-kind check and reports whether that just flipped this replication into or
  * out of an alert-worthy state — without sending anything itself, so callers can either notify
  * immediately (a single manual check) or batch several transitions from the same sweep into one
@@ -153,14 +178,17 @@ type StatusTransition = { direction: "down" | "up"; before: Replication; after: 
 async function runStatusCheck(id: string): Promise<StatusTransition | null> {
   const before = getReplication(id);
   if (!before) return null;
+  let ok = true;
   try {
     if (before.kind === "folder") await checkFolderReplicationStatus(before);
     else if (before.kind === "sqlite") await runSqliteSync(before);
     else if (before.kind === "mysql") await checkMysqlReplicationStatus(before);
     else await checkPostgresReplicationStatus(before);
   } catch (err) {
+    ok = false;
     updateReplicationStatus(id, "error", err instanceof Error ? err.message : "Erreur inconnue lors de la vérification.");
   }
+  recordCheckResult(id, ok);
 
   const after = getReplication(id);
   if (!after) return null;
@@ -243,7 +271,7 @@ export async function removeReplication(id: string): Promise<void> {
  * already; this only refreshes their displayed status. 'sqlite' has no continuous mechanism at
  * all, so this is what actually performs its next sync, not just a status check. */
 export async function checkAllReplications(): Promise<void> {
-  const replications = listReplications().filter((r) => r.enabled && r.status !== "setting_up");
+  const replications = listReplications().filter((r) => r.enabled && r.status !== "setting_up" && !isBackedOff(r.id));
   const transitions = (await Promise.all(replications.map((r) => runStatusCheck(r.id)))).filter(
     (t): t is StatusTransition => t !== null
   );
