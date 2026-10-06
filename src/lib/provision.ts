@@ -1,5 +1,5 @@
 import { getDb } from "./db";
-import { getOllamaConfig, askOllama } from "./ollama";
+import { isAiConfigured, askAi, AI_NOT_CONFIGURED_MESSAGE } from "./aiProvider";
 import { listAppTemplates } from "./appTemplates";
 
 export type ProvisionSuggestion = {
@@ -33,9 +33,8 @@ function toStringArray(value: unknown): string[] {
  * as if they'd filled it in by hand — one sentence replaces the typing, not the confirmation.
  */
 export async function interpretProvisionSentence(sentence: string): Promise<ProvisionSuggestion> {
-  const config = getOllamaConfig();
-  if (!config.baseUrl || !config.model) {
-    throw new Error("L'assistant IA n'est pas configuré (Réglages > Assistant IA (Ollama)).");
+  if (!isAiConfigured()) {
+    throw new Error(AI_NOT_CONFIGURED_MESSAGE);
   }
 
   const hosts = getDockerHosts();
@@ -63,7 +62,7 @@ Réponds UNIQUEMENT avec un objet JSON, sans aucun texte avant ni après, au for
 
 Si une seule machine est listée, choisis-la même si la demande ne la nomme pas. N'invente jamais d'id de machine ou de modèle qui n'est pas dans les listes ci-dessus.`;
 
-  const raw = await askOllama(prompt);
+  const raw = await askAi(prompt);
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("L'IA n'a pas renvoyé de réponse exploitable — reformule ta demande.");
 

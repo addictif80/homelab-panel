@@ -8,7 +8,9 @@ import CertificateWatchPanel from "@/components/CertificateWatchPanel";
 import DomainRegistrationPanel from "@/components/DomainRegistrationPanel";
 import TrustedContactPanel from "@/components/TrustedContactPanel";
 import TrustedDevicesPanel from "@/components/TrustedDevicesPanel";
+import AiProviderSelector from "@/components/AiProviderSelector";
 import OllamaSettingsPanel from "@/components/OllamaSettingsPanel";
+import OneMinSettingsPanel from "@/components/OneMinSettingsPanel";
 import PortAuditPanel from "@/components/PortAuditPanel";
 import RecoveryVaultPanel from "@/components/RecoveryVaultPanel";
 import LockdownPanel from "@/components/LockdownPanel";
@@ -41,7 +43,9 @@ export default function SettingsPage() {
         <DomainRegistrationPanel />
         <TrustedContactPanel />
         <TrustedDevicesPanel />
+        <AiProviderSelector />
         <OllamaSettingsPanel />
+        <OneMinSettingsPanel />
         <DirectorySettingsPanel />
         <MailLogSourcesPanel />
       </div>

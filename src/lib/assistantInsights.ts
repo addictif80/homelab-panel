@@ -1,5 +1,5 @@
 import { getSetting, setSetting } from "./db";
-import { isOllamaConfigured, askOllama } from "./ollama";
+import { isAiConfigured, askAi } from "./aiProvider";
 import { checkRule321 } from "./backup/rule321";
 import { getOutageSummary } from "./isp/report";
 import { getPowerCostSummary } from "./power/cost";
@@ -56,11 +56,11 @@ export function getProactiveInsight(): ProactiveInsight | null {
  * runs in the background rather than in response to a click.
  */
 export async function refreshProactiveInsight(): Promise<void> {
-  if (!isOllamaConfigured()) return;
+  if (!isAiConfigured()) return;
   const digest = buildDigest();
   const prompt = `Instantané actuel de l'état d'un homelab administré via ce panel :\n${digest}\n\nÉcris, en 2 à 4 phrases maximum et en français, un message proactif comme si tu interpellais l'administrateur en premier — pas une réponse à une question posée, une remarque spontanée sur ce qui mérite le plus son attention en ce moment (ou une note brève et positive s'il n'y a vraiment rien à signaler). Ne liste pas mécaniquement chaque donnée : choisis ce qui compte le plus. Pas de formule d'ouverture type "Bonjour" ou "Salut" — va directement au message.`;
   try {
-    const message = await askOllama(prompt);
+    const message = await askAi(prompt);
     if (message.trim()) {
       setSetting(INSIGHT_KEY, message.trim());
       setSetting(INSIGHT_AT_KEY, new Date().toISOString().slice(0, 19).replace("T", " "));
