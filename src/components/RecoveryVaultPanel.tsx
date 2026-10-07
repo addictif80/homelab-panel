@@ -70,7 +70,7 @@ export default function RecoveryVaultPanel() {
   }
 
   return (
-    <section className="space-y-4 rounded border border-neutral-800 bg-neutral-900 p-4">
+    <section className="space-y-4 card p-4">
       <div>
         <h2 className="text-sm font-semibold text-neutral-100">Coffre-fort de récupération hors-ligne</h2>
         <p className="mt-1 text-xs text-neutral-500">

@@ -73,7 +73,7 @@ export default function OllamaSettingsPanel() {
   }
 
   return (
-    <div className="rounded border border-neutral-800 bg-neutral-900">
+    <div className="card">
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center justify-between px-4 py-2.5 text-sm text-neutral-300"

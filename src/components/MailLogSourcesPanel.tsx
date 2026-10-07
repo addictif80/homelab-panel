@@ -135,7 +135,7 @@ export default function MailLogSourcesPanel() {
   }
 
   return (
-    <section className="space-y-3 rounded border border-neutral-800 bg-neutral-900 p-4">
+    <section className="space-y-3 card p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold text-neutral-100">Anti-spam mail</h2>

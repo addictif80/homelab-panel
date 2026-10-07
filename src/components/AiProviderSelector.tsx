@@ -31,7 +31,7 @@ export default function AiProviderSelector() {
   if (!provider) return null;
 
   return (
-    <div className="flex items-center justify-between rounded border border-neutral-800 bg-neutral-900 px-4 py-2.5">
+    <div className="flex items-center justify-between card px-4 py-2.5">
       <span className="text-sm text-neutral-300">Fournisseur actif pour l&apos;assistant IA</span>
       <select
         value={provider}

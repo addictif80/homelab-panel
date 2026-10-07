@@ -88,7 +88,7 @@ export default function LicensePanel() {
   }
 
   return (
-    <div className="rounded border border-neutral-800 bg-neutral-900 p-4">
+    <div className="card p-4">
       <h2 className="text-sm font-semibold text-neutral-100">Licence</h2>
 
       {!status ? (

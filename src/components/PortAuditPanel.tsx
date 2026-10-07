@@ -34,7 +34,7 @@ export default function PortAuditPanel() {
   }
 
   return (
-    <section className="space-y-3 rounded border border-neutral-800 bg-neutral-900 p-4">
+    <section className="space-y-3 card p-4">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-neutral-100">Auto-audit réseau</h2>
         <button

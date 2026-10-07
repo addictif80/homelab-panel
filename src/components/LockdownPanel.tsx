@@ -33,7 +33,7 @@ export default function LockdownPanel() {
   }
 
   return (
-    <section className="space-y-2 rounded border border-red-900/60 bg-red-950/10 p-4">
+    <section className="space-y-2 rounded-2xl border border-red-900/60 bg-red-950/10 p-4">
       <h2 className="text-sm font-semibold text-red-200">Lockdown</h2>
       <p className="text-xs text-neutral-400">
         En cas de suspicion de compromission : révoque d&apos;un coup toutes les sessions et appareils de confiance
