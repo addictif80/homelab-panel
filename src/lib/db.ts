@@ -925,6 +925,25 @@ export function migrate(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_background_jobs_kind ON background_jobs(kind, started_at DESC);
     CREATE INDEX IF NOT EXISTS idx_background_jobs_status ON background_jobs(status, started_at DESC);
+
+    -- Assistant IA conversation history (lib/assistantHistory.ts) — one row per conversation,
+    -- the whole message array stored as a single JSON blob rather than normalized into a
+    -- messages table: conversations are only ever read/written whole (open one, append to it,
+    -- delete it), never queried per-message, so normalizing would add join overhead for no
+    -- actual benefit here. 'chat' and 'agent' conversations share this table (kind tells them
+    -- apart) since both are just "a sequence of turns" at this level, even though the two modes'
+    -- message shapes differ — the app layer, not the DB, knows how to interpret messages_json for
+    -- each kind.
+    CREATE TABLE IF NOT EXISTS assistant_conversations (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL CHECK (kind IN ('chat','agent')),
+      title TEXT NOT NULL DEFAULT '',
+      messages_json TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_assistant_conversations_kind ON assistant_conversations(kind, updated_at DESC);
   `);
 
   const haReplicationColumns = db.prepare(`PRAGMA table_info(ha_replications)`).all() as { name: string }[];
