@@ -31,7 +31,7 @@ function formatArgs(args: Record<string, unknown>): string {
 }
 
 export default function AssistantPage() {
-  const [config, setConfig] = useState<{ baseUrl: string; model: string; language: string } | null>(null);
+  const [aiStatus, setAiStatus] = useState<{ configured: boolean; label: string | null } | null>(null);
   const [mode, setMode] = useState<"chat" | "agent">("chat");
 
   // Plain conversation mode
@@ -49,9 +49,9 @@ export default function AssistantPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch("/api/settings/ollama")
+    fetch("/api/settings/ai-status")
       .then((r) => r.json())
-      .then((data) => setConfig(data.config));
+      .then((data) => setAiStatus({ configured: data.configured, label: data.label }));
     try {
       const saved = sessionStorage.getItem(STORAGE_KEY);
       if (saved) setMessages(JSON.parse(saved));
@@ -73,7 +73,7 @@ export default function AssistantPage() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [agentMessages, pending]);
 
-  const configured = Boolean(config?.baseUrl && config?.model);
+  const configured = Boolean(aiStatus?.configured);
 
   async function send() {
     const text = input.trim();
@@ -204,14 +204,12 @@ export default function AssistantPage() {
           <h1 className="text-lg font-semibold text-neutral-100">Assistant IA</h1>
           <p className="text-xs text-neutral-500">
             {configured ? (
-              <>
-                Connecté à {config?.model} sur {config?.baseUrl}
-              </>
+              <>Connecté à {aiStatus?.label}</>
             ) : (
               <>
                 Non configuré —{" "}
-                <Link href="/security" className="text-blue-400 hover:underline">
-                  configure Ollama dans Sécurité
+                <Link href="/settings" className="text-blue-400 hover:underline">
+                  configure l&apos;assistant IA dans Réglages
                 </Link>
                 .
               </>
@@ -289,7 +287,7 @@ export default function AssistantPage() {
                 }
               }}
               disabled={!configured || sending}
-              placeholder={configured ? "Écris ton message... (Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne)" : "Configure Ollama pour commencer."}
+              placeholder={configured ? "Écris ton message... (Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne)" : "Configure l'assistant IA pour commencer."}
               rows={2}
               className="flex-1 resize-none rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 disabled:opacity-50"
             />
@@ -380,7 +378,7 @@ export default function AssistantPage() {
                 }
               }}
               disabled={!configured || agentBusy || pending.length > 0}
-              placeholder={configured ? "Décris ce que tu veux consulter ou faire sur l'infrastructure..." : "Configure Ollama pour commencer."}
+              placeholder={configured ? "Décris ce que tu veux consulter ou faire sur l'infrastructure..." : "Configure l'assistant IA pour commencer."}
               rows={2}
               className="flex-1 resize-none rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 disabled:opacity-50"
             />
