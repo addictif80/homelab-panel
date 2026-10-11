@@ -74,6 +74,15 @@ async function pruneOldSnapshots(
 // interrupted from a dropped connection at that point anyway).
 const activeRuns = new Map<string, AbortController>();
 
+// Host ids currently involved (as either source or destination) in a running backup — guards
+// against two *different* plans hitting the same machine at once, which isRunInProgress(planId)
+// above doesn't catch (that only blocks the same plan from overlapping itself). Two plans sharing
+// a source or a destination running concurrently doubles up exactly the disk/CPU load `nice` in
+// transfer.ts is trying to keep out of the other services' way — this caps it at one backup touching
+// any given host at a time instead. Same in-memory-only tradeoff as activeRuns: empty again after a
+// restart, which just means a plan that looked "blocked" can start again rather than staying stuck.
+const busyHosts = new Set<number>();
+
 /** Cancels a running backup — closes its SSH connection outright (see runSshCommandStreaming's own
  * comment for why that's used instead of trying to signal the remote process), which reliably kills
  * whatever rsync/mysqldump/etc. was reading from or writing to it on the next broken-pipe write.
@@ -106,6 +115,13 @@ export async function runBackupPlan(planId: string): Promise<string> {
   const plan = getPlan(planId);
   if (!plan) throw new Error("Plan de sauvegarde introuvable.");
   if (isRunInProgress(planId)) throw new Error("Une sauvegarde pour ce plan est déjà en cours.");
+  if (busyHosts.has(plan.sourceHostId) || busyHosts.has(plan.destHostId)) {
+    throw new Error(
+      "Une autre sauvegarde est déjà en cours sur la machine source ou destination de ce plan — réessaie une fois celle-ci terminée, pour éviter de cumuler la charge sur cette machine."
+    );
+  }
+  busyHosts.add(plan.sourceHostId);
+  busyHosts.add(plan.destHostId);
 
   const runId = startRun(planId);
   const append = (text: string) => appendRunLog(runId, text);
@@ -195,6 +211,8 @@ export async function runBackupPlan(planId: string): Promise<string> {
       finishRun(runId, "failed", null, []);
     } finally {
       activeRuns.delete(runId);
+      busyHosts.delete(plan.sourceHostId);
+      busyHosts.delete(plan.destHostId);
     }
   })();
 

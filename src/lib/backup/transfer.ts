@@ -167,6 +167,18 @@ export async function rsyncTransfer(opts: {
   // BackupRunProgress in the backups page) instead of one file's worth of characters overwriting
   // each other into an unreadable smear.
   const bwlimitFlag = bwlimitKbps ? `--bwlimit=${bwlimitKbps} ` : "";
+  // Lowers this rsync's CPU scheduling priority on both ends — `nice` (not `ionice`: not every
+  // appliance/NAS OS this panel targets has util-linux, and a missing `ionice` binary would fail
+  // the whole command outright, whereas `nice` is POSIX and present even on BusyBox) only yields
+  // the CPU to other processes when something else actually wants it, so an otherwise-idle host
+  // backs up exactly as fast as before — it only matters under real contention, which is the
+  // whole point: the panel moving to its own VM never helped with this, since the actual rsync
+  // work always ran on the source/destination hosts themselves, never on the panel. `--rsync-path`
+  // is what makes the *destination's* spawned `rsync --server` process niced too, not just the
+  // local one on the source — same mechanism folderReplication.ts already uses for `--rsync-path`
+  // (there, sudo instead of nice) to affect what runs on the remote end of this exact connection.
+  const niceRsync = "nice -n19 rsync";
+  const rsyncPathFlag = `--rsync-path=${shellQuote(niceRsync)} `;
   // rsync's own I/O timeout: if no data moves for this long, rsync exits itself with "timeout
   // waiting for daemon connection". Without it, a connection that stalls mid-transfer (the
   // destination dropping off Tailscale, a NAT silently swallowing the connection with no RST...)
@@ -175,7 +187,7 @@ export async function rsyncTransfer(opts: {
   // the health of rsync's own, separate connection from the source *to the destination*, which is
   // where a stall like that actually happens. Five minutes tolerates a slow stat-heavy directory
   // scan on a huge tree without false-positiving on a transfer that's merely slow, not stuck.
-  const command = `rsync -a --delete --stats --info=progress2 --timeout=300 ${bwlimitFlag}${linkFlag}-e ${shellQuote(sshOpts)} ${shellQuote(sourcePath)} ${shellQuote(`${dest.user}@${dest.address}:${destDirSlash}`)}`;
+  const command = `nice -n19 rsync -a --delete --stats --info=progress2 --timeout=300 ${bwlimitFlag}${rsyncPathFlag}${linkFlag}-e ${shellQuote(sshOpts)} ${shellQuote(sourcePath)} ${shellQuote(`${dest.user}@${dest.address}:${destDirSlash}`)}`;
 
   append(`\n$ copie de ${sourcePath} vers ${dest.user}@${dest.address}:${destDirSlash}\n`);
   // Mirrored locally as well as streamed to the job log, purely so the error thrown below can
