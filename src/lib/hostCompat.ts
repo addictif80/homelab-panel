@@ -36,32 +36,47 @@ const PACKAGE_MANAGER_BINS: [PackageManager, string][] = [
 // with a slow mirror or many sources can itself take long enough to blow through the overall SSH
 // timeout well before the lock-wait budget is even exhausted. Separating them means `update` only
 // ever runs again if it specifically was the one that hit the lock.
+const APT_RETRY_HELPER = [
+  `retry_apt() {`,
+  `  CMD="$1"`,
+  `  i=0`,
+  `  while [ "$i" -lt 25 ]; do`,
+  // Single-quoted at the call site below, so $CMD holds the literal text (including the
+  // embedded $PKG) — `eval` is what actually expands $PKG, at the time each attempt runs, not
+  // the call site up front.
+  `    OUT=$(eval "$CMD" 2>&1)`,
+  `    CODE=$?`,
+  `    [ "$CODE" -eq 0 ] && { echo "$OUT"; return 0; }`,
+  `    if echo "$OUT" | grep -qiE "could not get lock|dpkg frontend lock|resource temporarily unavailable"; then`,
+  `      i=$((i + 1))`,
+  `      sleep 7`,
+  `      continue`,
+  `    fi`,
+  `    echo "$OUT" >&2`,
+  `    return "$CODE"`,
+  `  done`,
+  `  echo "apt/dpkg est resté verrouillé par un autre processus pendant plus de 3 minutes (unattended-upgrades ou une autre installation en cours) — réessaie dans quelques minutes." >&2`,
+  `  return 1`,
+  `}`,
+].join("\n");
+
 const APT_LOCK_RETRY_SCRIPT = (pkg: string) =>
   [
     `PKG=${shellQuote(pkg)}`,
-    `retry_apt() {`,
-    `  CMD="$1"`,
-    `  i=0`,
-    `  while [ "$i" -lt 25 ]; do`,
-    // Single-quoted at the call site below, so $CMD holds the literal text (including the
-    // embedded $PKG) — `eval` is what actually expands $PKG, at the time each attempt runs, not
-    // the call site up front.
-    `    OUT=$(eval "$CMD" 2>&1)`,
-    `    CODE=$?`,
-    `    [ "$CODE" -eq 0 ] && { echo "$OUT"; return 0; }`,
-    `    if echo "$OUT" | grep -qiE "could not get lock|dpkg frontend lock|resource temporarily unavailable"; then`,
-    `      i=$((i + 1))`,
-    `      sleep 7`,
-    `      continue`,
-    `    fi`,
-    `    echo "$OUT" >&2`,
-    `    return "$CODE"`,
-    `  done`,
-    `  echo "apt/dpkg est resté verrouillé par un autre processus pendant plus de 3 minutes (unattended-upgrades ou une autre installation en cours) — réessaie dans quelques minutes." >&2`,
-    `  return 1`,
-    `}`,
+    APT_RETRY_HELPER,
     `retry_apt 'apt-get update -qq' || exit $?`,
     `retry_apt 'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$PKG"'`,
+  ].join("\n");
+
+// `--only-upgrade` makes apt upgrade the package if (and only if) it's already installed, instead
+// of installing it fresh — the right semantics for "patch this specific already-running thing",
+// as opposed to installPackageUniversal's "get this onto the machine at all" below.
+const APT_UPGRADE_RETRY_SCRIPT = (pkg: string) =>
+  [
+    `PKG=${shellQuote(pkg)}`,
+    APT_RETRY_HELPER,
+    `retry_apt 'apt-get update -qq' || exit $?`,
+    `retry_apt 'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --only-upgrade "$PKG"'`,
   ].join("\n");
 
 const INSTALL_COMMANDS: Record<PackageManager, (pkg: string) => string> = {
@@ -71,6 +86,15 @@ const INSTALL_COMMANDS: Record<PackageManager, (pkg: string) => string> = {
   apk: (pkg) => `apk add --no-cache ${shellQuote(pkg)}`,
   pacman: (pkg) => `pacman -Sy --noconfirm ${shellQuote(pkg)}`,
   zypper: (pkg) => `zypper --non-interactive install ${shellQuote(pkg)}`,
+};
+
+const UPGRADE_COMMANDS: Record<PackageManager, (pkg: string) => string> = {
+  apt: APT_UPGRADE_RETRY_SCRIPT,
+  dnf: (pkg) => `dnf upgrade -y -q ${shellQuote(pkg)}`,
+  yum: (pkg) => `yum update -y -q ${shellQuote(pkg)}`,
+  apk: (pkg) => `apk update -q >/dev/null 2>&1; apk add --upgrade --no-cache ${shellQuote(pkg)}`,
+  pacman: (pkg) => `pacman -Sy --noconfirm ${shellQuote(pkg)}`,
+  zypper: (pkg) => `zypper --non-interactive update ${shellQuote(pkg)}`,
 };
 
 async function detectPackageManager(hostId: number): Promise<PackageManager | null> {
@@ -111,6 +135,33 @@ export async function installPackageUniversal(
       stderr ||
         `Impossible d'installer ${packageName} automatiquement via ${manager} sur cette machine — installe-le ` +
           `manuellement puis relance la configuration.`
+    );
+  }
+}
+
+/** Upgrades `pkg` in place if it's already installed, via whichever supported package manager is
+ * present — the patch-a-known-vulnerability counterpart to installPackageUniversal above, which
+ * is about getting something onto the machine at all rather than updating what's already there. */
+export async function upgradePackageUniversal(
+  hostId: number,
+  pkg: string,
+  altNames: Partial<Record<PackageManager, string>> = {}
+): Promise<void> {
+  const manager = await detectPackageManager(hostId);
+  if (!manager) {
+    throw new Error(
+      `Aucun gestionnaire de paquets reconnu sur cette machine (apt, dnf, yum, apk, pacman, zypper) — mets à jour ` +
+        `${pkg} manuellement.`
+    );
+  }
+  const packageName = altNames[manager] || pkg;
+  const { code, stderr } = await runSshCommand(hostId, UPGRADE_COMMANDS[manager](packageName), {
+    sudo: true,
+    timeoutMs: manager === "apt" ? 600_000 : 120_000,
+  });
+  if (code !== 0) {
+    throw new Error(
+      stderr || `Impossible de mettre à jour ${packageName} automatiquement via ${manager} sur cette machine — mets-le à jour manuellement.`
     );
   }
 }

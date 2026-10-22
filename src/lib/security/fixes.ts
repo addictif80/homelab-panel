@@ -3,7 +3,7 @@ import { getDb } from "../db";
 import { buildUpdateCommand, startUpdateJob, type UpdateMethod } from "../updates";
 import { withTimeout } from "../timeout";
 import { blockIp, blockIpEverywhere, firewallBackendScript } from "../firewall";
-import { installPackageUniversal, restartService } from "../hostCompat";
+import { installPackageUniversal, upgradePackageUniversal, restartService } from "../hostCompat";
 
 export type FixResult = { message: string; jobId?: string };
 
@@ -114,6 +114,22 @@ export const FIX_REGISTRY: Record<string, FixFn> = {
     return {
       message: `Pare-feu de base activé (SSH sur le port ${sshPort} conservé, reste du trafic entrant bloqué).`,
     };
+  },
+
+  "upgrade-runtime-package": async (hostId, params) => {
+    const pkg = params?.pkg;
+    if (!pkg) throw new Error("Paquet manquant.");
+    await upgradePackageUniversal(hostId, pkg);
+    if (params?.service) {
+      const { code, stderr } = await restartService(hostId, params.service);
+      if (code !== 0) {
+        return {
+          message: `${pkg} mis à jour, mais le redémarrage du service "${params.service}" a échoué (${stderr.trim() || "erreur inconnue"}) — redémarre-le manuellement pour que la mise à jour prenne effet.`,
+        };
+      }
+      return { message: `${pkg} mis à jour et service "${params.service}" redémarré.` };
+    }
+    return { message: `${pkg} mis à jour. Redémarre le service concerné manuellement si nécessaire pour que la mise à jour prenne effet.` };
   },
 
   "block-ip": async (hostId, params) => {

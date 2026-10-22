@@ -319,6 +319,19 @@ export function migrate(db: Database.Database) {
       blocked_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    -- Caches CVE lookups against NVD (runtime binaries: PHP, Node, MySQL/MariaDB, nginx, Apache,
+    -- OpenSSH) and OSV.dev (composer/npm package manifests) — keyed by exactly what was looked up
+    -- (software + version, or ecosystem + package + version), not by host, since the same
+    -- software/version combination gives the identical answer on every host that happens to run
+    -- it. Re-fetched at most once per CACHE_TTL_DAYS (see vulnDb.ts) rather than on every scan:
+    -- both APIs are public and free but rate-limited (NVD especially, 5 req/30s with no key), and a
+    -- given version's CVE list doesn't change from one scan to the next anyway.
+    CREATE TABLE IF NOT EXISTS vuln_scan_cache (
+      lookup_key TEXT PRIMARY KEY,
+      cves_json TEXT NOT NULL,
+      checked_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS maintenance_plans (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,

@@ -4,6 +4,7 @@ import { analyzeHost } from "./analyze";
 import { historicalLogFindings } from "./logScan";
 import { hostDiagnosticsFindings } from "./hostDiagnostics";
 import { secretsExposureFindings } from "./secretsScan";
+import { vulnerabilityFindings } from "./vulnScan";
 import { listIgnoredKeys } from "./ignore";
 import { scanCertificates } from "./certFindings";
 import { scanDomainRegistrations } from "./domainFindings";
@@ -29,13 +30,14 @@ export async function scanHost(host: HostRow): Promise<HostScanResult> {
   try {
     const facts = await collectHostFacts(host.id);
     const findings = analyzeHost(host, facts);
-    const [logFindings, diagFindings, secretFindings] = await Promise.all([
+    const [logFindings, diagFindings, secretFindings, vulnFindings] = await Promise.all([
       historicalLogFindings(host.id).catch(() => []),
       hostDiagnosticsFindings(host.id).catch(() => []),
       secretsExposureFindings(host.id).catch(() => []),
+      vulnerabilityFindings(host.id).catch(() => []),
     ]);
     const ignoredKeys = listIgnoredKeys();
-    const allFindings = [...findings, ...logFindings, ...diagFindings, ...secretFindings].map((f) =>
+    const allFindings = [...findings, ...logFindings, ...diagFindings, ...secretFindings, ...vulnFindings].map((f) =>
       ignoredKeys.has(`${host.id}:${f.id}`) ? { ...f, ignored: true } : f
     );
     return {
