@@ -149,6 +149,17 @@ export default function InventoryPage() {
   const [linkForm, setLinkForm] = useState({ host_a_id: "", host_b_id: "", link_type: "lan" });
   const [linkError, setLinkError] = useState("");
 
+  // DNS — per-host modal state, plus the "apply to all" bulk section at the top of the list.
+  const [dnsHostId, setDnsHostId] = useState<number | null>(null);
+  const [dnsCurrent, setDnsCurrent] = useState<string[] | null>(null);
+  const [dnsInput, setDnsInput] = useState("");
+  const [dnsSaving, setDnsSaving] = useState(false);
+  const [dnsError, setDnsError] = useState("");
+  const [bulkDnsInput, setBulkDnsInput] = useState("");
+  const [bulkDnsApplying, setBulkDnsApplying] = useState(false);
+  const [bulkDnsResult, setBulkDnsResult] = useState<{ applied: number; failed: { host: string; error: string }[] } | null>(null);
+  const [bulkDnsOpen, setBulkDnsOpen] = useState(false);
+
   const load = useCallback(async () => {
     const res = await fetch("/api/hosts");
     const data = await res.json();
@@ -160,6 +171,12 @@ export default function InventoryPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    fetch("/api/hosts/dns/apply-all")
+      .then((r) => r.json())
+      .then((data) => setBulkDnsInput((data.servers ?? []).join(", ")));
+  }, []);
 
   // A device found by /discovery can hand off here to pre-fill the "add machine" form instead of
   // duplicating host-creation logic in two places.
@@ -266,6 +283,60 @@ export default function InventoryPage() {
     return hosts.find((h) => h.id === id)?.name ?? `#${id}`;
   }
 
+  function parseDnsInput(value: string): string[] {
+    return value.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+  }
+
+  async function openDns(h: Host) {
+    setDnsHostId(h.id);
+    setDnsCurrent(null);
+    setDnsError("");
+    setDnsInput("");
+    const res = await fetch(`/api/hosts/${h.id}/dns`);
+    const data = await res.json();
+    setDnsCurrent(data.servers ?? []);
+    setDnsInput((data.servers ?? []).join(", "));
+  }
+
+  async function saveDns() {
+    if (dnsHostId === null) return;
+    setDnsSaving(true);
+    setDnsError("");
+    try {
+      const res = await fetch(`/api/hosts/${dnsHostId}/dns`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ servers: parseDnsInput(dnsInput) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setDnsHostId(null);
+    } catch (err) {
+      setDnsError(err instanceof Error ? err.message : "Erreur.");
+    } finally {
+      setDnsSaving(false);
+    }
+  }
+
+  async function applyBulkDns() {
+    setBulkDnsApplying(true);
+    setBulkDnsResult(null);
+    try {
+      const res = await fetch("/api/hosts/dns/apply-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ servers: parseDnsInput(bulkDnsInput) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setBulkDnsResult(data);
+    } catch (err) {
+      setBulkDnsResult({ applied: 0, failed: [{ host: "—", error: err instanceof Error ? err.message : "Erreur." }] });
+    } finally {
+      setBulkDnsApplying(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -298,6 +369,55 @@ export default function InventoryPage() {
             + Ajouter une machine
           </button>
         </div>
+      </div>
+
+      <div className="card">
+        <button
+          onClick={() => setBulkDnsOpen((o) => !o)}
+          className="flex w-full items-center justify-between px-4 py-2.5 text-sm text-neutral-300"
+        >
+          <span>Serveurs DNS — appliquer à toutes les machines</span>
+          <span className="text-neutral-500">{bulkDnsOpen ? "▲" : "▼"}</span>
+        </button>
+        {bulkDnsOpen && (
+          <div className="space-y-2 border-t border-neutral-800 p-4">
+            <p className="text-xs text-neutral-500">
+              Écrase <code>/etc/resolv.conf</code> sur toutes les machines de l&apos;inventaire — les routeurs sont
+              exclus (leur DNS se gère via leur propre intégration, pas en SSH). Verrouille le fichier (
+              <code>chattr +i</code>) quand c&apos;est possible pour empêcher DHCP/systemd-resolved de l&apos;écraser au
+              prochain renouvellement de bail.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={bulkDnsInput}
+                onChange={(e) => setBulkDnsInput(e.target.value)}
+                placeholder="1.1.1.1, 1.0.0.1"
+                className="flex-1 min-w-[200px] rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+              />
+              <button
+                onClick={applyBulkDns}
+                disabled={bulkDnsApplying || !bulkDnsInput.trim()}
+                className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-xs text-blue-200 hover:bg-blue-900/60 disabled:opacity-50"
+              >
+                {bulkDnsApplying ? "Application..." : "Appliquer à toutes les machines"}
+              </button>
+            </div>
+            {bulkDnsResult && (
+              <div className="rounded border border-neutral-800 bg-neutral-900 p-2 text-xs">
+                <p className="text-emerald-400">{bulkDnsResult.applied} machine(s) mise(s) à jour.</p>
+                {bulkDnsResult.failed.length > 0 && (
+                  <ul className="mt-1 space-y-0.5 text-red-400">
+                    {bulkDnsResult.failed.map((f, i) => (
+                      <li key={i}>
+                        {f.host} : {f.error}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {loading ? (
@@ -349,6 +469,14 @@ export default function InventoryPage() {
                     >
                       Modifier
                     </button>
+                    {h.kind !== "router" && (
+                      <button
+                        onClick={() => openDns(h)}
+                        className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+                      >
+                        DNS
+                      </button>
+                    )}
                     <button
                       onClick={() => deleteHost(h)}
                       className="rounded border border-neutral-700 px-2 py-0.5 text-xs text-red-400 hover:bg-neutral-800"
@@ -676,6 +804,54 @@ export default function InventoryPage() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {dnsHostId !== null && (
+        <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/60 p-8">
+          <div className="max-h-full w-full max-w-md space-y-3 overflow-auto rounded border border-neutral-700 bg-neutral-950 p-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold">Serveurs DNS — {hostName(dnsHostId)}</h2>
+              <button onClick={() => setDnsHostId(null)} className="text-neutral-500 hover:text-neutral-300">
+                ✕
+              </button>
+            </div>
+
+            {dnsCurrent === null ? (
+              <p className="text-sm text-neutral-500">Lecture de /etc/resolv.conf...</p>
+            ) : (
+              <>
+                <p className="text-xs text-neutral-500">
+                  Actuels : {dnsCurrent.length > 0 ? dnsCurrent.join(", ") : "aucun détecté"}
+                </p>
+                <div>
+                  <label className="block text-xs mb-1">Nouveaux serveurs DNS (séparés par une virgule)</label>
+                  <input
+                    value={dnsInput}
+                    onChange={(e) => setDnsInput(e.target.value)}
+                    placeholder="1.1.1.1, 1.0.0.1"
+                    className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                  />
+                </div>
+                {dnsError && <p className="text-xs text-red-400">{dnsError}</p>}
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    onClick={() => setDnsHostId(null)}
+                    className="rounded border border-neutral-700 px-3 py-1.5 text-sm hover:bg-neutral-800"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={saveDns}
+                    disabled={dnsSaving || !dnsInput.trim()}
+                    className="rounded bg-blue-600 text-white px-3 py-1.5 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
+                  >
+                    {dnsSaving ? "Enregistrement..." : "Appliquer"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
