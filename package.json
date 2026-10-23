@@ -18,7 +18,7 @@
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^13.0.3",
     "jose": "^6.2.12",
-    "next": "16.3.8",
+    "next": "16.4.3",
     "nodemailer": "^10.0.13",
     "otpauth": "^9.5.2",
     "puppeteer-core": "^25.11.0",
