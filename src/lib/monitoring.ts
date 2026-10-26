@@ -59,11 +59,14 @@ function parseStats(stdout: string): Omit<HostStats, "hostId" | "hostName" | "er
 }
 
 async function getHostStatsViaSsh(hostId: number, hostName: string): Promise<HostStats> {
-  const { stdout, code } = await withTimeout(
-    runSshCommand(hostId, STATS_COMMAND, { sudo: false }),
-    HOST_TIMEOUT_MS,
-    `Timeout: ${hostName} n'a pas répondu.`
-  );
+  // timeoutMs goes to runSshCommand itself, not just a withTimeout() wrapped around it — a wrapper
+  // only stops the panel from *waiting*, it doesn't close the actual SSH connection or kill the
+  // remote command. Without this, a host where STATS_COMMAND genuinely hangs (df stuck on a dead
+  // NFS/SMB mount is the classic case) leaves a stuck connection and a runaway remote command
+  // behind on every single monitoring cycle, forever, invisible from here — which looks exactly
+  // like "this host times out" even though SSH itself is fine, as confirmed by the terminal module
+  // connecting instantly to the same host.
+  const { stdout, code } = await runSshCommand(hostId, STATS_COMMAND, { sudo: false, timeoutMs: HOST_TIMEOUT_MS });
   if (code !== 0) throw new Error("Impossible de lire les statistiques.");
   return { hostId, hostName, ...parseStats(stdout), error: null };
 }
