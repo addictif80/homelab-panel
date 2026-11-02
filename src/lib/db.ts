@@ -104,6 +104,7 @@ export function migrate(db: Database.Database) {
       ssh_port INTEGER DEFAULT 22,
       ssh_user TEXT,
       docker_enabled INTEGER NOT NULL DEFAULT 0,
+      incus_enabled INTEGER NOT NULL DEFAULT 0,
       update_method TEXT,
       needs_sudo INTEGER NOT NULL DEFAULT 1,
       proxmox_node TEXT,
@@ -1132,6 +1133,9 @@ export function migrate(db: Database.Database) {
   }
   if (!hostColumns.some((c) => c.name === "watts_max")) {
     db.exec(`ALTER TABLE hosts ADD COLUMN watts_max INTEGER`);
+  }
+  if (!hostColumns.some((c) => c.name === "incus_enabled")) {
+    db.exec(`ALTER TABLE hosts ADD COLUMN incus_enabled INTEGER NOT NULL DEFAULT 0`);
   }
 
   const licenseColumns = db.prepare(`PRAGMA table_info(license)`).all() as { name: string }[];

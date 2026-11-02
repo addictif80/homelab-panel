@@ -20,8 +20,9 @@ export default function Terminal({
 }: {
   hostId: number;
   containerId?: string;
-  /** "pct" for a Proxmox LXC (via `pct exec` on the node); ignored unless containerId is set. */
-  execKind?: "docker" | "pct";
+  /** "pct" for a Proxmox LXC (via `pct exec`), "incus" for an Incus container/VM (via
+   * `incus exec`) — both ignored unless containerId is set. */
+  execKind?: "docker" | "pct" | "incus";
   onStatusChange?: (status: "connecting" | "connected" | "closed" | "error", message?: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);

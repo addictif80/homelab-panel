@@ -46,7 +46,7 @@ export function attachSshWebSocketServer(server: import("http").Server) {
         return;
       }
       const containerId = typeof query.containerId === "string" ? query.containerId : null;
-      const execKind = query.execKind === "pct" ? "pct" : "docker";
+      const execKind = query.execKind === "pct" ? "pct" : query.execKind === "incus" ? "incus" : "docker";
       const execTarget: ExecTarget | null = containerId ? { kind: execKind, id: containerId } : null;
 
       wss.handleUpgrade(req, socket, head, (ws) => {

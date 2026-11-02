@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const hostId = Number(body.hostId);
   const containerId = typeof body.containerId === "string" ? body.containerId : null;
-  const execKind = body.execKind === "pct" ? "pct" : "docker";
+  const execKind = body.execKind === "pct" ? "pct" : body.execKind === "incus" ? "incus" : "docker";
   if (!hostId) return NextResponse.json({ error: "Machine requise." }, { status: 400 });
 
   const sessionId = createPollSession(hostId, containerId ? { kind: execKind, id: containerId } : null, username);

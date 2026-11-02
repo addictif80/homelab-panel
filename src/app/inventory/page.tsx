@@ -16,6 +16,7 @@ type Host = {
   ssh_port: number;
   ssh_user: string | null;
   docker_enabled: number;
+  incus_enabled: number;
   update_method: string | null;
   needs_sudo: number;
   proxmox_node: string | null;
@@ -61,6 +62,7 @@ type FormState = {
   ssh_port: string;
   ssh_user: string;
   docker_enabled: boolean;
+  incus_enabled: boolean;
   update_method: string;
   needs_sudo: boolean;
   proxmox_node: string;
@@ -82,6 +84,7 @@ const EMPTY_FORM: FormState = {
   ssh_port: "22",
   ssh_user: "",
   docker_enabled: false,
+  incus_enabled: false,
   update_method: "",
   needs_sudo: true,
   proxmox_node: "",
@@ -104,6 +107,7 @@ function hostToForm(h: Host): FormState {
     ssh_port: String(h.ssh_port ?? 22),
     ssh_user: h.ssh_user ?? "",
     docker_enabled: !!h.docker_enabled,
+    incus_enabled: !!h.incus_enabled,
     update_method: h.update_method ?? "",
     needs_sudo: !!h.needs_sudo,
     proxmox_node: h.proxmox_node ?? "",
@@ -127,6 +131,7 @@ function formToPayload(f: FormState) {
     ssh_port: Number(f.ssh_port) || 22,
     ssh_user: f.ssh_user || null,
     docker_enabled: f.docker_enabled,
+    incus_enabled: f.incus_enabled,
     update_method: f.update_method || null,
     needs_sudo: f.needs_sudo,
     proxmox_node: f.proxmox_node || null,
@@ -733,6 +738,14 @@ export default function InventoryPage() {
                     onChange={(e) => setForm({ ...form, docker_enabled: e.target.checked })}
                   />
                   Docker sur cette machine
+                </label>
+                <label className="flex items-center gap-2 text-xs text-neutral-400">
+                  <input
+                    type="checkbox"
+                    checked={form.incus_enabled}
+                    onChange={(e) => setForm({ ...form, incus_enabled: e.target.checked })}
+                  />
+                  Incus sur cette machine
                 </label>
                 <label className="flex items-center gap-2 text-xs text-neutral-400">
                   <input

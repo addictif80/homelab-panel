@@ -24,7 +24,7 @@ export type SshChannelCallbacks = {
   onClose: () => void;
 };
 
-export type ExecTarget = { kind: "docker" | "pct"; id: string };
+export type ExecTarget = { kind: "docker" | "pct" | "incus"; id: string };
 
 export function openSshChannel(
   hostId: number,
@@ -44,6 +44,13 @@ export function openSshChannel(
       // when the host is actually configured to need it, same as every other privileged command.
       const pctCmd = `pct exec ${Number(execTarget.id)} -- bash -l`;
       execCommand = buildPrivilegedCommand(hostId, pctCmd);
+    } else if (execTarget?.kind === "incus") {
+      // Same "exec bash, fall back to sh" robustness as the Docker branch above — an Incus
+      // container isn't guaranteed to have bash (minimal/Alpine-based images are common), and
+      // `incus exec` has no login-shell flag of its own to fall back for us the way `pct exec`'s
+      // `-l` does.
+      const incusCmd = `incus exec ${shellQuote(execTarget.id)} -- sh -c 'exec bash || exec sh'`;
+      execCommand = buildPrivilegedCommand(hostId, incusCmd);
     }
   } catch (err) {
     // Deferred so the caller can finish registering the handle before onError can trigger any

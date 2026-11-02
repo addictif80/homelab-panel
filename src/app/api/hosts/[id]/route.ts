@@ -16,6 +16,7 @@ const EDITABLE_FIELDS = [
   "ssh_port",
   "ssh_user",
   "docker_enabled",
+  "incus_enabled",
   "update_method",
   "needs_sudo",
   "proxmox_node",
@@ -27,7 +28,7 @@ const EDITABLE_FIELDS = [
 ] as const;
 
 // better-sqlite3 only binds numbers, strings, bigints, buffers and null — booleans throw.
-const BOOLEAN_FIELDS = new Set(["docker_enabled", "needs_sudo", "offsite"]);
+const BOOLEAN_FIELDS = new Set(["docker_enabled", "incus_enabled", "needs_sudo", "offsite"]);
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {

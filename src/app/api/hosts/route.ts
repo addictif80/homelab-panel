@@ -17,6 +17,7 @@ export type Host = {
   ssh_port: number;
   ssh_user: string | null;
   docker_enabled: number;
+  incus_enabled: number;
   update_method: string | null;
   needs_sudo: number;
   proxmox_node: string | null;
@@ -58,6 +59,7 @@ export async function POST(req: NextRequest) {
     ssh_port,
     ssh_user,
     docker_enabled,
+    incus_enabled,
     update_method,
     needs_sudo,
     proxmox_node,
@@ -89,8 +91,8 @@ export async function POST(req: NextRequest) {
   try {
     const info = db
       .prepare(
-        `INSERT INTO hosts (name, slug, kind, role, os, cluster, lan_ip, tailscale_ip, public_ip, ssh_port, ssh_user, docker_enabled, update_method, needs_sudo, proxmox_node, notes, offsite)
-         VALUES (@name, @slug, @kind, @role, @os, @cluster, @lan_ip, @tailscale_ip, @public_ip, @ssh_port, @ssh_user, @docker_enabled, @update_method, @needs_sudo, @proxmox_node, @notes, @offsite)`
+        `INSERT INTO hosts (name, slug, kind, role, os, cluster, lan_ip, tailscale_ip, public_ip, ssh_port, ssh_user, docker_enabled, incus_enabled, update_method, needs_sudo, proxmox_node, notes, offsite)
+         VALUES (@name, @slug, @kind, @role, @os, @cluster, @lan_ip, @tailscale_ip, @public_ip, @ssh_port, @ssh_user, @docker_enabled, @incus_enabled, @update_method, @needs_sudo, @proxmox_node, @notes, @offsite)`
       )
       .run({
         name,
@@ -105,6 +107,7 @@ export async function POST(req: NextRequest) {
         ssh_port: ssh_port ?? 22,
         ssh_user: ssh_user ?? null,
         docker_enabled: docker_enabled ? 1 : 0,
+        incus_enabled: incus_enabled ? 1 : 0,
         update_method: update_method ?? null,
         needs_sudo: needs_sudo === undefined ? 1 : needs_sudo ? 1 : 0,
         proxmox_node: proxmox_node ?? null,

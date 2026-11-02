@@ -26,7 +26,7 @@ type SshTarget = {
   sublabel: string;
   hostId: number;
   containerId?: string;
-  execKind?: "docker" | "pct";
+  execKind?: "docker" | "pct" | "incus";
 };
 
 export default function SshPage() {
@@ -42,6 +42,7 @@ function SshPageInner() {
   const [hosts, setHosts] = useState<Host[]>([]);
   const [dockerTargets, setDockerTargets] = useState<SshTarget[]>([]);
   const [lxcTargets, setLxcTargets] = useState<SshTarget[]>([]);
+  const [incusTargets, setIncusTargets] = useState<SshTarget[]>([]);
   // Every target a terminal has been opened for stays mounted (just hidden, never unmounted) once
   // opened, so switching the active tab — or, on mobile, closing the modal — never tears down its
   // WebSocket. Only the explicit "✕ close" on a tab actually disconnects it.
@@ -62,7 +63,7 @@ function SshPageInner() {
     sublabel: h.tailscale_ip || h.lan_ip || h.public_ip || "pas d'IP",
     hostId: h.id,
   }));
-  const allTargets = [...hostTargets, ...dockerTargets, ...lxcTargets];
+  const allTargets = [...hostTargets, ...dockerTargets, ...lxcTargets, ...incusTargets];
   const activeTarget = allTargets.find((t) => t.key === activeKey) ?? null;
   // The sudo/credentials management panel only makes sense for a real inventory host — an ad-hoc
   // Docker container or LXC has no SSH credentials of its own, it rides on its host's.
@@ -152,6 +153,26 @@ function SshPageInner() {
     })();
   }, []);
 
+  useEffect(() => {
+    fetch("/api/incus/instances")
+      .then((r) => r.json())
+      .then((d) => {
+        type AggregatedInstance = { name: string; status: string; type: string; hostId: number; hostName: string };
+        const running = (d.instances as AggregatedInstance[]).filter((i) => i.status === "Running");
+        setIncusTargets(
+          running.map((i) => ({
+            key: `incus:${i.hostId}:${i.name}`,
+            label: i.name,
+            sublabel: `Incus — ${i.hostName}`,
+            hostId: i.hostId,
+            containerId: i.name,
+            execKind: "incus" as const,
+          }))
+        );
+      })
+      .catch(() => {});
+  }, []);
+
   async function toggleNeedsSudo() {
     if (!selectedHost) return;
     const next = selectedHost.needs_sudo ? 0 : 1;
@@ -225,6 +246,7 @@ function SshPageInner() {
         <TargetGroup title="Machines" targets={hostTargets} activeKey={activeKey} openKeys={openKeys} onOpen={openTarget} />
         <TargetGroup title="Conteneurs Docker" targets={dockerTargets} activeKey={activeKey} openKeys={openKeys} onOpen={openTarget} />
         <TargetGroup title="LXC Proxmox" targets={lxcTargets} activeKey={activeKey} openKeys={openKeys} onOpen={openTarget} />
+        <TargetGroup title="Conteneurs Incus" targets={incusTargets} activeKey={activeKey} openKeys={openKeys} onOpen={openTarget} />
 
         {selectedHost && (
           <div className="space-y-2 border-t border-neutral-800 pt-4">
