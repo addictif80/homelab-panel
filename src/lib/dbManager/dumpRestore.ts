@@ -1,10 +1,16 @@
-import { randomUUID } from "crypto";
-import { runSshCommand, shellQuote } from "../ssh";
-import { withTimeout } from "../timeout";
+import type { Client as SshClient, ClientChannel } from "ssh2";
+import { connectSsh, buildPrivilegedCommand, shellQuote } from "../ssh";
 import { vaultDecrypt } from "../crypto";
 import { explainMysqlError, type DbConnection } from "./sqlRunner";
 
-const DUMP_TIMEOUT_MS = 5 * 60_000;
+/** Hard ceiling on an import's upload size — matches what the UI advertises and tells the user
+ * about up front, rather than letting a huge file fail unpredictably deep into the transfer. */
+export const MAX_IMPORT_BYTES = 1024 * 1024 * 1024; // 1 GiB
+
+// No ceiling on *total* transfer time — a near-1GB dump/restore over a slow homelab link can
+// legitimately take a while. Reset on every byte that actually moves instead, so only a
+// connection that's gone fully silent (not just slow) gets torn down.
+const IDLE_TIMEOUT_MS = 2 * 60_000;
 
 // Same reasoning as sqlRunner.ts's MYSQL_BIN_DETECT: recent MariaDB packaging/images can lack the
 // `mysql`/`mysqldump` compatibility names entirely, only shipping `mariadb`/`mariadb-dump`.
@@ -25,10 +31,6 @@ function dumpCommand(conn: DbConnection, password: string, database: string): st
       const script = `${detect}; exec "$BIN" ${args}`;
       return `docker exec -e MYSQL_PWD=${shellQuote(password)} ${shellQuote(conn.containerId)} sh -c ${shellQuote(script)}`;
     }
-    // Parenthesized into a subshell group so this is safe to use as one stage of a pipe on
-    // either side (`( A; B; C ) | next` or `prev | ( A; B; C )`) — without the parens, `;`
-    // sequencing and `|` piping only bind to the single statement adjacent to the pipe operator,
-    // silently dropping the detection step or the piped data depending on which side this lands on.
     return `(${detect}; MYSQL_PWD=${shellQuote(password)} "$BIN" ${args})`;
   }
   const cmd = `pg_dump -h ${shellQuote(conn.dbHost)} -p ${conn.dbPort} -U ${shellQuote(conn.username)} -d ${shellQuote(database)}`;
@@ -53,59 +55,166 @@ function restoreCommand(conn: DbConnection, password: string, database: string):
     : `PGPASSWORD=${shellQuote(password)} ${cmd}`;
 }
 
-/** Dumps a single database to a gzip'd SQL file, entirely on the remote host, and returns it
- * base64-encoded over the same SSH exec channel used for everything else — no separate file
- * transfer step needed, at the cost of holding the whole dump in memory for a homelab-scale
- * database (acceptable; a multi-GB production dump would want the panel's real backup engine —
- * see lib/backup/sources/database.ts — with retention and streaming to disk, not this one-off
- * "download a copy right now" action). */
-export async function dumpDatabaseToBase64(conn: DbConnection, database: string): Promise<{ base64: string; filename: string }> {
-  const password = vaultDecrypt(conn.passwordEncrypted);
-  const remoteTmp = `/tmp/homelab-panel-db-dump-${randomUUID()}.sql.gz`;
-  const command = `set -o pipefail; ${dumpCommand(conn, password, database)} | gzip > ${shellQuote(remoteTmp)} && base64 -w0 ${shellQuote(remoteTmp)}; RC=$?; rm -f ${shellQuote(remoteTmp)}; exit $RC`;
-
-  const { stdout, code, stderr } = await withTimeout(
-    runSshCommand(conn.hostId, command, { sudo: true }),
-    DUMP_TIMEOUT_MS,
-    "Délai dépassé lors de l'export."
+/** Opens the exec channel for `rawCommand`, wrapped in sudo (and fed the sudo password on stdin)
+ * exactly like every other privileged command in the panel — see buildPrivilegedCommand's own
+ * comment for why this is applied uniformly rather than only when strictly necessary. */
+function execPrivileged(hostId: number, rawCommand: string): Promise<{ client: SshClient; channel: ClientChannel }> {
+  const { command, stdinPassword } = buildPrivilegedCommand(hostId, rawCommand);
+  return connectSsh(hostId).then(
+    (client) =>
+      new Promise((resolve, reject) => {
+        client.exec(command, (err, channel) => {
+          if (err) {
+            client.end();
+            reject(err);
+            return;
+          }
+          if (stdinPassword) channel.write(`${stdinPassword}\n`);
+          resolve({ client, channel });
+        });
+      })
   );
-  if (code !== 0) throw new Error(conn.engine === "mysql" ? explainMysqlError(stderr) : stderr.trim() || "Échec de l'export de la base.");
-  return { base64: stdout.trim(), filename: `${database}-${new Date().toISOString().slice(0, 10)}.sql.gz` };
 }
 
-/** Restores from a .sql or .sql.gz file's raw bytes (already read into memory by the API route
- * from the uploaded file) by shipping it to the remote host as base64 over stdin, then piping it
- * (decompressing first if gzipped) straight into mysql/psql — the same "no separate transfer
- * step" trade-off as the dump side, sized for a homelab restore rather than a multi-GB one. */
-export async function restoreDatabaseFromBase64(
+function safeEnd(client: SshClient) {
+  try {
+    client.end();
+  } catch {
+    // already closing
+  }
+}
+
+/** Idle-reset watchdog: only fires if nothing — no stdout, no stderr, no input chunk — has moved
+ * for IDLE_TIMEOUT_MS. Call `.poke()` from whichever side carries the real payload (stdout for a
+ * dump, the upload's own data events for a restore). */
+function armIdleWatchdog(client: SshClient, channel: ClientChannel, onTimeout: () => void) {
+  let timer: NodeJS.Timeout;
+  const poke = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      try {
+        channel.close();
+      } catch {
+        // already closing
+      }
+      safeEnd(client);
+      onTimeout();
+    }, IDLE_TIMEOUT_MS);
+  };
+  poke();
+  channel.on("data", poke);
+  channel.stderr.on("data", poke);
+  return { cancel: () => clearTimeout(timer), poke };
+}
+
+/**
+ * Dumps a database as a gzip'd byte stream straight from the remote mysqldump/pg_dump process —
+ * no remote temp file, no base64 (which, for a dump approaching 1GB, risks Node/V8's max string
+ * length and adds 33% of pure overhead for nothing). The caller pipes this directly into the HTTP
+ * response body instead of buffering the whole export in memory.
+ */
+export async function dumpDatabaseToStream(
+  conn: DbConnection,
+  database: string
+): Promise<{ webStream: ReadableStream<Uint8Array>; filename: string }> {
+  const password = vaultDecrypt(conn.passwordEncrypted);
+  const command = `set -o pipefail; ${dumpCommand(conn, password, database)} | gzip`;
+  const { client, channel } = await execPrivileged(conn.hostId, command);
+
+  const webStream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      let stderr = "";
+      let settled = false;
+      const watchdog = armIdleWatchdog(client, channel, () => {
+        if (settled) return;
+        settled = true;
+        controller.error(new Error("Délai dépassé — l'export a été interrompu (connexion inactive)."));
+      });
+      channel.stderr.on("data", (d: Buffer) => (stderr += d.toString("utf8")));
+      channel.on("data", (chunk: Buffer) => {
+        if (settled) return;
+        controller.enqueue(new Uint8Array(chunk));
+      });
+      channel.on("close", (code: number) => {
+        watchdog.cancel();
+        safeEnd(client);
+        if (settled) return;
+        settled = true;
+        if (code === 0) controller.close();
+        else controller.error(new Error(conn.engine === "mysql" ? explainMysqlError(stderr) : stderr.trim() || "Échec de l'export."));
+      });
+      channel.on("error", (err: Error) => {
+        watchdog.cancel();
+        if (settled) return;
+        settled = true;
+        controller.error(err);
+      });
+    },
+    cancel() {
+      try {
+        channel.close();
+      } catch {
+        // already closing
+      }
+      safeEnd(client);
+    },
+  });
+
+  return { webStream, filename: `${database}-${new Date().toISOString().slice(0, 10)}.sql.gz` };
+}
+
+/**
+ * Restores a database from the uploaded file's own raw bytes, piped straight into mysql/psql's
+ * stdin over the SSH exec channel (decompressed on the remote end via `gunzip -c` first when
+ * `isGzip`, never here) — the same "never hold the whole transfer as one in-memory string"
+ * reasoning as the dump side above, since a ~1GB import based64-encoded client-side would also
+ * double as much RAM again on the way through.
+ */
+export async function restoreDatabaseFromStream(
   conn: DbConnection,
   database: string,
-  base64Content: string,
+  input: NodeJS.ReadableStream,
   isGzip: boolean
 ): Promise<void> {
   const password = vaultDecrypt(conn.passwordEncrypted);
-  const remoteTmp = `/tmp/homelab-panel-db-restore-${randomUUID()}.b64`;
-  const decodeAndPipe = isGzip
-    ? `base64 -d ${shellQuote(remoteTmp)} | gunzip -c | ${restoreCommand(conn, password, database)}`
-    : `base64 -d ${shellQuote(remoteTmp)} | ${restoreCommand(conn, password, database)}`;
+  const pipeline = isGzip ? `gunzip -c | ${restoreCommand(conn, password, database)}` : restoreCommand(conn, password, database);
+  const command = `set -o pipefail; ${pipeline}`;
+  const { client, channel } = await execPrivileged(conn.hostId, command);
 
-  // The base64 payload travels as its own heredoc write first (kept well under typical remote
-  // ARG_MAX/pipe limits since it's chunked as stdin, not a single argv), then a second command
-  // decodes and pipes it into the target CLI — splitting it this way avoids holding the decode
-  // and the restore's own stdin need in the same pipeline as the upload.
-  const writeCommand = `cat > ${shellQuote(remoteTmp)} <<'HLP_B64_EOF'\n${base64Content}\nHLP_B64_EOF`;
-  const writeResult = await withTimeout(
-    runSshCommand(conn.hostId, writeCommand, { sudo: true }),
-    DUMP_TIMEOUT_MS,
-    "Délai dépassé lors du transfert du fichier."
-  );
-  if (writeResult.code !== 0) throw new Error(writeResult.stderr.trim() || "Échec du transfert du fichier de restauration.");
+  return new Promise((resolve, reject) => {
+    let stderr = "";
+    let settled = false;
+    const watchdog = armIdleWatchdog(client, channel, () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("Délai dépassé — la restauration a été interrompue (connexion inactive)."));
+    });
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      watchdog.cancel();
+      fn();
+    };
 
-  const command = `set -o pipefail; ${decodeAndPipe}; RC=$?; rm -f ${shellQuote(remoteTmp)}; exit $RC`;
-  const { code, stderr } = await withTimeout(
-    runSshCommand(conn.hostId, command, { sudo: true }),
-    DUMP_TIMEOUT_MS,
-    "Délai dépassé lors de la restauration."
-  );
-  if (code !== 0) throw new Error(conn.engine === "mysql" ? explainMysqlError(stderr) : stderr.trim() || "Échec de la restauration.");
+    channel.stderr.on("data", (d: Buffer) => (stderr += d.toString("utf8")));
+    channel.on("close", (code: number) => {
+      safeEnd(client);
+      finish(() => {
+        if (code === 0) resolve();
+        else reject(new Error(conn.engine === "mysql" ? explainMysqlError(stderr) : stderr.trim() || "Échec de la restauration."));
+      });
+    });
+    channel.on("error", (err: Error) => finish(() => reject(err)));
+
+    input.on("data", watchdog.poke);
+    input.on("error", (err) => {
+      try {
+        channel.end();
+      } catch {
+        // already closing
+      }
+      finish(() => reject(err instanceof Error ? err : new Error("Erreur de lecture du fichier.")));
+    });
+    input.pipe(channel);
+  });
 }

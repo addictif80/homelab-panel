@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import JobLog from "@/components/JobLog";
+
+// Mirrors MAX_IMPORT_BYTES in lib/dbManager/dumpRestore.ts — checked here too so an oversized
+// file is rejected before the browser spends any time uploading it.
+const MAX_IMPORT_BYTES = 1024 * 1024 * 1024;
 
 type Engine = "mysql" | "postgres";
 type Host = { id: number; name: string };
@@ -473,73 +476,61 @@ function TablesList({
 }
 
 function DumpButton({ connId, dbName }: { connId: string; dbName: string }) {
-  const [busy, setBusy] = useState(false);
-  async function download() {
-    setBusy(true);
-    try {
-      const data = await api<{ base64: string; filename: string }>(
-        `/api/db-manager/connections/${connId}/databases/${encodeURIComponent(dbName)}/dump`
-      );
-      const bytes = Uint8Array.from(atob(data.base64), (c) => c.charCodeAt(0));
-      const blob = new Blob([bytes], { type: "application/gzip" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = data.filename;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Erreur lors de l'export.");
-    } finally {
-      setBusy(false);
-    }
-  }
+  // A plain link to the streaming export route — the browser downloads it natively (its own
+  // progress UI, no risk of buffering a near-1GB export as one in-memory blob first).
   return (
-    <button onClick={download} disabled={busy} className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-50">
-      {busy ? "Export..." : "Sauvegarder"}
-    </button>
+    <a
+      href={`/api/db-manager/connections/${connId}/databases/${encodeURIComponent(dbName)}/dump`}
+      className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+    >
+      Exporter
+    </a>
   );
 }
 
 function RestoreButton({ connId, dbName }: { connId: string; dbName: string }) {
   const [busy, setBusy] = useState(false);
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    if (!confirm(`Restaurer "${file.name}" dans la base "${dbName}" ? Cela peut écraser des données existantes.`)) return;
+    setError(null);
+    if (file.size > MAX_IMPORT_BYTES) {
+      setError(`Fichier trop volumineux (${(file.size / 1024 / 1024).toFixed(0)} Mo, maximum 1024 Mo).`);
+      return;
+    }
+    if (!confirm(`Importer "${file.name}" dans la base "${dbName}" ? Cela peut écraser des données existantes.`)) return;
     setBusy(true);
     try {
-      const buffer = await file.arrayBuffer();
-      const base64 = btoa(new Uint8Array(buffer).reduce((s, b) => s + String.fromCharCode(b), ""));
-      const isGzip = file.name.endsWith(".gz");
-      const data = await api<{ jobId: string }>(
+      // The raw file bytes go straight into the request body — no base64, which would add 33%
+      // and risk the browser choking on a ~1GB string for nothing. The server pipes them
+      // directly into mysql/psql's stdin over SSH, decompressing on the remote end if gzipped.
+      const res = await fetch(
         `/api/db-manager/connections/${connId}/databases/${encodeURIComponent(dbName)}/restore`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ base64, isGzip }),
+          headers: { "X-Is-Gzip": file.name.endsWith(".gz") ? "1" : "0" },
+          body: file,
         }
       );
-      setJobId(data.jobId);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erreur lors de la restauration.");
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Erreur lors de la restauration.");
+      setError(err instanceof Error ? err.message : "Erreur lors de la restauration.");
     } finally {
       setBusy(false);
     }
   }
+
   return (
     <div className="inline-block">
       <label className="cursor-pointer rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800">
-        {busy ? "Envoi..." : "Restaurer"}
+        {busy ? "Import en cours..." : "Importer"}
         <input type="file" accept=".sql,.gz" onChange={onFile} disabled={busy} className="hidden" />
       </label>
-      {jobId && (
-        <div className="mt-2 w-72 rounded border border-neutral-800 bg-neutral-950 p-2">
-          <JobLog jobId={jobId} onDone={() => setJobId(null)} />
-        </div>
-      )}
+      {error && <p className="mt-1 max-w-xs text-xs text-red-400">{error}</p>}
     </div>
   );
 }
