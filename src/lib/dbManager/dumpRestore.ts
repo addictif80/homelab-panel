@@ -1,7 +1,7 @@
 import type { Client as SshClient, ClientChannel } from "ssh2";
 import { connectSsh, buildPrivilegedCommand, shellQuote } from "../ssh";
 import { vaultDecrypt } from "../crypto";
-import { explainMysqlError, type DbConnection } from "./sqlRunner";
+import { explainMysqlError, wrapContainerExec, type DbConnection } from "./sqlRunner";
 
 /** Hard ceiling on an import's upload size — matches what the UI advertises and tells the user
  * about up front, rather than letting a huge file fail unpredictably deep into the transfer. */
@@ -29,36 +29,36 @@ function dumpCommand(conn: DbConnection, password: string, database: string): st
     const detect = binDetect(["mysqldump", "mariadb-dump"], "Client mysqldump/mariadb-dump introuvable — installe mariadb-client.");
     if (conn.containerId) {
       const script = `${detect}; exec "$BIN" ${args}`;
-      return `docker exec -e MYSQL_PWD=${shellQuote(password)} ${shellQuote(conn.containerId)} sh -c ${shellQuote(script)}`;
+      return wrapContainerExec(conn.containerKind, conn.containerId, "MYSQL_PWD", password, script);
     }
     return `(${detect}; MYSQL_PWD=${shellQuote(password)} "$BIN" ${args})`;
   }
   const cmd = `pg_dump -h ${shellQuote(conn.dbHost)} -p ${conn.dbPort} -U ${shellQuote(conn.username)} -d ${shellQuote(database)}`;
-  return conn.containerId
-    ? `docker exec -e PGPASSWORD=${shellQuote(password)} ${shellQuote(conn.containerId)} ${cmd}`
-    : `PGPASSWORD=${shellQuote(password)} ${cmd}`;
+  return conn.containerId ? wrapContainerExec(conn.containerKind, conn.containerId, "PGPASSWORD", password, cmd) : `PGPASSWORD=${shellQuote(password)} ${cmd}`;
 }
 
-function restoreCommand(conn: DbConnection, password: string, database: string): string {
+/** Exported for lib/migration/cloudpanelImport.ts, which restores a database the same way but
+ * from a remote tar member's stdout instead of an HTTP upload — same CLI invocation either way. */
+export function restoreCommand(conn: DbConnection, password: string, database: string): string {
   if (conn.engine === "mysql") {
     const args = `--protocol=TCP -h ${shellQuote(conn.dbHost)} -P ${conn.dbPort} -u ${shellQuote(conn.username)} ${shellQuote(database)}`;
     const detect = binDetect(["mysql", "mariadb"], "Client mysql/mariadb introuvable — installe mariadb-client.");
     if (conn.containerId) {
       const script = `${detect}; exec "$BIN" ${args}`;
-      return `docker exec -i -e MYSQL_PWD=${shellQuote(password)} ${shellQuote(conn.containerId)} sh -c ${shellQuote(script)}`;
+      return wrapContainerExec(conn.containerKind, conn.containerId, "MYSQL_PWD", password, script);
     }
     return `(${detect}; MYSQL_PWD=${shellQuote(password)} "$BIN" ${args})`;
   }
   const cmd = `psql -h ${shellQuote(conn.dbHost)} -p ${conn.dbPort} -U ${shellQuote(conn.username)} -d ${shellQuote(database)}`;
-  return conn.containerId
-    ? `docker exec -i -e PGPASSWORD=${shellQuote(password)} ${shellQuote(conn.containerId)} ${cmd}`
-    : `PGPASSWORD=${shellQuote(password)} ${cmd}`;
+  return conn.containerId ? wrapContainerExec(conn.containerKind, conn.containerId, "PGPASSWORD", password, cmd) : `PGPASSWORD=${shellQuote(password)} ${cmd}`;
 }
 
 /** Opens the exec channel for `rawCommand`, wrapped in sudo (and fed the sudo password on stdin)
  * exactly like every other privileged command in the panel — see buildPrivilegedCommand's own
- * comment for why this is applied uniformly rather than only when strictly necessary. */
-function execPrivileged(hostId: number, rawCommand: string): Promise<{ client: SshClient; channel: ClientChannel }> {
+ * comment for why this is applied uniformly rather than only when strictly necessary. Exported
+ * for lib/migration/cloudpanelImport.ts, which relays bytes directly between two such channels
+ * (one per host) rather than between a channel and an HTTP body. */
+export function openPrivilegedExec(hostId: number, rawCommand: string): Promise<{ client: SshClient; channel: ClientChannel }> {
   const { command, stdinPassword } = buildPrivilegedCommand(hostId, rawCommand);
   return connectSsh(hostId).then(
     (client) =>
@@ -119,7 +119,7 @@ export async function dumpDatabaseToStream(
 ): Promise<{ webStream: ReadableStream<Uint8Array>; filename: string }> {
   const password = vaultDecrypt(conn.passwordEncrypted);
   const command = `set -o pipefail; ${dumpCommand(conn, password, database)} | gzip`;
-  const { client, channel } = await execPrivileged(conn.hostId, command);
+  const { client, channel } = await openPrivilegedExec(conn.hostId, command);
 
   const webStream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -179,7 +179,7 @@ export async function restoreDatabaseFromStream(
   const password = vaultDecrypt(conn.passwordEncrypted);
   const pipeline = isGzip ? `gunzip -c | ${restoreCommand(conn, password, database)}` : restoreCommand(conn, password, database);
   const command = `set -o pipefail; ${pipeline}`;
-  const { client, channel } = await execPrivileged(conn.hostId, command);
+  const { client, channel } = await openPrivilegedExec(conn.hostId, command);
 
   return new Promise((resolve, reject) => {
     let stderr = "";

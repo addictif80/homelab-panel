@@ -1,19 +1,20 @@
 import { randomUUID } from "crypto";
 import { getDb } from "../db";
 import { vaultEncrypt } from "../crypto";
-import { getDbConnection, type DbConnection, type Engine } from "./sqlRunner";
+import { getDbConnection, type ContainerKind, type DbConnection, type Engine } from "./sqlRunner";
 
 export type { DbConnection };
 
 export function listDbConnections(): Omit<DbConnection, "passwordEncrypted">[] {
   const rows = getDb()
-    .prepare(`SELECT id, host_id, label, engine, container_id, db_host, db_port, username FROM db_connections ORDER BY label`)
+    .prepare(`SELECT id, host_id, label, engine, container_id, container_kind, db_host, db_port, username FROM db_connections ORDER BY label`)
     .all() as {
     id: string;
     host_id: number;
     label: string;
     engine: Engine;
     container_id: string | null;
+    container_kind: ContainerKind;
     db_host: string;
     db_port: number;
     username: string;
@@ -24,6 +25,7 @@ export function listDbConnections(): Omit<DbConnection, "passwordEncrypted">[] {
     label: r.label,
     engine: r.engine,
     containerId: r.container_id,
+    containerKind: r.container_kind,
     dbHost: r.db_host,
     dbPort: r.db_port,
     username: r.username,
@@ -35,6 +37,7 @@ export function addDbConnection(input: {
   label: string;
   engine: Engine;
   containerId: string | null;
+  containerKind: ContainerKind;
   dbHost: string;
   dbPort: number;
   username: string;
@@ -43,8 +46,8 @@ export function addDbConnection(input: {
   const id = randomUUID();
   getDb()
     .prepare(
-      `INSERT INTO db_connections (id, host_id, label, engine, container_id, db_host, db_port, username, password_encrypted)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO db_connections (id, host_id, label, engine, container_id, container_kind, db_host, db_port, username, password_encrypted)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -52,6 +55,7 @@ export function addDbConnection(input: {
       input.label.trim(),
       input.engine,
       input.containerId?.trim() || null,
+      input.containerId?.trim() ? input.containerKind : "docker",
       input.dbHost.trim() || "127.0.0.1",
       input.dbPort,
       input.username.trim(),

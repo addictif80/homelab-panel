@@ -76,6 +76,7 @@ export const NAV_SECTIONS: { label: string; items: { href: string; label: string
     items: [
       { href: "/services", label: "Services & annuaire", icon: "directory" },
       { href: "/cyberpanel", label: "CyberPanel", icon: "cyberpanel" },
+      { href: "/migrations", label: "Migration CloudPanel", icon: "backup" },
     ],
   },
   {

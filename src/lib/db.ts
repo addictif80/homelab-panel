@@ -647,6 +647,7 @@ export function migrate(db: Database.Database) {
       label TEXT NOT NULL,
       engine TEXT NOT NULL CHECK (engine IN ('mysql','postgres')),
       container_id TEXT,
+      container_kind TEXT NOT NULL DEFAULT 'docker' CHECK (container_kind IN ('docker','incus')),
       db_host TEXT NOT NULL DEFAULT '127.0.0.1',
       db_port INTEGER NOT NULL,
       username TEXT NOT NULL,
@@ -1136,6 +1137,11 @@ export function migrate(db: Database.Database) {
   }
   if (!hostColumns.some((c) => c.name === "incus_enabled")) {
     db.exec(`ALTER TABLE hosts ADD COLUMN incus_enabled INTEGER NOT NULL DEFAULT 0`);
+  }
+
+  const dbConnectionColumns = db.prepare(`PRAGMA table_info(db_connections)`).all() as { name: string }[];
+  if (!dbConnectionColumns.some((c) => c.name === "container_kind")) {
+    db.exec(`ALTER TABLE db_connections ADD COLUMN container_kind TEXT NOT NULL DEFAULT 'docker'`);
   }
 
   const licenseColumns = db.prepare(`PRAGMA table_info(license)`).all() as { name: string }[];

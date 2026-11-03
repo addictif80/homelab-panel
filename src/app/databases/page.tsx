@@ -14,6 +14,7 @@ type Connection = {
   label: string;
   engine: Engine;
   containerId: string | null;
+  containerKind: "docker" | "incus";
   dbHost: string;
   dbPort: number;
   username: string;
@@ -252,6 +253,7 @@ function ConnectionsList({
   const [label, setLabel] = useState("");
   const [engine, setEngine] = useState<Engine>("mysql");
   const [containerId, setContainerId] = useState("");
+  const [containerKind, setContainerKind] = useState<"docker" | "incus">("docker");
   const [dbHost, setDbHost] = useState("127.0.0.1");
   const [dbPort, setDbPort] = useState(3306);
   const [username, setUsername] = useState("root");
@@ -267,7 +269,7 @@ function ConnectionsList({
       await api("/api/db-manager/connections", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hostId, label, engine, containerId: containerId || null, dbHost, dbPort, username, password }),
+        body: JSON.stringify({ hostId, label, engine, containerId: containerId || null, containerKind, dbHost, dbPort, username, password }),
       });
       setShowAdd(false);
       setLabel("");
@@ -291,7 +293,7 @@ function ConnectionsList({
                 <p className="font-medium text-neutral-100">{c.label}</p>
                 <p className="text-xs text-neutral-500">
                   {c.engine === "mysql" ? "MySQL/MariaDB" : "PostgreSQL"} — {c.dbHost}:{c.dbPort}
-                  {c.containerId ? ` (conteneur ${c.containerId})` : ""}
+                  {c.containerId ? ` (${c.containerKind} ${c.containerId})` : ""}
                 </p>
               </div>
             </div>
@@ -343,8 +345,19 @@ function ConnectionsList({
                 <option value="postgres">PostgreSQL</option>
               </select>
             </Field>
-            <Field label="Conteneur Docker (optionnel)">
-              <input value={containerId} onChange={(e) => setContainerId(e.target.value)} placeholder="mailcow-mysql-mailcow-1" className="input" />
+            <Field label="Conteneur (optionnel)">
+              <input
+                value={containerId}
+                onChange={(e) => setContainerId(e.target.value)}
+                placeholder={containerKind === "incus" ? "nom de l'instance Incus" : "mailcow-mysql-mailcow-1"}
+                className="input"
+              />
+            </Field>
+            <Field label="Type de conteneur">
+              <select value={containerKind} onChange={(e) => setContainerKind(e.target.value as "docker" | "incus")} className="input">
+                <option value="docker">Docker</option>
+                <option value="incus">Incus</option>
+              </select>
             </Field>
             <Field label="Hôte de la base">
               <input value={dbHost} onChange={(e) => setDbHost(e.target.value)} className="input" />

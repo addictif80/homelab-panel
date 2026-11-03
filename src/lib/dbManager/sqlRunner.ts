@@ -4,6 +4,7 @@ import { vaultDecrypt } from "../crypto";
 import { getDb } from "../db";
 
 export type Engine = "mysql" | "postgres";
+export type ContainerKind = "docker" | "incus";
 
 export type DbConnection = {
   id: string;
@@ -11,6 +12,7 @@ export type DbConnection = {
   label: string;
   engine: Engine;
   containerId: string | null;
+  containerKind: ContainerKind;
   dbHost: string;
   dbPort: number;
   username: string;
@@ -23,6 +25,7 @@ type DbConnectionRow = {
   label: string;
   engine: Engine;
   container_id: string | null;
+  container_kind: ContainerKind;
   db_host: string;
   db_port: number;
   username: string;
@@ -36,11 +39,31 @@ function rowToConnection(row: DbConnectionRow): DbConnection {
     label: row.label,
     engine: row.engine,
     containerId: row.container_id,
+    containerKind: row.container_kind,
     dbHost: row.db_host,
     dbPort: row.db_port,
     username: row.username,
     passwordEncrypted: row.password_encrypted,
   };
+}
+
+/** Wraps `script` (a complete shell command string) so it runs inside `containerId` — `docker
+ * exec` or `incus exec`, the same two exec targets the SSH terminal itself supports (see
+ * lib/sshChannel.ts). `envVar` is exported for just this one invocation, never as a CLI argument
+ * (which `ps` would show to any other user on the box). */
+export function wrapContainerExec(
+  containerKind: ContainerKind,
+  containerId: string,
+  envVar: string,
+  envValue: string,
+  script: string
+): string {
+  if (containerKind === "incus") {
+    // incus exec has no -e/env flag of its own — export inline inside the wrapped script instead.
+    const inner = `${envVar}=${shellQuote(envValue)} ${script}`;
+    return `incus exec ${shellQuote(containerId)} -- sh -c ${shellQuote(inner)}`;
+  }
+  return `docker exec -e ${envVar}=${shellQuote(envValue)} -i ${shellQuote(containerId)} sh -c ${shellQuote(script)}`;
 }
 
 export function getDbConnection(id: string): DbConnection {
@@ -89,7 +112,7 @@ function buildCommandPrefix(conn: DbConnection, password: string, database?: str
       .join(" ");
     if (conn.containerId) {
       const script = `${MYSQL_BIN_DETECT}; exec "$BIN" ${args}`;
-      return `docker exec -e MYSQL_PWD=${shellQuote(password)} -i ${shellQuote(conn.containerId)} sh -c ${shellQuote(script)}`;
+      return wrapContainerExec(conn.containerKind, conn.containerId, "MYSQL_PWD", password, script);
     }
     return `${MYSQL_BIN_DETECT}; MYSQL_PWD=${shellQuote(password)} "$BIN" ${args}`;
   }
@@ -106,7 +129,7 @@ function buildCommandPrefix(conn: DbConnection, password: string, database?: str
     `-P null=${shellQuote(PG_NULL_MARKER)}`,
   ].join(" ");
   return conn.containerId
-    ? `docker exec -e PGPASSWORD=${shellQuote(password)} -i ${shellQuote(conn.containerId)} ${args}`
+    ? wrapContainerExec(conn.containerKind, conn.containerId, "PGPASSWORD", password, args)
     : `PGPASSWORD=${shellQuote(password)} ${args}`;
 }
 

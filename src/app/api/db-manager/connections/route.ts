@@ -12,6 +12,7 @@ export async function POST(req: NextRequest) {
     label?: string;
     engine?: "mysql" | "postgres";
     containerId?: string | null;
+    containerKind?: "docker" | "incus";
     dbHost?: string;
     dbPort?: number;
     username?: string;
@@ -23,12 +24,16 @@ export async function POST(req: NextRequest) {
   if (body.engine !== "mysql" && body.engine !== "postgres") {
     return NextResponse.json({ error: "Moteur invalide." }, { status: 400 });
   }
+  if (body.containerKind && body.containerKind !== "docker" && body.containerKind !== "incus") {
+    return NextResponse.json({ error: "Type de conteneur invalide." }, { status: 400 });
+  }
 
   const id = addDbConnection({
     hostId: body.hostId,
     label: body.label,
     engine: body.engine,
     containerId: body.containerId ?? null,
+    containerKind: body.containerKind ?? "docker",
     dbHost: body.dbHost || "127.0.0.1",
     dbPort: body.dbPort || (body.engine === "mysql" ? 3306 : 5432),
     username: body.username,
