@@ -142,114 +142,195 @@ export default function DatabasesPage() {
         </div>
       )}
 
-      {/* Breadcrumb */}
-      <div className="flex flex-wrap items-center gap-1.5 text-sm">
-        <button onClick={() => { setConnId(null); setDbName(null); }} className={`rounded px-2 py-1 ${!connId ? "bg-blue-900/40 text-blue-200" : "text-neutral-400 hover:bg-neutral-800"}`}>
-          Connexions
-        </button>
-        {connection && (
-          <>
-            <span className="text-neutral-600">/</span>
-            <button onClick={() => { setDbName(null); setTableName(null); }} className={`rounded px-2 py-1 ${connId && !dbName ? "bg-blue-900/40 text-blue-200" : "text-neutral-400 hover:bg-neutral-800"}`}>
-              {connection.label}
-            </button>
-          </>
-        )}
-        {dbName && (
-          <>
-            <span className="text-neutral-600">/</span>
-            <button onClick={() => setTableName(null)} className={`rounded px-2 py-1 ${dbName && !tableName ? "bg-blue-900/40 text-blue-200" : "text-neutral-400 hover:bg-neutral-800"}`}>
-              {dbName}
-            </button>
-          </>
-        )}
-        {tableName && (
-          <>
-            <span className="text-neutral-600">/</span>
-            <span className="rounded bg-blue-900/40 px-2 py-1 text-blue-200">{tableName}</span>
-          </>
-        )}
-      </div>
-
-      {!connId && (
-        <ConnectionsList
+      <div className="flex flex-wrap items-start gap-4">
+        <ConnectionTree
           connections={connections}
-          hosts={hosts}
-          onOpen={openConnection}
-          onRemove={removeConnection}
-          showAdd={showAddConn}
-          setShowAdd={setShowAddConn}
-          onAdded={loadConnections}
-        />
-      )}
-
-      {connId && !dbName && (
-        <DatabasesList
-          databases={databases}
-          onOpen={openDatabase}
-          onDrop={dropDb}
-          showAdd={showAddDb}
-          setShowAdd={setShowAddDb}
-          onAdd={async (name) => {
-            await api(`/api/db-manager/connections/${connId}/databases`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name }),
-            });
-            setShowAddDb(false);
-            openConnection(connId);
-          }}
-        />
-      )}
-
-      {connId && dbName && !tableName && connection && (
-        <TablesList
-          tables={tables}
-          engine={connection.engine}
-          onOpen={setTableName}
-          onDrop={dropTbl}
-          showAddTable={showAddTable}
-          setShowAddTable={setShowAddTable}
-          showQuery={showQuery}
-          setShowQuery={setShowQuery}
-          onCreateTable={async (name, columns) => {
-            await api(`/api/db-manager/connections/${connId}/databases/${encodeURIComponent(dbName)}/tables`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name, columns }),
-            });
-            setShowAddTable(false);
-            openDatabase(dbName);
-          }}
           connId={connId}
+          databases={databases}
           dbName={dbName}
-          connections={connections}
+          onOpenConnection={openConnection}
+          onOpenDatabase={openDatabase}
+          onRemoveConnection={removeConnection}
+          onDropDatabase={dropDb}
+          showAdd={showAddConn}
+          onToggleAdd={() => setShowAddConn((s) => !s)}
         />
-      )}
 
-      {connId && dbName && tableName && connection && (
-        <TableDetail connId={connId} dbName={dbName} tableName={tableName} engine={connection.engine} onDropped={() => openDatabase(dbName)} />
-      )}
+        <div className="min-w-0 flex-1 space-y-4">
+          {showAddConn && (
+            <AddConnectionForm
+              hosts={hosts}
+              onAdded={() => {
+                setShowAddConn(false);
+                loadConnections();
+              }}
+              onCancel={() => setShowAddConn(false)}
+            />
+          )}
+
+          {!showAddConn && !connId && (
+            <div className="rounded-xl border border-dashed border-neutral-800 p-8 text-center text-sm text-neutral-500">
+              Sélectionne une connexion à gauche, ou crée-en une nouvelle.
+            </div>
+          )}
+
+          {!showAddConn && connId && !dbName && (
+            <div className="space-y-3 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+              <p className="text-sm text-neutral-400">Sélectionne une base dans l&apos;arborescence, ou crée-en une nouvelle sur cette connexion.</p>
+              <AddDatabaseInline
+                onAdd={async (name) => {
+                  await api(`/api/db-manager/connections/${connId}/databases`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name }),
+                  });
+                  openConnection(connId);
+                }}
+              />
+            </div>
+          )}
+
+          {connId && dbName && !tableName && connection && (
+            <TablesList
+              tables={tables}
+              engine={connection.engine}
+              onOpen={setTableName}
+              onDrop={dropTbl}
+              showAddTable={showAddTable}
+              setShowAddTable={setShowAddTable}
+              showQuery={showQuery}
+              setShowQuery={setShowQuery}
+              onCreateTable={async (name, columns) => {
+                await api(`/api/db-manager/connections/${connId}/databases/${encodeURIComponent(dbName)}/tables`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ name, columns }),
+                });
+                setShowAddTable(false);
+                openDatabase(dbName);
+              }}
+              connId={connId}
+              dbName={dbName}
+              connections={connections}
+            />
+          )}
+
+          {connId && dbName && tableName && connection && (
+            <TableDetail connId={connId} dbName={dbName} tableName={tableName} engine={connection.engine} onDropped={() => openDatabase(dbName)} />
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
-function ConnectionsList({
+function ConnectionTree({
   connections,
-  hosts,
-  onOpen,
-  onRemove,
+  connId,
+  databases,
+  dbName,
+  onOpenConnection,
+  onOpenDatabase,
+  onRemoveConnection,
+  onDropDatabase,
   showAdd,
-  setShowAdd,
-  onAdded,
+  onToggleAdd,
 }: {
   connections: Connection[];
-  hosts: Host[];
-  onOpen: (id: string) => void;
-  onRemove: (id: string) => void;
+  connId: string | null;
+  databases: string[];
+  dbName: string | null;
+  onOpenConnection: (id: string) => void;
+  onOpenDatabase: (db: string) => void;
+  onRemoveConnection: (id: string) => void;
+  onDropDatabase: (db: string) => void;
   showAdd: boolean;
-  setShowAdd: (v: boolean) => void;
+  onToggleAdd: () => void;
+}) {
+  return (
+    <aside className="w-full shrink-0 space-y-1 rounded-xl border border-neutral-800 bg-neutral-900 p-3 sm:w-64">
+      <div className="flex items-center justify-between px-1 pb-1.5">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Connexions</span>
+        <button onClick={onToggleAdd} className={`text-xs font-medium hover:underline ${showAdd ? "text-neutral-300" : "text-blue-400"}`}>
+          {showAdd ? "Annuler" : "+ Nouvelle"}
+        </button>
+      </div>
+      {connections.length === 0 && <p className="px-1 text-xs text-neutral-600">Aucune connexion.</p>}
+      {connections.map((c) => (
+        <div key={c.id}>
+          <div className="group flex items-center gap-1">
+            <button
+              onClick={() => onOpenConnection(c.id)}
+              className={`flex-1 truncate rounded-lg px-2 py-1.5 text-left text-sm ${
+                connId === c.id ? "bg-blue-900/30 font-medium text-blue-200" : "text-neutral-300 hover:bg-neutral-800"
+              }`}
+            >
+              {c.label}
+            </button>
+            <button
+              onClick={() => onRemoveConnection(c.id)}
+              className="rounded px-1.5 py-1 text-xs text-neutral-600 opacity-0 hover:bg-red-950/40 hover:text-red-300 group-hover:opacity-100"
+              aria-label={`Supprimer la connexion ${c.label}`}
+            >
+              ✕
+            </button>
+          </div>
+          {connId === c.id && (
+            <div className="ml-2 space-y-0.5 border-l border-neutral-800 pl-2">
+              {databases.map((db) => (
+                <div key={db} className="group flex items-center gap-1">
+                  <button
+                    onClick={() => onOpenDatabase(db)}
+                    className={`flex-1 truncate rounded-lg px-2 py-1 text-left font-mono text-xs ${
+                      dbName === db ? "bg-blue-900/30 font-medium text-blue-200" : "text-neutral-400 hover:bg-neutral-800"
+                    }`}
+                  >
+                    {db}
+                  </button>
+                  <button
+                    onClick={() => onDropDatabase(db)}
+                    className="rounded px-1 py-1 text-xs text-neutral-600 opacity-0 hover:bg-red-950/40 hover:text-red-300 group-hover:opacity-100"
+                    aria-label={`Supprimer la base ${db}`}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              {databases.length === 0 && <p className="px-2 py-1 text-xs text-neutral-600">Aucune base.</p>}
+            </div>
+          )}
+        </div>
+      ))}
+    </aside>
+  );
+}
+
+function AddDatabaseInline({ onAdd }: { onAdd: (name: string) => void }) {
+  const [name, setName] = useState("");
+  return (
+    <div className="flex gap-2">
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="nom_de_la_base" className="input flex-1" />
+      <button
+        onClick={() => {
+          if (name.trim()) onAdd(name.trim());
+          setName("");
+        }}
+        className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60"
+      >
+        Créer
+      </button>
+    </div>
+  );
+}
+
+function AddConnectionForm({
+  hosts,
+  onAdded,
+  onCancel,
+}: {
+  hosts: Host[];
   onAdded: () => void;
+  onCancel: () => void;
 }) {
   const [hostId, setHostId] = useState<number | "">("");
   const [label, setLabel] = useState("");
@@ -273,10 +354,6 @@ function ConnectionsList({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ hostId, label, engine, containerId: containerId || null, containerKind, dbHost, dbPort, username, password }),
       });
-      setShowAdd(false);
-      setLabel("");
-      setPassword("");
-      setContainerId("");
       onAdded();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Erreur.");
@@ -286,147 +363,72 @@ function ConnectionsList({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {connections.map((c) => (
-          <div key={c.id} className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-4">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="font-medium text-neutral-100">{c.label}</p>
-                <p className="text-xs text-neutral-500">
-                  {c.engine === "mysql" ? "MySQL/MariaDB" : "PostgreSQL"} — {c.dbHost}:{c.dbPort}
-                  {c.containerId ? ` (${c.containerKind} ${c.containerId})` : ""}
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => onOpen(c.id)} className="flex-1 rounded border border-blue-700 bg-blue-900/40 px-2 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60">
-                Ouvrir
-              </button>
-              <button onClick={() => onRemove(c.id)} className="rounded border border-red-900 px-2 py-1.5 text-sm text-red-300 hover:bg-red-950/40">
-                Supprimer
-              </button>
-            </div>
-          </div>
-        ))}
-        <button
-          onClick={() => setShowAdd(!showAdd)}
-          className="flex min-h-[92px] flex-col items-center justify-center gap-1 rounded border border-dashed border-neutral-700 text-sm text-neutral-500 hover:border-neutral-600 hover:text-neutral-300"
-        >
-          + Nouvelle connexion
+    <div className="space-y-3 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+      <h2 className="text-sm font-semibold text-neutral-100">Nouvelle connexion</h2>
+      {err && <p className="text-sm text-red-400">{err}</p>}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field label="Machine (SSH)">
+          <select value={hostId} onChange={(e) => setHostId(e.target.value ? Number(e.target.value) : "")} className="input">
+            <option value="">Sélectionner...</option>
+            {hosts.map((h) => (
+              <option key={h.id} value={h.id}>{h.name}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Nom (libre)">
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="MariaDB Mailcow" className="input" />
+        </Field>
+        <Field label="Moteur">
+          <select
+            value={engine}
+            onChange={(e) => {
+              const v = e.target.value as Engine;
+              setEngine(v);
+              setDbPort(v === "mysql" ? 3306 : 5432);
+              setUsername(v === "mysql" ? "root" : "postgres");
+            }}
+            className="input"
+          >
+            <option value="mysql">MySQL / MariaDB</option>
+            <option value="postgres">PostgreSQL</option>
+          </select>
+        </Field>
+        <Field label="Conteneur (optionnel)">
+          <input
+            value={containerId}
+            onChange={(e) => setContainerId(e.target.value)}
+            placeholder={containerKind === "incus" ? "nom de l'instance Incus" : "mailcow-mysql-mailcow-1"}
+            className="input"
+          />
+        </Field>
+        <Field label="Type de conteneur">
+          <select value={containerKind} onChange={(e) => setContainerKind(e.target.value as "docker" | "incus")} className="input">
+            <option value="docker">Docker</option>
+            <option value="incus">Incus</option>
+          </select>
+        </Field>
+        <Field label="Hôte de la base">
+          <input value={dbHost} onChange={(e) => setDbHost(e.target.value)} className="input" />
+        </Field>
+        <Field label="Port">
+          <input type="number" value={dbPort} onChange={(e) => setDbPort(Number(e.target.value))} className="input" />
+        </Field>
+        <Field label="Utilisateur">
+          <input value={username} onChange={(e) => setUsername(e.target.value)} className="input" />
+        </Field>
+        <Field label="Mot de passe">
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="input" />
+        </Field>
+      </div>
+      <div className="flex gap-2">
+        <button onClick={submit} disabled={saving} className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60 disabled:opacity-50">
+          {saving ? "Connexion..." : "Ajouter"}
+        </button>
+        <button onClick={onCancel} className="rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800">
+          Annuler
         </button>
       </div>
-
-      {showAdd && (
-        <div className="space-y-3 rounded border border-neutral-800 bg-neutral-900 p-4">
-          {err && <p className="text-sm text-red-400">{err}</p>}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Machine (SSH)">
-              <select value={hostId} onChange={(e) => setHostId(e.target.value ? Number(e.target.value) : "")} className="input">
-                <option value="">Sélectionner...</option>
-                {hosts.map((h) => (
-                  <option key={h.id} value={h.id}>{h.name}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Nom (libre)">
-              <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="MariaDB Mailcow" className="input" />
-            </Field>
-            <Field label="Moteur">
-              <select
-                value={engine}
-                onChange={(e) => {
-                  const v = e.target.value as Engine;
-                  setEngine(v);
-                  setDbPort(v === "mysql" ? 3306 : 5432);
-                  setUsername(v === "mysql" ? "root" : "postgres");
-                }}
-                className="input"
-              >
-                <option value="mysql">MySQL / MariaDB</option>
-                <option value="postgres">PostgreSQL</option>
-              </select>
-            </Field>
-            <Field label="Conteneur (optionnel)">
-              <input
-                value={containerId}
-                onChange={(e) => setContainerId(e.target.value)}
-                placeholder={containerKind === "incus" ? "nom de l'instance Incus" : "mailcow-mysql-mailcow-1"}
-                className="input"
-              />
-            </Field>
-            <Field label="Type de conteneur">
-              <select value={containerKind} onChange={(e) => setContainerKind(e.target.value as "docker" | "incus")} className="input">
-                <option value="docker">Docker</option>
-                <option value="incus">Incus</option>
-              </select>
-            </Field>
-            <Field label="Hôte de la base">
-              <input value={dbHost} onChange={(e) => setDbHost(e.target.value)} className="input" />
-            </Field>
-            <Field label="Port">
-              <input type="number" value={dbPort} onChange={(e) => setDbPort(Number(e.target.value))} className="input" />
-            </Field>
-            <Field label="Utilisateur">
-              <input value={username} onChange={(e) => setUsername(e.target.value)} className="input" />
-            </Field>
-            <Field label="Mot de passe">
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="input" />
-            </Field>
-          </div>
-          <button onClick={submit} disabled={saving} className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60 disabled:opacity-50">
-            {saving ? "Connexion..." : "Ajouter"}
-          </button>
-        </div>
-      )}
       <style jsx global>{`.input { border-radius: 0.25rem; border: 1px solid rgb(64 64 64); background: rgb(10 10 10); padding: 0.375rem 0.5rem; font-size: 0.875rem; color: rgb(245 245 245); width: 100%; }`}</style>
-    </div>
-  );
-}
-
-function DatabasesList({
-  databases,
-  onOpen,
-  onDrop,
-  showAdd,
-  setShowAdd,
-  onAdd,
-}: {
-  databases: string[];
-  onOpen: (db: string) => void;
-  onDrop: (db: string) => void;
-  showAdd: boolean;
-  setShowAdd: (v: boolean) => void;
-  onAdd: (name: string) => void;
-}) {
-  const [name, setName] = useState("");
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-neutral-100">Bases de données</h2>
-        <button onClick={() => setShowAdd(!showAdd)} className="rounded border border-blue-700 bg-blue-900/40 px-2 py-1 text-xs text-blue-200 hover:bg-blue-900/60">
-          + Nouvelle base
-        </button>
-      </div>
-      {showAdd && (
-        <div className="flex gap-2">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="nom_de_la_base" className="input flex-1" />
-          <button onClick={() => { if (name.trim()) onAdd(name.trim()); setName(""); }} className="rounded border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-sm text-blue-200 hover:bg-blue-900/60">
-            Créer
-          </button>
-        </div>
-      )}
-      <div className="divide-y divide-neutral-800 rounded border border-neutral-800">
-        {databases.map((db) => (
-          <div key={db} className="flex items-center justify-between px-3 py-2 text-sm">
-            <button onClick={() => onOpen(db)} className="font-mono text-neutral-100 hover:text-blue-300">{db}</button>
-            <button onClick={() => onDrop(db)} className="rounded border border-red-900 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40">
-              Supprimer
-            </button>
-          </div>
-        ))}
-        {databases.length === 0 && <p className="p-4 text-center text-sm text-neutral-600">Aucune base.</p>}
-      </div>
     </div>
   );
 }
