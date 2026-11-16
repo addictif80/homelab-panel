@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import JobLog from "@/components/JobLog";
 
 // Mirrors MAX_IMPORT_BYTES in lib/dbManager/dumpRestore.ts — checked here too so an oversized
 // file is rejected before the browser spends any time uploading it.
@@ -222,6 +223,7 @@ export default function DatabasesPage() {
           }}
           connId={connId}
           dbName={dbName}
+          connections={connections}
         />
       )}
 
@@ -441,6 +443,7 @@ function TablesList({
   onCreateTable,
   connId,
   dbName,
+  connections,
 }: {
   tables: string[];
   engine: Engine;
@@ -453,7 +456,9 @@ function TablesList({
   onCreateTable: (name: string, columns: ColumnSpec[]) => void;
   connId: string;
   dbName: string;
+  connections: Connection[];
 }) {
+  const [showMigrate, setShowMigrate] = useState(false);
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
@@ -461,6 +466,9 @@ function TablesList({
         <div className="flex gap-2">
           <DumpButton connId={connId} dbName={dbName} />
           <RestoreButton connId={connId} dbName={dbName} />
+          <button onClick={() => setShowMigrate(!showMigrate)} className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800">
+            Migrer vers...
+          </button>
           <button onClick={() => setShowQuery(!showQuery)} className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800">
             Requête SQL
           </button>
@@ -470,6 +478,9 @@ function TablesList({
         </div>
       </div>
 
+      {showMigrate && (
+        <MigratePanel connId={connId} dbName={dbName} engine={engine} connections={connections} onClose={() => setShowMigrate(false)} />
+      )}
       {showQuery && <QueryEditor connId={connId} dbName={dbName} />}
       {showAddTable && <CreateTableForm engine={engine} onCreate={onCreateTable} />}
 
@@ -484,6 +495,127 @@ function TablesList({
         ))}
         {tables.length === 0 && <p className="p-4 text-center text-sm text-neutral-600">Aucune table.</p>}
       </div>
+    </div>
+  );
+}
+
+function MigratePanel({
+  connId,
+  dbName,
+  engine,
+  connections,
+  onClose,
+}: {
+  connId: string;
+  dbName: string;
+  engine: Engine;
+  connections: Connection[];
+  onClose: () => void;
+}) {
+  const targets = connections.filter((c) => c.id !== connId && c.engine === engine);
+  const [targetConnId, setTargetConnId] = useState("");
+  const [targetDatabases, setTargetDatabases] = useState<string[]>([]);
+  const [targetDatabase, setTargetDatabase] = useState("");
+  const [newDbName, setNewDbName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!targetConnId) {
+      setTargetDatabases([]);
+      return;
+    }
+    api<{ databases: string[] }>(`/api/db-manager/connections/${targetConnId}/databases`)
+      .then((d) => setTargetDatabases(d.databases))
+      .catch(() => setTargetDatabases([]));
+  }, [targetConnId]);
+
+  async function launch() {
+    const finalTarget = newDbName.trim() || targetDatabase;
+    if (!targetConnId || !finalTarget) return;
+    if (!confirm(`Migrer "${dbName}" vers "${finalTarget}" sur l'autre connexion ? Les données existantes de la base cible seront écrasées en cas de conflit.`))
+      return;
+    setBusy(true);
+    setError(null);
+    try {
+      if (newDbName.trim() && !targetDatabases.includes(newDbName.trim())) {
+        await api(`/api/db-manager/connections/${targetConnId}/databases`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: newDbName.trim() }),
+        });
+      }
+      const data = await api<{ jobId: string }>("/api/db-manager/migrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceConnectionId: connId,
+          sourceDatabase: dbName,
+          targetConnectionId: targetConnId,
+          targetDatabase: finalTarget,
+        }),
+      });
+      setJobId(data.jobId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors du lancement de la migration.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded border border-neutral-800 bg-neutral-900 p-3">
+      <p className="text-xs text-neutral-400">
+        Transfère &quot;{dbName}&quot; directement vers une autre connexion (serveur A → serveur B), sans passer par ton navigateur.
+      </p>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      {jobId ? (
+        <div className="w-full max-w-sm rounded border border-neutral-800 bg-neutral-950 p-2">
+          <JobLog jobId={jobId} />
+          <button onClick={onClose} className="mt-2 text-xs text-neutral-400 hover:underline">
+            Fermer
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <Field label="Connexion cible">
+            <select value={targetConnId} onChange={(e) => setTargetConnId(e.target.value)} className="input">
+              <option value="">Sélectionner...</option>
+              {targets.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Base cible existante (ou saisis un nouveau nom ci-dessous)">
+            <select value={targetDatabase} onChange={(e) => setTargetDatabase(e.target.value)} className="input" disabled={!targetConnId}>
+              <option value="">Sélectionner...</option>
+              {targetDatabases.map((db) => (
+                <option key={db} value={db}>
+                  {db}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Ou nouvelle base à créer sur la cible">
+            <input value={newDbName} onChange={(e) => setNewDbName(e.target.value)} placeholder={dbName} className="input" />
+          </Field>
+          <div className="flex items-end gap-2">
+            <button
+              onClick={launch}
+              disabled={busy || !targetConnId || !(newDbName.trim() || targetDatabase)}
+              className="rounded border border-emerald-700 bg-emerald-900/40 px-3 py-1.5 text-sm text-emerald-200 hover:bg-emerald-900/60 disabled:opacity-50"
+            >
+              {busy ? "Lancement..." : "Lancer la migration"}
+            </button>
+            <button onClick={onClose} className="text-xs text-neutral-400 hover:underline">
+              Annuler
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

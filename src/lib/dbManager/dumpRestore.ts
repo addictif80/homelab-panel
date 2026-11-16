@@ -21,7 +21,10 @@ function binDetect(candidates: [string, string], notFoundMessage: string): strin
   );
 }
 
-function dumpCommand(conn: DbConnection, password: string, database: string): string {
+/** Exported for migrateDatabaseDirect below, which dumps on the source connection the same way
+ * dumpDatabaseToStream does but pipes straight into a second SSH channel instead of the HTTP
+ * response body. */
+export function dumpCommand(conn: DbConnection, password: string, database: string): string {
   if (conn.engine === "mysql") {
     // --protocol=TCP: see sqlRunner.ts's identical flag for why — without it, a host that looks
     // like "localhost" silently switches to a Unix socket instead of dbHost:dbPort.
@@ -81,6 +84,97 @@ function safeEnd(client: SshClient) {
     client.end();
   } catch {
     // already closing
+  }
+}
+
+/** Exported for lib/migration/cloudpanelImport.ts, which uses the same close/end pattern for the
+ * exec channels it opens (one per host) when it isn't already going through this file. */
+export function endClients(...clients: SshClient[]): void {
+  for (const c of clients) safeEnd(c);
+}
+
+/** Relays bytes from `source`'s stdout straight into `dest`'s stdin, and only resolves once BOTH
+ * sides have exited 0 — checking just `dest`'s exit code isn't enough: a `source` command that
+ * fails before producing any output (a bad database name, a typo'd path) would otherwise look
+ * like a harmless empty transfer that "succeeded" at doing nothing. */
+export function relayChannels(source: ClientChannel, dest: ClientChannel): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let sourceStderr = "";
+    let destStderr = "";
+    let sourceCode: number | null = null;
+    let destCode: number | null = null;
+    let settled = false;
+
+    const maybeFinish = () => {
+      if (settled || destCode === null) return;
+      if (sourceCode !== null && sourceCode !== 0) {
+        settled = true;
+        reject(new Error(sourceStderr.trim() || `La lecture de la source a échoué (code ${sourceCode}).`));
+        return;
+      }
+      if (destCode !== 0) {
+        settled = true;
+        reject(new Error(destStderr.trim() || `L'écriture sur la cible a échoué (code ${destCode}).`));
+        return;
+      }
+      settled = true;
+      resolve();
+    };
+
+    source.stderr.on("data", (d: Buffer) => (sourceStderr += d.toString("utf8")));
+    dest.stderr.on("data", (d: Buffer) => (destStderr += d.toString("utf8")));
+    source.on("close", (code: number) => {
+      sourceCode = code;
+      maybeFinish();
+    });
+    dest.on("close", (code: number) => {
+      destCode = code;
+      maybeFinish();
+    });
+    source.on("error", (err: Error) => {
+      if (settled) return;
+      settled = true;
+      try {
+        dest.end();
+      } catch {
+        // already closing
+      }
+      reject(err);
+    });
+    dest.on("error", (err: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    });
+    source.pipe(dest);
+  });
+}
+
+/**
+ * Migrates a database directly from one connection to another — same mysqldump/pg_dump ->
+ * mysql/psql pipeline as export/import, but relayed between two live SSH connections (source ->
+ * this process -> target) instead of going through a browser download + upload. Neither side's
+ * disk nor this panel's own disk ever holds the dump as a whole file.
+ */
+export async function migrateDatabaseDirect(
+  sourceConn: DbConnection,
+  sourceDatabase: string,
+  targetConn: DbConnection,
+  targetDatabase: string
+): Promise<void> {
+  const sourcePassword = vaultDecrypt(sourceConn.passwordEncrypted);
+  const sourceScript = `set -o pipefail; ${dumpCommand(sourceConn, sourcePassword, sourceDatabase)} | gzip`;
+
+  const targetPassword = vaultDecrypt(targetConn.passwordEncrypted);
+  const targetScript = `set -o pipefail; gunzip -c | ${restoreCommand(targetConn, targetPassword, targetDatabase)}`;
+
+  const { client: sourceClient, channel: sourceChannel } = await openPrivilegedExec(sourceConn.hostId, sourceScript);
+  const { client: targetClient, channel: targetChannel } = await openPrivilegedExec(targetConn.hostId, targetScript);
+
+  try {
+    await relayChannels(sourceChannel, targetChannel);
+  } finally {
+    endClients(sourceClient, targetClient);
   }
 }
 

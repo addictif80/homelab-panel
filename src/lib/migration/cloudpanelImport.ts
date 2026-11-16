@@ -1,7 +1,6 @@
-import type { Client as SshClient, ClientChannel } from "ssh2";
 import { runSshCommand, shellQuote } from "../ssh";
 import { vaultDecrypt } from "../crypto";
-import { openPrivilegedExec, restoreCommand } from "../dbManager/dumpRestore";
+import { openPrivilegedExec, restoreCommand, relayChannels, endClients } from "../dbManager/dumpRestore";
 import type { DbConnection } from "../dbManager/sqlRunner";
 
 // CloudPanel's own backup layout, confirmed against a real export:
@@ -71,73 +70,6 @@ export async function inspectCloudPanelSite(nasHostId: number, backupRoot: strin
     }
   }
   return { domains: [...domains].sort(), databases };
-}
-
-/** Relays bytes from `source`'s stdout straight into `dest`'s stdin, and only resolves once BOTH
- * sides have exited 0 — checking just `dest`'s exit code isn't enough: a `source` command that
- * fails before producing any output (a typo'd tar member path, say) would otherwise look like a
- * harmless empty transfer that "succeeded" at doing nothing. */
-function relayChannels(source: ClientChannel, dest: ClientChannel): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let sourceStderr = "";
-    let destStderr = "";
-    let sourceCode: number | null = null;
-    let destCode: number | null = null;
-    let settled = false;
-
-    const maybeFinish = () => {
-      if (settled || destCode === null) return;
-      if (sourceCode !== null && sourceCode !== 0) {
-        settled = true;
-        reject(new Error(sourceStderr.trim() || `La lecture de la sauvegarde a échoué (code ${sourceCode}).`));
-        return;
-      }
-      if (destCode !== 0) {
-        settled = true;
-        reject(new Error(destStderr.trim() || `La restauration a échoué (code ${destCode}).`));
-        return;
-      }
-      settled = true;
-      resolve();
-    };
-
-    source.stderr.on("data", (d: Buffer) => (sourceStderr += d.toString("utf8")));
-    dest.stderr.on("data", (d: Buffer) => (destStderr += d.toString("utf8")));
-    source.on("close", (code: number) => {
-      sourceCode = code;
-      maybeFinish();
-    });
-    dest.on("close", (code: number) => {
-      destCode = code;
-      maybeFinish();
-    });
-    source.on("error", (err: Error) => {
-      if (settled) return;
-      settled = true;
-      try {
-        dest.end();
-      } catch {
-        // already closing
-      }
-      reject(err);
-    });
-    dest.on("error", (err: Error) => {
-      if (settled) return;
-      settled = true;
-      reject(err);
-    });
-    source.pipe(dest);
-  });
-}
-
-function endClients(...clients: SshClient[]): void {
-  for (const c of clients) {
-    try {
-      c.end();
-    } catch {
-      // already closing
-    }
-  }
 }
 
 export type RestoreCloudPanelFilesOptions = {
