@@ -195,3 +195,52 @@ table {
 @keyframes progress-stripe {
   to { background-position: 28px 0, 0 0; }
 }
+
+/* In-app launch splash (components/AppSplash.tsx) — picks up exactly where the native
+   apple-touch-startup-image / Android splash leave off (same mark, same background), then pops
+   the mark in and fades the wordmark in behind it before the whole thing fades out. */
+.app-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  background: var(--color-neutral-950);
+}
+.app-splash.fade-out {
+  opacity: 0;
+  transition: opacity 200ms cubic-bezier(.2,.9,.3,1);
+}
+.app-splash-mark {
+  width: 96px;
+  height: 96px;
+  border-radius: 22px;
+  overflow: hidden;
+  animation: app-splash-pop 320ms cubic-bezier(.3,1.5,.5,1) both;
+}
+.app-splash-mark svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.app-splash-word {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--color-neutral-100);
+  animation: app-splash-word-fade 200ms cubic-bezier(.2,.9,.3,1) 320ms both;
+}
+@keyframes app-splash-pop {
+  from { transform: scale(.6); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+@keyframes app-splash-word-fade {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-splash { display: none !important; }
+}

@@ -6,6 +6,7 @@ import TrialBanner from "./TrialBanner";
 import SelfUpdateBanner from "./SelfUpdateBanner";
 import LockdownBanner from "./LockdownBanner";
 import ActivityWidget from "./ActivityWidget";
+import OfflineBanner from "./OfflineBanner";
 
 const NO_SHELL_PATHS = ["/login", "/setup", "/mission-control"];
 const NO_SHELL_PREFIXES = ["/emergency-access"];
@@ -22,6 +23,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
   return (
     <div className="flex flex-1 flex-col">
+      <OfflineBanner />
       <TrialBanner />
       <SelfUpdateBanner />
       <LockdownBanner />

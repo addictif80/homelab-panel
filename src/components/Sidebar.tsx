@@ -436,11 +436,14 @@ function Logo() {
         className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[9px]"
         style={{ backgroundImage: "var(--grad)", boxShadow: "0 4px 12px -3px rgba(109,91,250,0.55)" }}
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-          <rect x="3" y="3" width="8" height="8" rx="2" fill="white" fillOpacity="0.95" />
-          <rect x="13" y="3" width="8" height="8" rx="2" fill="white" fillOpacity="0.65" />
-          <rect x="3" y="13" width="8" height="8" rx="2" fill="white" fillOpacity="0.65" />
-          <rect x="13" y="13" width="8" height="8" rx="2" fill="white" fillOpacity="0.95" />
+        <svg width="17" height="17" viewBox="0 0 100 100" fill="none">
+          <g fill="white">
+            <rect x="26" y="30" width="48" height="13" rx="4" fillOpacity="0.95" />
+            <rect x="26" y="46.5" width="48" height="13" rx="4" fillOpacity="0.8" />
+            <rect x="26" y="63" width="48" height="13" rx="4" fillOpacity="0.65" />
+            <circle cx="33" cy="36.5" r="2.6" fill="#1A1A2E" />
+          </g>
+          <circle cx="68" cy="36.5" r="5.5" fill="#34D399" />
         </svg>
       </div>
       <span className="font-display text-[15px] font-bold tracking-tight text-neutral-100">Homelab Panel</span>

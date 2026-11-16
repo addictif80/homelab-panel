@@ -1,4 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#3b56d9"/>
-  <path d="M256 120 L392 224 V392 H320 V296 H192 V392 H120 V224 Z" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Nouvelle marque : trois U de rack empilés (silhouette serveur) sur le dégradé
+       indigo -> magenta déjà approuvé (globals.css --grad), avec un point de supervision
+       (vert, "en ligne") sur l'unité du haut — lisible jusqu'au favicon 16px, centrée dans
+       la zone de sécurité "maskable" (cercle Ø80%) pour ne jamais être rognée par un
+       launcher Android. Remplace l'ancienne maison/pin bleu uni, qui ne correspondait plus
+       à la palette retenue pour la refonte. -->
+  <defs>
+    <linearGradient id="hlpMarkGradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#6D5BFA"/>
+      <stop offset="100%" stop-color="#C026D3"/>
+    </linearGradient>
+  </defs>
+  <rect width="100" height="100" rx="22" fill="url(#hlpMarkGradient)"/>
+  <g fill="#fff">
+    <rect x="26" y="30" width="48" height="13" rx="4" fill-opacity=".95"/>
+    <rect x="26" y="46.5" width="48" height="13" rx="4" fill-opacity=".8"/>
+    <rect x="26" y="63" width="48" height="13" rx="4" fill-opacity=".65"/>
+    <circle cx="33" cy="36.5" r="2.6" fill="#1A1A2E"/>
+  </g>
+  <circle cx="68" cy="36.5" r="5.5" fill="#34D399" stroke="#6D5BFA" stroke-width="2"/>
 </svg>
