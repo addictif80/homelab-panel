@@ -934,6 +934,12 @@ export function migrate(db: Database.Database) {
       status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','success','failed')),
       log TEXT NOT NULL DEFAULT '',
       result_json TEXT,
+      -- Nullable on purpose: most job kinds still can't know a total ahead of time (an SSH-piped
+      -- dump/tar stream has no size until it's done) — null on either means "show indeterminate",
+      -- never a fabricated percentage. current/total share one unit per job (bytes most often),
+      -- decided by whichever caller sets it.
+      progress_current INTEGER,
+      progress_total INTEGER,
       started_at TEXT NOT NULL DEFAULT (datetime('now')),
       finished_at TEXT
     );
@@ -1137,6 +1143,14 @@ export function migrate(db: Database.Database) {
   }
   if (!hostColumns.some((c) => c.name === "incus_enabled")) {
     db.exec(`ALTER TABLE hosts ADD COLUMN incus_enabled INTEGER NOT NULL DEFAULT 0`);
+  }
+
+  const backgroundJobColumns = db.prepare(`PRAGMA table_info(background_jobs)`).all() as { name: string }[];
+  if (!backgroundJobColumns.some((c) => c.name === "progress_current")) {
+    db.exec(`ALTER TABLE background_jobs ADD COLUMN progress_current INTEGER`);
+  }
+  if (!backgroundJobColumns.some((c) => c.name === "progress_total")) {
+    db.exec(`ALTER TABLE background_jobs ADD COLUMN progress_total INTEGER`);
   }
 
   const dbConnectionColumns = db.prepare(`PRAGMA table_info(db_connections)`).all() as { name: string }[];

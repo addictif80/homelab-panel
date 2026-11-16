@@ -20,6 +20,11 @@ export type BackgroundJob = {
   status: JobStatus;
   log: string;
   result: unknown;
+  /** Null on either side means "unknown total" — the UI shows an indeterminate bar rather than a
+   * fabricated percentage. Same unit on both sides (usually bytes), picked by whichever caller
+   * calls setJobProgress. */
+  progressCurrent: number | null;
+  progressTotal: number | null;
   startedAt: string;
   finishedAt: string | null;
 };
@@ -32,6 +37,8 @@ type JobRow = {
   status: JobStatus;
   log: string;
   result_json: string | null;
+  progress_current: number | null;
+  progress_total: number | null;
   started_at: string;
   finished_at: string | null;
 };
@@ -45,6 +52,8 @@ function rowToJob(row: JobRow): BackgroundJob {
     status: row.status,
     log: row.log,
     result: row.result_json ? JSON.parse(row.result_json) : null,
+    progressCurrent: row.progress_current,
+    progressTotal: row.progress_total,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
   };
@@ -62,6 +71,13 @@ export function startJob(kind: string, label: string, hostId?: number): string {
 
 export function appendJobLog(id: string, text: string): void {
   getDb().prepare(`UPDATE background_jobs SET log = log || ? WHERE id = ?`).run(text, id);
+}
+
+/** Call only when `total` is genuinely known ahead of time (a file's byte size, a row count) —
+ * never estimate one just to have a number, since a wrong total is worse than no bar at all
+ * (the UI falls back to an honest indeterminate spinner when this is never called). */
+export function setJobProgress(id: string, current: number, total: number): void {
+  getDb().prepare(`UPDATE background_jobs SET progress_current = ?, progress_total = ? WHERE id = ?`).run(current, total, id);
 }
 
 export function finishJob(id: string, status: "success" | "failed", result?: unknown): void {

@@ -190,3 +190,8 @@ table {
 .brain-flow {
   animation: brain-flow 1s linear infinite;
 }
+
+/* ProgressBar's indeterminate state (no known total — see lib/jobs.ts's setJobProgress). */
+@keyframes progress-stripe {
+  to { background-position: 28px 0, 0 0; }
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import ProgressBar from "./ProgressBar";
 
 type Job = { id: string; status: "running" | "success" | "failed"; log: string; result: { method?: string } | null };
 
@@ -45,10 +46,11 @@ export default function MigrationJobLog({ jobId, onDone }: { jobId: string; onDo
   return (
     <div className="space-y-2">
       <p className="text-sm">
-        {job?.status === "running" && <span className="text-amber-400">Migration en cours...</span>}
+        {job?.status === "running" && <span className="text-neutral-200">Migration en cours...</span>}
         {job?.status === "success" && <span className="text-emerald-400">Migration terminée avec succès.</span>}
         {job?.status === "failed" && <span className="text-red-400">Échec de la migration.</span>}
       </p>
+      <ProgressBar status={job?.status ?? "running"} />
       {job?.result?.method === "dump-restore" && (
         <p className="text-xs text-amber-300">
           Effectuée par export/import (les nœuds ne sont pas dans le même cluster Proxmox) — la VM/CT source a été

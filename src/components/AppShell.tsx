@@ -5,6 +5,7 @@ import Sidebar from "./Sidebar";
 import TrialBanner from "./TrialBanner";
 import SelfUpdateBanner from "./SelfUpdateBanner";
 import LockdownBanner from "./LockdownBanner";
+import ActivityWidget from "./ActivityWidget";
 
 const NO_SHELL_PATHS = ["/login", "/setup", "/mission-control"];
 const NO_SHELL_PREFIXES = ["/emergency-access"];
@@ -28,6 +29,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <Sidebar />
         <main className="flex-1 overflow-auto p-4 sm:p-6">{children}</main>
       </div>
+      <ActivityWidget />
     </div>
   );
 }

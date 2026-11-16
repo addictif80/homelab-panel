@@ -57,30 +57,35 @@ export const NAV_SECTIONS: { label: string; items: { href: string; label: string
     ],
   },
   {
-    label: "Infrastructure",
+    // Regroupe tout ce qui concerne le parc de machines lui-même (inventaire, santé, hyperviseur,
+    // conteneurs) — avant, ces 10 items étaient mélangés avec les outils d'accès distant dans un
+    // seul groupe "Infrastructure" surchargé. Voir la maquette validée (artefact de refonte).
+    label: "Machines",
     items: [
+      { href: "/inventory", label: "Inventaire & topologie", icon: "topology" },
       { href: "/servers", label: "Serveurs physiques", icon: "server-rack" },
       { href: "/hardware", label: "Santé matérielle", icon: "heartbeat" },
       { href: "/proxmox", label: "Serveurs VM", icon: "vm" },
       { href: "/docker", label: "Docker", icon: "docker" },
-      { href: "/databases", label: "Bases de données", icon: "database" },
+      { href: "/updates", label: "Mises à jour", icon: "clock" },
+    ],
+  },
+  {
+    // Les outils pour "entrer" dans une machine ou ses données, qu'elle soit déjà dans
+    // l'inventaire ou pas (terminal, RDP, navigateur intégré, fichiers, bases de données).
+    label: "Accès & données",
+    items: [
       { href: "/ssh", label: "Terminal SSH", icon: "terminal" },
       { href: "/rdp", label: "Client RDP", icon: "rdp" },
       { href: "/browser", label: "Navigateur intégré", icon: "browser" },
-      { href: "/updates", label: "Mises à jour", icon: "clock" },
       { href: "/files", label: "Explorateur de fichiers", icon: "files" },
+      { href: "/databases", label: "Bases de données", icon: "database" },
     ],
   },
   {
-    label: "Services",
-    items: [
-      { href: "/services", label: "Services & annuaire", icon: "directory" },
-      { href: "/cyberpanel", label: "CyberPanel", icon: "cyberpanel" },
-      { href: "/migrations", label: "Migration CloudPanel", icon: "backup" },
-    ],
-  },
-  {
-    label: "Réseau",
+    // Tout ce qui rend un service ou un site joignable — réseau pur et panels web confondus,
+    // puisqu'ils forment une seule chaîne (routeur → Tailscale → reverse proxy → DNS → le site).
+    label: "Réseau & services",
     items: [
       { href: "/routers", label: "Box & routeurs", icon: "router" },
       { href: "/tailscale", label: "Tailscale", icon: "tailscale" },
@@ -88,10 +93,13 @@ export const NAV_SECTIONS: { label: string; items: { href: string; label: string
       { href: "/dns", label: "DNS", icon: "dns" },
       { href: "/uptime", label: "Uptime Kuma", icon: "uptime" },
       { href: "/discovery", label: "Découverte réseau", icon: "discovery" },
+      { href: "/services", label: "Services & annuaire", icon: "directory" },
+      { href: "/cyberpanel", label: "CyberPanel", icon: "cyberpanel" },
+      { href: "/migrations", label: "Migrations", icon: "backup" },
     ],
   },
   {
-    label: "Sécurité",
+    label: "Sécurité & continuité",
     items: [
       { href: "/security", label: "Sécurité", icon: "shield" },
       { href: "/incidents", label: "Incidents", icon: "incident" },
@@ -102,15 +110,15 @@ export const NAV_SECTIONS: { label: string; items: { href: string; label: string
     ],
   },
   {
-    label: "Système",
+    // Le méta/admin du panel lui-même, plutôt que de l'infra qu'il gère.
+    label: "Pilotage",
     items: [
-      { href: "/inventory", label: "Inventaire & topologie", icon: "topology" },
-      { href: "/architecture", label: "Documentation d'architecture", icon: "docs" },
-      { href: "/wrapped", label: "Récap annuel", icon: "wrapped" },
       { href: "/assistant", label: "Assistant IA", icon: "assistant" },
       { href: "/jobs", label: "Activité en cours", icon: "jobs" },
       { href: "/audit", label: "Journal d'audit", icon: "audit" },
       { href: "/users", label: "Comptes", icon: "users" },
+      { href: "/architecture", label: "Documentation d'architecture", icon: "docs" },
+      { href: "/wrapped", label: "Récap annuel", icon: "wrapped" },
       { href: "/settings", label: "Réglages", icon: "settings" },
     ],
   },
