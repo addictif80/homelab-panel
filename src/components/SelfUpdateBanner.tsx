@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import ProgressBar from "./ProgressBar";
 
 type UpdateCheck = {
   currentVersion: string;
@@ -103,6 +104,11 @@ export default function SelfUpdateBanner() {
           )}
         </div>
       </div>
+      {job?.status === "running" && (
+        <div className="mx-auto mt-2 max-w-5xl">
+          <ProgressBar status="running" />
+        </div>
+      )}
       {error && <p className="mx-auto mt-2 max-w-5xl text-xs text-red-400">{error}</p>}
       {showLog && job && (
         <pre className="mx-auto mt-3 max-w-5xl overflow-auto rounded border border-neutral-800 bg-black p-3 font-mono text-xs text-neutral-300" style={{ maxHeight: 220 }}>

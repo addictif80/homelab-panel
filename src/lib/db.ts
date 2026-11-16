@@ -184,6 +184,12 @@ export function migrate(db: Database.Database) {
       dest_path TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','success','failed')),
       log TEXT NOT NULL DEFAULT '',
+      -- Bytes copied so far / total bytes across the whole tree, computed by a size-only walk
+      -- before the copy starts — unlike background_jobs' progress columns, a file copy's total
+      -- really is knowable ahead of time, so this is populated on every run rather than being
+      -- an opt-in a caller might skip.
+      progress_current INTEGER NOT NULL DEFAULT 0,
+      progress_total INTEGER,
       started_at TEXT NOT NULL DEFAULT (datetime('now')),
       finished_at TEXT
     );
@@ -1143,6 +1149,14 @@ export function migrate(db: Database.Database) {
   }
   if (!hostColumns.some((c) => c.name === "incus_enabled")) {
     db.exec(`ALTER TABLE hosts ADD COLUMN incus_enabled INTEGER NOT NULL DEFAULT 0`);
+  }
+
+  const copyJobColumns = db.prepare(`PRAGMA table_info(copy_jobs)`).all() as { name: string }[];
+  if (!copyJobColumns.some((c) => c.name === "progress_current")) {
+    db.exec(`ALTER TABLE copy_jobs ADD COLUMN progress_current INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!copyJobColumns.some((c) => c.name === "progress_total")) {
+    db.exec(`ALTER TABLE copy_jobs ADD COLUMN progress_total INTEGER`);
   }
 
   const backgroundJobColumns = db.prepare(`PRAGMA table_info(background_jobs)`).all() as { name: string }[];

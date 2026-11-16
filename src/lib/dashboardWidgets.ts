@@ -33,6 +33,7 @@ export const WIDGET_CATALOG: WidgetDef[] = [
   { id: "tailscale", title: "Tailscale", category: "Réseau", description: "Appareils connectés/déconnectés sur le tailnet." },
   { id: "publicIp", title: "IP publique", category: "Réseau", description: "IP publique actuelle du panel." },
   { id: "ispOutages", title: "Coupures FAI", category: "Réseau", description: "Coupures internet détectées automatiquement, avec rapport téléchargeable." },
+  { id: "activity", title: "Activité en cours", category: "Autres", description: "Actions longues en cours (sauvegarde, migration, restauration...) avec leur barre de progression." },
   { id: "audit", title: "Journal d'audit", category: "Autres", description: "Dernières actions enregistrées sur le panel." },
   { id: "license", title: "Licence", category: "Autres", description: "Statut d'activation et jours d'essai restants." },
   { id: "notes", title: "Notes", category: "Autres", description: "Bloc-notes personnel, visible uniquement par toi." },
@@ -105,7 +106,7 @@ function widgetBlock(widgetId: string): DashboardBlock {
  * by the previous single-column version — see migrateLegacyLayout) sees. */
 export const DEFAULT_LAYOUT: DashboardLayout = {
   columnCount: 1,
-  columns: [["resources", "machines", "quickAccess", "notes", "alerts", "logs"].map(widgetBlock)],
+  columns: [["resources", "machines", "quickAccess", "activity", "notes", "alerts", "logs"].map(widgetBlock)],
 };
 
 /** The dashboard's first version stored a plain string[] of widget ids (implicitly one column,

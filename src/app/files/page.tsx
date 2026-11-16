@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import CopyToHostModal from "@/components/CopyToHostModal";
+import ProgressBar from "@/components/ProgressBar";
 
 type Host = { id: number; name: string };
 type FileEntry = { name: string; type: "file" | "directory" | "symlink" | "other"; size: number; modifiedAt: number };
@@ -29,7 +30,12 @@ export default function FilesPage() {
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [copySource, setCopySource] = useState<string | null>(null);
   const [copyJobId, setCopyJobId] = useState<string | null>(null);
-  const [copyJob, setCopyJob] = useState<{ status: string; log: string } | null>(null);
+  const [copyJob, setCopyJob] = useState<{
+    status: "running" | "success" | "failed";
+    log: string;
+    progressCurrent: number;
+    progressTotal: number | null;
+  } | null>(null);
 
   useEffect(() => {
     fetch("/api/hosts")
@@ -336,7 +342,7 @@ export default function FilesPage() {
           onStarted={(jobId) => {
             setCopySource(null);
             setCopyJobId(jobId);
-            setCopyJob({ status: "running", log: "" });
+            setCopyJob({ status: "running", log: "", progressCurrent: 0, progressTotal: null });
           }}
         />
       )}
@@ -356,6 +362,14 @@ export default function FilesPage() {
             >
               Fermer
             </button>
+          </div>
+          <div className="px-3 pt-2">
+            <ProgressBar status={copyJob.status} current={copyJob.progressCurrent} total={copyJob.progressTotal} />
+            {copyJob.progressTotal !== null && (
+              <p className="mt-1 text-right text-[10px] text-neutral-500">
+                {formatSize(copyJob.progressCurrent)} / {formatSize(copyJob.progressTotal)}
+              </p>
+            )}
           </div>
           <div ref={logRef} className="max-h-48 overflow-auto bg-black p-2 font-mono text-[11px] text-neutral-300">
             <pre className="whitespace-pre-wrap">{copyJob.log || "Démarrage..."}</pre>

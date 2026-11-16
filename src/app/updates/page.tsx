@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import MaintenancePlansPanel from "@/components/MaintenancePlansPanel";
+import ProgressBar from "@/components/ProgressBar";
 
 type Host = {
   id: number;
@@ -229,6 +230,11 @@ export default function UpdatesPage() {
                   </button>
                 </div>
               </div>
+              {job?.status === "running" && (
+                <div className="px-4 pb-2">
+                  <ProgressBar status="running" />
+                </div>
+              )}
               {lines.length > 0 && (
                 <div
                   ref={(el) => {

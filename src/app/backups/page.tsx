@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import DirectoryPicker from "@/components/DirectoryPicker";
+import ProgressBar from "@/components/ProgressBar";
 import { parseSqliteUtc } from "@/lib/sqliteDate";
 
 type Host = { id: number; name: string; kind: string; docker_enabled: number; proxmox_node: string | null };
@@ -524,16 +525,10 @@ export default function BackupsPage() {
           {activeRun.status === "running" &&
             (() => {
               const pct = parseRsyncProgressPercent(activeRun.log);
-              if (pct === null) return null;
               return (
                 <div className="px-3 pt-2">
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-800">
-                    <div
-                      className="h-full rounded-full bg-blue-500 transition-[width] duration-500"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  <p className="mt-1 text-right text-[10px] text-neutral-500">{pct}%</p>
+                  <ProgressBar status="running" current={pct ?? undefined} total={pct !== null ? 100 : undefined} />
+                  {pct !== null && <p className="mt-1 text-right text-[10px] text-neutral-500">{pct}%</p>}
                 </div>
               );
             })()}
@@ -1842,6 +1837,11 @@ function DrillJobPanel({ drillId, onClose }: { drillId: string; onClose: () => v
           Fermer
         </button>
       </div>
+      {drill?.status === "running" && (
+        <div className="px-3 pt-2">
+          <ProgressBar status="running" />
+        </div>
+      )}
       <pre ref={logRef} className="max-h-64 overflow-auto whitespace-pre-wrap bg-black p-2 font-mono text-[11px] text-neutral-300">
         {drill?.log || "Démarrage..."}
       </pre>

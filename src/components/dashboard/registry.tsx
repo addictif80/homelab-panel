@@ -5,6 +5,7 @@ import { BlockedIpsWidget, LockdownWidget, MailEventsWidget, SecurityFindingsWid
 import { BackupRule321Widget, BackupsWidget, CertificatesWidget, HaStateWidget, MaintenanceWidget, UptimeWidget } from "./widgets/ReliabilityWidgets";
 import { IspOutagesWidget, PublicIpWidget, TailscaleWidget } from "./widgets/NetworkWidgets";
 import { AuditWidget } from "./widgets/AuditWidget";
+import { ActivityJobsWidget } from "./widgets/ActivityWidget";
 import { LicenseWidget } from "./widgets/LicenseWidget";
 import { NotesWidget } from "./widgets/NotesWidget";
 import { LogsWidget } from "./widgets/LogsWidget";
@@ -35,6 +36,7 @@ export const WIDGET_COMPONENTS: Record<string, React.ComponentType> = {
   publicIp: PublicIpWidget,
   ispOutages: IspOutagesWidget,
   audit: AuditWidget,
+  activity: ActivityJobsWidget,
   license: LicenseWidget,
   notes: NotesWidget,
   logs: LogsWidget,
