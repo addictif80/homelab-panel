@@ -25,7 +25,9 @@ type Replication = {
   syncScheduleTime: string | null;
   appDbUser: string | null;
   targetDbContainer: string | null;
+  targetDbContainerKind: "docker" | "incus";
   sourceDbContainer: string | null;
+  sourceDbContainerKind: "docker" | "incus";
   provisionPreset: ProvisionPreset | null;
   provisionDomain: string | null;
   provisionPhpVersion: string | null;
@@ -104,7 +106,9 @@ const EMPTY_FORM = {
   appDbUser: "",
   appDbPassword: "",
   targetDbContainer: "",
+  targetDbContainerKind: "docker" as "docker" | "incus",
   sourceDbContainer: "",
+  sourceDbContainerKind: "docker" as "docker" | "incus",
   provisionPreset: "" as ProvisionPreset | "",
   provisionDomain: "",
   provisionPhpVersion: "8.2",
@@ -131,7 +135,9 @@ const EMPTY_EDIT_FORM = {
   appDbUser: "",
   appDbPassword: "",
   targetDbContainer: "",
+  targetDbContainerKind: "docker" as "docker" | "incus",
   sourceDbContainer: "",
+  sourceDbContainerKind: "docker" as "docker" | "incus",
   provisionPreset: "" as ProvisionPreset | "",
   provisionDomain: "",
   provisionPhpVersion: "8.2",
@@ -425,7 +431,9 @@ export default function HaPage() {
       appDbUser: r.appDbUser ?? "",
       appDbPassword: "",
       targetDbContainer: r.targetDbContainer ?? "",
+      targetDbContainerKind: r.targetDbContainerKind,
       sourceDbContainer: r.sourceDbContainer ?? "",
+      sourceDbContainerKind: r.sourceDbContainerKind,
       provisionPreset: r.provisionPreset ?? "",
       provisionDomain: r.provisionDomain ?? "",
       provisionPhpVersion: r.provisionPhpVersion ?? "8.2",
@@ -464,7 +472,9 @@ export default function HaPage() {
           appDbUser: editForm.appDbUser,
           appDbPassword: editForm.appDbPassword || undefined,
           targetDbContainer: editForm.targetDbContainer,
+          targetDbContainerKind: editForm.targetDbContainerKind,
           sourceDbContainer: editForm.sourceDbContainer,
+          sourceDbContainerKind: editForm.sourceDbContainerKind,
           provisionPreset: r.kind === "folder" ? editForm.provisionPreset || null : undefined,
           provisionDomain: r.kind === "folder" ? editForm.provisionDomain : undefined,
           provisionPhpVersion: r.kind === "folder" ? editForm.provisionPhpVersion : undefined,
@@ -954,34 +964,54 @@ export default function HaPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
                   <div>
                     <label className="mb-1 block text-xs text-neutral-400">
-                      Container Docker sur la machine source (optionnel)
+                      Container sur la machine source (optionnel)
                     </label>
-                    <input
-                      value={form.sourceDbContainer}
-                      onChange={(e) => setForm({ ...form, sourceDbContainer: e.target.value })}
-                      placeholder="ex: mariadb"
-                      className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
-                    />
+                    <div className="flex gap-2">
+                      <input
+                        value={form.sourceDbContainer}
+                        onChange={(e) => setForm({ ...form, sourceDbContainer: e.target.value })}
+                        placeholder="ex: mariadb"
+                        className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                      />
+                      <select
+                        value={form.sourceDbContainerKind}
+                        onChange={(e) => setForm({ ...form, sourceDbContainerKind: e.target.value as "docker" | "incus" })}
+                        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                      >
+                        <option value="docker">Docker</option>
+                        <option value="incus">Incus</option>
+                      </select>
+                    </div>
                   </div>
                   <div>
                     <label className="mb-1 block text-xs text-neutral-400">
-                      Container Docker sur la machine cible (optionnel)
+                      Container sur la machine cible (optionnel)
                     </label>
-                    <input
-                      value={form.targetDbContainer}
-                      onChange={(e) => setForm({ ...form, targetDbContainer: e.target.value })}
-                      placeholder="ex: mariadb"
-                      className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
-                    />
+                    <div className="flex gap-2">
+                      <input
+                        value={form.targetDbContainer}
+                        onChange={(e) => setForm({ ...form, targetDbContainer: e.target.value })}
+                        placeholder="ex: mariadb"
+                        className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                      />
+                      <select
+                        value={form.targetDbContainerKind}
+                        onChange={(e) => setForm({ ...form, targetDbContainerKind: e.target.value as "docker" | "incus" })}
+                        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                      >
+                        <option value="docker">Docker</option>
+                        <option value="incus">Incus</option>
+                      </select>
+                    </div>
                   </div>
                   <p className="col-span-2 text-xs text-neutral-600">
-                    Laisse vide côté source et/ou cible quand cette machine a un client mysql/mariadb natif sur son
-                    propre système. Si sa base de données ne tourne que dans un container Docker (aucun client natif
-                    sur l&apos;hôte), indique le nom du container correspondant ici — le panel exécutera toutes les
-                    commandes SQL de configuration de cette machine via <code>docker exec</code> dans ce container au
-                    lieu de s&apos;y connecter/l&apos;administrer nativement. Source et cible sont indépendants :
-                    n&apos;importe quelle combinaison native/Docker fonctionne (native → Docker, Docker → native,
-                    Docker → Docker...).
+                    Laisse le champ vide côté source et/ou cible quand cette machine a un client mysql/mariadb natif
+                    sur son propre système. Si sa base de données ne tourne que dans un conteneur (aucun client natif
+                    sur l&apos;hôte), indique son nom et son type ici — le panel exécutera toutes les commandes SQL de
+                    configuration de cette machine via <code>docker exec</code> ou <code>incus exec</code> dans ce
+                    conteneur au lieu de s&apos;y connecter/l&apos;administrer nativement. Source et cible sont
+                    indépendants : n&apos;importe quelle combinaison fonctionne (native → Incus, Docker → native,
+                    Incus → Docker...).
                   </p>
                 </div>
               )}
@@ -1398,22 +1428,46 @@ export default function HaPage() {
                   <>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
                       <div>
-                        <label className="mb-1 block text-xs text-neutral-400">Container Docker (source)</label>
-                        <input
-                          value={editForm.sourceDbContainer}
-                          onChange={(e) => setEditForm({ ...editForm, sourceDbContainer: e.target.value })}
-                          placeholder="ex: mariadb"
-                          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
-                        />
+                        <label className="mb-1 block text-xs text-neutral-400">Container (source)</label>
+                        <div className="flex gap-2">
+                          <input
+                            value={editForm.sourceDbContainer}
+                            onChange={(e) => setEditForm({ ...editForm, sourceDbContainer: e.target.value })}
+                            placeholder="ex: mariadb"
+                            className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                          />
+                          <select
+                            value={editForm.sourceDbContainerKind}
+                            onChange={(e) =>
+                              setEditForm({ ...editForm, sourceDbContainerKind: e.target.value as "docker" | "incus" })
+                            }
+                            className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                          >
+                            <option value="docker">Docker</option>
+                            <option value="incus">Incus</option>
+                          </select>
+                        </div>
                       </div>
                       <div>
-                        <label className="mb-1 block text-xs text-neutral-400">Container Docker (cible)</label>
-                        <input
-                          value={editForm.targetDbContainer}
-                          onChange={(e) => setEditForm({ ...editForm, targetDbContainer: e.target.value })}
-                          placeholder="ex: mariadb"
-                          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
-                        />
+                        <label className="mb-1 block text-xs text-neutral-400">Container (cible)</label>
+                        <div className="flex gap-2">
+                          <input
+                            value={editForm.targetDbContainer}
+                            onChange={(e) => setEditForm({ ...editForm, targetDbContainer: e.target.value })}
+                            placeholder="ex: mariadb"
+                            className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm placeholder:text-neutral-600"
+                          />
+                          <select
+                            value={editForm.targetDbContainerKind}
+                            onChange={(e) =>
+                              setEditForm({ ...editForm, targetDbContainerKind: e.target.value as "docker" | "incus" })
+                            }
+                            className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                          >
+                            <option value="docker">Docker</option>
+                            <option value="incus">Incus</option>
+                          </select>
+                        </div>
                       </div>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-neutral-800 pt-3">

@@ -43,10 +43,16 @@ export type Replication = {
    * target whose MariaDB only exists inside a Docker container (no mysql/mariadb client on the
    * host OS itself). Null keeps the original native-client behavior. */
   targetDbContainer: string | null;
+  /** 'mysql' only — which exec target targetDbContainer means: `docker exec` or `incus exec`.
+   * Ignored when targetDbContainer is null. Defaults to "docker" for replications created before
+   * this field existed. */
+  targetDbContainerKind: "docker" | "incus";
   /** 'mysql' only — same as targetDbContainer, but for the source host: when set, the binlog
-   * config, replication role and initial dump are all issued through `docker exec` into this
-   * container instead of a native client/service on the source host itself. */
+   * config, replication role and initial dump are all issued through `docker exec`/`incus exec`
+   * into this container instead of a native client/service on the source host itself. */
   sourceDbContainer: string | null;
+  /** Same as targetDbContainerKind, but for sourceDbContainer. */
+  sourceDbContainerKind: "docker" | "incus";
   /** 'folder' only — see provisioning.ts. Null (the default) skips web-server provisioning on the
    * target entirely, unchanged behavior for every replication created before this existed. */
   provisionPreset: ProvisionPreset | null;
@@ -111,6 +117,8 @@ type ReplicationRow = {
   app_db_password_encrypted: string | null;
   target_db_container: string | null;
   source_db_container: string | null;
+  target_db_container_kind: "docker" | "incus";
+  source_db_container_kind: "docker" | "incus";
   provision_preset: ProvisionPreset | null;
   provision_domain: string | null;
   provision_php_version: string | null;
@@ -147,7 +155,9 @@ function rowToReplication(row: ReplicationRow): Replication {
     appDbUser: row.app_db_user,
     hasAppDbPassword: !!row.app_db_password_encrypted,
     targetDbContainer: row.target_db_container,
+    targetDbContainerKind: row.target_db_container_kind,
     sourceDbContainer: row.source_db_container,
+    sourceDbContainerKind: row.source_db_container_kind,
     provisionPreset: row.provision_preset,
     provisionDomain: row.provision_domain,
     provisionPhpVersion: row.provision_php_version,
@@ -230,11 +240,16 @@ export type CreateReplicationInput = {
    * clones roles along with everything else. */
   appDbUser?: string;
   appDbPassword?: string;
-  /** 'mysql' only — Docker container name on the target host to run admin SQL through
-   * (`docker exec`) instead of a native client. Left unset for a target with a native install. */
+  /** 'mysql' only — Docker/Incus container name on the target host to run admin SQL through
+   * (`docker exec`/`incus exec`) instead of a native client. Left unset for a target with a
+   * native install. */
   targetDbContainer?: string;
+  /** Which exec target targetDbContainer means. Defaults to "docker". */
+  targetDbContainerKind?: "docker" | "incus";
   /** 'mysql' only — same as targetDbContainer, but for the source host. */
   sourceDbContainer?: string;
+  /** Which exec target sourceDbContainer means. Defaults to "docker". */
+  sourceDbContainerKind?: "docker" | "incus";
   /** 'folder' only — see Replication.provisionPreset. */
   provisionPreset?: ProvisionPreset;
   provisionDomain?: string;
@@ -246,8 +261,8 @@ export function createReplication(input: CreateReplicationInput): Replication {
   const id = randomUUID();
   getDb()
     .prepare(
-      `INSERT INTO ha_replications (id, name, kind, source_host_id, target_host_id, source_path, target_path, db_port, db_user, db_password_encrypted, target_db_user, target_db_password_encrypted, proxy_host_id, target_port, target_owner, target_mode, target_needs_sudo, sync_schedule_time, app_db_user, app_db_password_encrypted, target_db_container, source_db_container, provision_preset, provision_domain, provision_php_version, provision_command)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO ha_replications (id, name, kind, source_host_id, target_host_id, source_path, target_path, db_port, db_user, db_password_encrypted, target_db_user, target_db_password_encrypted, proxy_host_id, target_port, target_owner, target_mode, target_needs_sudo, sync_schedule_time, app_db_user, app_db_password_encrypted, target_db_container, source_db_container, target_db_container_kind, source_db_container_kind, provision_preset, provision_domain, provision_php_version, provision_command)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -272,6 +287,8 @@ export function createReplication(input: CreateReplicationInput): Replication {
       input.appDbPassword ? vaultEncrypt(input.appDbPassword) : null,
       input.targetDbContainer?.trim() || null,
       input.sourceDbContainer?.trim() || null,
+      input.targetDbContainerKind || "docker",
+      input.sourceDbContainerKind || "docker",
       input.provisionPreset || null,
       input.provisionDomain?.trim() || null,
       input.provisionPhpVersion?.trim() || null,
@@ -316,7 +333,9 @@ export function duplicateReplication(id: string): Replication | null {
     appDbUser: original.appDbUser ?? undefined,
     appDbPassword: secrets.appDbPassword ?? undefined,
     targetDbContainer: original.targetDbContainer ?? undefined,
+    targetDbContainerKind: original.targetDbContainerKind,
     sourceDbContainer: original.sourceDbContainer ?? undefined,
+    sourceDbContainerKind: original.sourceDbContainerKind,
     provisionPreset: original.provisionPreset ?? undefined,
     provisionDomain: original.provisionDomain ?? undefined,
     provisionPhpVersion: original.provisionPhpVersion ?? undefined,
@@ -351,7 +370,9 @@ export type UpdateReplicationInput = {
   appDbUser?: string | null;
   appDbPassword?: string;
   targetDbContainer?: string | null;
+  targetDbContainerKind?: "docker" | "incus";
   sourceDbContainer?: string | null;
+  sourceDbContainerKind?: "docker" | "incus";
   /** 'folder' only — see Replication.provisionPreset. Empty string clears it back to "no
    * provisioning". */
   provisionPreset?: ProvisionPreset | null;
@@ -374,6 +395,7 @@ export function updateReplication(id: string, input: UpdateReplicationInput): vo
        name = ?, source_path = ?, target_path = ?, db_port = ?, db_user = ?, db_password_encrypted = ?,
        target_db_user = ?, target_db_password_encrypted = ?, target_owner = ?, target_mode = ?, target_needs_sudo = ?,
        sync_schedule_time = ?, app_db_user = ?, app_db_password_encrypted = ?, target_db_container = ?, source_db_container = ?,
+       target_db_container_kind = ?, source_db_container_kind = ?,
        provision_preset = ?, provision_domain = ?, provision_php_version = ?, provision_command = ?
      WHERE id = ?`
   ).run(
@@ -393,6 +415,8 @@ export function updateReplication(id: string, input: UpdateReplicationInput): vo
     input.appDbPassword ? vaultEncrypt(input.appDbPassword) : row.app_db_password_encrypted,
     input.targetDbContainer !== undefined ? input.targetDbContainer?.trim() || null : row.target_db_container,
     input.sourceDbContainer !== undefined ? input.sourceDbContainer?.trim() || null : row.source_db_container,
+    input.targetDbContainerKind !== undefined ? input.targetDbContainerKind : row.target_db_container_kind,
+    input.sourceDbContainerKind !== undefined ? input.sourceDbContainerKind : row.source_db_container_kind,
     input.provisionPreset !== undefined ? input.provisionPreset || null : row.provision_preset,
     input.provisionDomain !== undefined ? input.provisionDomain?.trim() || null : row.provision_domain,
     input.provisionPhpVersion !== undefined ? input.provisionPhpVersion?.trim() || null : row.provision_php_version,

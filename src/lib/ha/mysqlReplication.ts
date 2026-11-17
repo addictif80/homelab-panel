@@ -33,33 +33,48 @@ function parseDatabaseNames(sourcePath: string): string[] {
 const SETUP_TIMEOUT_MS = 30 * 60_000;
 const STATUS_TIMEOUT_MS = 15_000;
 
-/** Debian/Ubuntu's MariaDB and MySQL packages (and the official Docker images, internally built the
- * same way) each ship their own conf.d directory (only one of which exists on a given host,
- * depending which engine is actually installed) — tried in order rather than assumed, since
- * guessing wrong means writing a config file nothing ever reads. Routed through `docker exec` when
- * `container` is set, so this works the same whether MariaDB is native or containerized. */
-async function findMysqlConfDir(hostId: number, container: string | null): Promise<string> {
+type ContainerKind = "docker" | "incus";
+
+/** Wraps `innerCmd` to run inside `container` — `docker exec`/`incus exec`, same two exec targets
+ * the SSH terminal and the DB Manager support — or returns it unchanged for a native install
+ * (`container` null). Centralizes the docker-vs-incus branch instead of repeating it at every
+ * call site below. */
+function execInContainer(kind: ContainerKind, container: string, innerCmd: string, opts: { interactive?: boolean } = {}): string {
+  if (kind === "incus") {
+    return `incus exec ${shellQuote(container)} -- sh -c ${shellQuote(innerCmd)}`;
+  }
+  return `docker exec ${opts.interactive ? "-i " : ""}${shellQuote(container)} sh -c ${shellQuote(innerCmd)}`;
+}
+
+/** Debian/Ubuntu's MariaDB and MySQL packages (and the official Docker/Incus images, internally
+ * built the same way) each ship their own conf.d directory (only one of which exists on a given
+ * host, depending which engine is actually installed) — tried in order rather than assumed, since
+ * guessing wrong means writing a config file nothing ever reads. Routed through `docker exec`/
+ * `incus exec` when `container` is set, so this works the same whether MariaDB is native or
+ * containerized. */
+async function findMysqlConfDir(hostId: number, container: string | null, containerKind: ContainerKind): Promise<string> {
   const candidates = ["/etc/mysql/mariadb.conf.d", "/etc/mysql/mysql.conf.d", "/etc/mysql/conf.d"];
   for (const dir of candidates) {
-    const testCmd = container ? `docker exec ${shellQuote(container)} test -d ${shellQuote(dir)}` : `test -d ${shellQuote(dir)}`;
+    const testCmd = container ? execInContainer(containerKind, container, `test -d ${shellQuote(dir)}`) : `test -d ${shellQuote(dir)}`;
     const { code } = await runSshCommand(hostId, testCmd, { timeoutMs: STATUS_TIMEOUT_MS, sudo: !!container });
     if (code === 0) return dir;
   }
   throw new Error(
     `Impossible de trouver le dossier de configuration MySQL/MariaDB (/etc/mysql/*.conf.d) ${
       container ? `dans le container "${container}"` : "sur cette machine"
-    } — l'installation ne correspond pas au paquet Debian/Ubuntu standard (ou à l'image Docker officielle).`
+    } — l'installation ne correspond pas au paquet Debian/Ubuntu standard (ou à l'image Docker/Incus officielle).`
   );
 }
 
 /** Restarts the MySQL/MariaDB process so a config file just written actually takes effect — a
- * `docker restart` when containerized (the config change already persists in the container's own
- * writable layer, no volume/recreate needed), otherwise tries both the `mariadb` and `mysql`
- * service names across systemd/OpenRC/SysV (see hostCompat.ts) rather than assuming either the
- * name or the init system. */
-async function restartMysqlService(hostId: number, container: string | null): Promise<void> {
+ * `docker restart`/`incus restart` when containerized (the config change already persists in the
+ * container's own writable layer, no volume/recreate needed), otherwise tries both the `mariadb`
+ * and `mysql` service names across systemd/OpenRC/SysV (see hostCompat.ts) rather than assuming
+ * either the name or the init system. */
+async function restartMysqlService(hostId: number, container: string | null, containerKind: ContainerKind): Promise<void> {
   if (container) {
-    const { code, stderr } = await runSshCommand(hostId, `docker restart ${shellQuote(container)}`, {
+    const restartCmd = containerKind === "incus" ? `incus restart ${shellQuote(container)}` : `docker restart ${shellQuote(container)}`;
+    const { code, stderr } = await runSshCommand(hostId, restartCmd, {
       sudo: true,
       timeoutMs: SETUP_TIMEOUT_MS,
     });
@@ -86,15 +101,25 @@ function mysqlCommand(host: string, port: number, user: string, password: string
   return `MYSQL_PWD=${shellQuote(password)} mysql -h ${shellQuote(host)} -P ${port} -u ${shellQuote(user)}`;
 }
 
-/** Same as mysqlCommand, but routed through `docker exec` into `container` instead of a direct
- * network connection when that machine's MariaDB only exists inside a Docker container (no
+/** Same as mysqlCommand, but routed through `docker exec`/`incus exec` into `container` instead of
+ * a direct network connection when that machine's MariaDB only exists inside a container (no
  * mysql/mariadb client on the host's own shell) — used for both the source and the target, since
- * either end can independently be native or containerized. The container's own mysqld is what
- * actually dials out over the network for replication — this only changes how the setup/admin SQL
- * commands themselves are issued, since they still run over SSH on that host, just piped into the
- * container rather than into a native client. */
-function resolvedMysqlCommand(container: string | null, address: string, port: number, user: string, password: string): string {
+ * either end can independently be native, Docker- or Incus-containerized. The container's own
+ * mysqld is what actually dials out over the network for replication — this only changes how the
+ * setup/admin SQL commands themselves are issued, since they still run over SSH on that host, just
+ * piped into the container rather than into a native client. */
+function resolvedMysqlCommand(
+  container: string | null,
+  containerKind: ContainerKind,
+  address: string,
+  port: number,
+  user: string,
+  password: string
+): string {
   if (container) {
+    if (containerKind === "incus") {
+      return execInContainer(containerKind, container, `MYSQL_PWD=${shellQuote(password)} mysql -u ${shellQuote(user)}`);
+    }
     return `docker exec -i -e ${shellQuote(`MYSQL_PWD=${password}`)} ${shellQuote(container)} mysql -u ${shellQuote(user)}`;
   }
   return mysqlCommand(address, port, user, password);
@@ -149,7 +174,7 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   await ensureRsyncReachable(r.sourceHostId, r.targetHostId, keyPath);
 
   updateReplicationStatus(r.id, "setting_up", "Activation du binlog sur la machine source…");
-  const confDir = await findMysqlConfDir(r.sourceHostId, r.sourceDbContainer);
+  const confDir = await findMysqlConfDir(r.sourceHostId, r.sourceDbContainer, r.sourceDbContainerKind);
   // server-id must be unique among every server in the replication topology — derived from the
   // host id (offset to stay clear of MySQL's reserved id 0) rather than hardcoded, so two
   // replications from different source hosts never collide.
@@ -157,15 +182,18 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   const binlogDoDbLines = databases.map((db) => `binlog_do_db = ${db}`).join("\n");
   const binlogConf = `[mariadb]\nserver-id = ${serverId}\nlog_bin = /var/log/mysql/mysql-bin.log\n${binlogDoDbLines}\n`;
   const confPath = `${confDir}/99-homelab-panel-ha.cnf`;
-  const writeConf = r.sourceDbContainer
-    ? `docker exec -i ${shellQuote(r.sourceDbContainer)} sh -c ${shellQuote(`cat > ${confPath}`)} <<'HLP_MYSQL_CONF_EOF'\n${binlogConf}\nHLP_MYSQL_CONF_EOF`
-    : `cat > ${confPath} <<'HLP_MYSQL_CONF_EOF'\n${binlogConf}\nHLP_MYSQL_CONF_EOF`;
+  const writeConfPrefix = r.sourceDbContainer
+    ? r.sourceDbContainerKind === "incus"
+      ? `incus exec ${shellQuote(r.sourceDbContainer)} -- sh -c ${shellQuote(`cat > ${confPath}`)}`
+      : `docker exec -i ${shellQuote(r.sourceDbContainer)} sh -c ${shellQuote(`cat > ${confPath}`)}`
+    : `cat > ${confPath}`;
+  const writeConf = `${writeConfPrefix} <<'HLP_MYSQL_CONF_EOF'\n${binlogConf}\nHLP_MYSQL_CONF_EOF`;
   const { code: writeConfCode, stderr: writeConfErr } = await runSshCommand(r.sourceHostId, writeConf, {
     sudo: true,
     timeoutMs: SETUP_TIMEOUT_MS,
   });
   if (writeConfCode !== 0) throw new Error(writeConfErr || "Impossible d'écrire la configuration de réplication MySQL sur la machine source.");
-  await restartMysqlService(r.sourceHostId, r.sourceDbContainer);
+  await restartMysqlService(r.sourceHostId, r.sourceDbContainer, r.sourceDbContainerKind);
 
   updateReplicationStatus(r.id, "setting_up", "Création du rôle de réplication…");
   // REQUIRE NONE explicitly, so this account's own row can't inherit a server-wide default (e.g.
@@ -176,7 +204,7 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   const grantSql = `CREATE USER IF NOT EXISTS ${shellQuote(cred.user)}@'%' IDENTIFIED BY ${shellQuote(cred.password)} REQUIRE NONE; GRANT REPLICATION SLAVE ON *.* TO ${shellQuote(cred.user)}@'%'; FLUSH PRIVILEGES;`;
   const { code: grantCode, stderr: grantErr } = await runSshCommand(
     r.sourceHostId,
-    `echo ${shellQuote(grantSql)} | ${resolvedMysqlCommand(r.sourceDbContainer, sourceAdminHost, port, r.dbUser, secrets.dbPassword)}`,
+    `echo ${shellQuote(grantSql)} | ${resolvedMysqlCommand(r.sourceDbContainer, r.sourceDbContainerKind, sourceAdminHost, port, r.dbUser, secrets.dbPassword)}`,
     { timeoutMs: SETUP_TIMEOUT_MS, sudo: !!r.sourceDbContainer }
   );
   if (grantCode !== 0) throw new Error(grantErr || "Impossible de créer le rôle de réplication MySQL.");
@@ -191,7 +219,9 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   // mysql/mariadb, and its output is redirected to a host-side file either way since `>` here runs
   // in the outer SSH shell, not inside the container.
   const dumpCmd = r.sourceDbContainer
-    ? `docker exec -i -e ${shellQuote(`MYSQL_PWD=${secrets.dbPassword}`)} ${shellQuote(r.sourceDbContainer)} mysqldump -u ${shellQuote(r.dbUser)} --single-transaction --master-data=2 --databases ${dbArgs} > ${shellQuote(dumpPath)}`
+    ? r.sourceDbContainerKind === "incus"
+      ? `incus exec ${shellQuote(r.sourceDbContainer)} -- sh -c ${shellQuote(`MYSQL_PWD=${shellQuote(secrets.dbPassword)} mysqldump -u ${shellQuote(r.dbUser)} --single-transaction --master-data=2 --databases ${dbArgs}`)} > ${shellQuote(dumpPath)}`
+      : `docker exec -i -e ${shellQuote(`MYSQL_PWD=${secrets.dbPassword}`)} ${shellQuote(r.sourceDbContainer)} mysqldump -u ${shellQuote(r.dbUser)} --single-transaction --master-data=2 --databases ${dbArgs} > ${shellQuote(dumpPath)}`
     : `MYSQL_PWD=${shellQuote(secrets.dbPassword)} mysqldump -h ${shellQuote(sourceAdminHost)} -P ${port} -u ${shellQuote(r.dbUser)} --single-transaction --master-data=2 --databases ${dbArgs} > ${shellQuote(dumpPath)}`;
   const { code: dumpCode, stderr: dumpErr } = await runSshCommand(r.sourceHostId, dumpCmd, {
     timeoutMs: SETUP_TIMEOUT_MS,
@@ -231,7 +261,7 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   // over.
   await runSshCommand(
     r.targetHostId,
-    `echo ${shellQuote("STOP SLAVE; RESET SLAVE ALL;")} | ${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)}`,
+    `echo ${shellQuote("STOP SLAVE; RESET SLAVE ALL;")} | ${resolvedMysqlCommand(r.targetDbContainer, r.targetDbContainerKind, targetAdminHost, port, targetCred.user, targetCred.password)}`,
     { timeoutMs: STATUS_TIMEOUT_MS, sudo: !!r.targetDbContainer }
   ).catch(() => {});
 
@@ -249,7 +279,7 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   const createDbSql = databases.map((db) => `CREATE DATABASE IF NOT EXISTS ${sqlIdent(db)};`).join(" ");
   const { code: createDbCode, stderr: createDbErr } = await runSshCommand(
     r.targetHostId,
-    `echo ${shellQuote(createDbSql)} | ${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)}`,
+    `echo ${shellQuote(createDbSql)} | ${resolvedMysqlCommand(r.targetDbContainer, r.targetDbContainerKind, targetAdminHost, port, targetCred.user, targetCred.password)}`,
     { timeoutMs: SETUP_TIMEOUT_MS, sudo: !!r.targetDbContainer }
   );
   if (createDbCode !== 0) throw new Error(createDbErr || "Impossible de préparer la base sur la machine cible.");
@@ -258,7 +288,7 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
   const listTablesSql = `SELECT CONCAT(table_schema, '.', table_name) FROM information_schema.tables WHERE table_schema IN (${schemaList});`;
   const { code: listTablesCode, stdout: existingTablesOut, stderr: listTablesErr } = await runSshCommand(
     r.targetHostId,
-    `echo ${shellQuote(listTablesSql)} | ${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)} --batch --raw -N`,
+    `echo ${shellQuote(listTablesSql)} | ${resolvedMysqlCommand(r.targetDbContainer, r.targetDbContainerKind, targetAdminHost, port, targetCred.user, targetCred.password)} --batch --raw -N`,
     { timeoutMs: STATUS_TIMEOUT_MS, sudo: !!r.targetDbContainer }
   );
   if (listTablesCode !== 0) throw new Error(listTablesErr || "Impossible de lister les tables existantes sur la machine cible.");
@@ -276,14 +306,14 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
     const dropTablesSql = `SET FOREIGN_KEY_CHECKS = 0; DROP TABLE IF EXISTS ${dropList}; SET FOREIGN_KEY_CHECKS = 1;`;
     const { code: dropTablesCode, stderr: dropTablesErr } = await runSshCommand(
       r.targetHostId,
-      `echo ${shellQuote(dropTablesSql)} | ${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)}`,
+      `echo ${shellQuote(dropTablesSql)} | ${resolvedMysqlCommand(r.targetDbContainer, r.targetDbContainerKind, targetAdminHost, port, targetCred.user, targetCred.password)}`,
       { timeoutMs: SETUP_TIMEOUT_MS, sudo: !!r.targetDbContainer }
     );
     if (dropTablesCode !== 0) throw new Error(dropTablesErr || "Impossible de vider la base sur la machine cible avant restauration.");
   }
 
   updateReplicationStatus(r.id, "setting_up", "Restauration sur la machine cible…");
-  const restoreCmd = `${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)} < ${shellQuote(targetDumpPath)}`;
+  const restoreCmd = `${resolvedMysqlCommand(r.targetDbContainer, r.targetDbContainerKind, targetAdminHost, port, targetCred.user, targetCred.password)} < ${shellQuote(targetDumpPath)}`;
   const { code: restoreCode, stderr: restoreErr } = await runSshCommand(r.targetHostId, restoreCmd, {
     timeoutMs: SETUP_TIMEOUT_MS,
     sudo: !!r.targetDbContainer,
@@ -307,7 +337,7 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
       `${grantLines} FLUSH PRIVILEGES;`;
     const { code: appUserCode, stderr: appUserErr } = await runSshCommand(
       r.targetHostId,
-      `echo ${shellQuote(appUserSql)} | ${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)}`,
+      `echo ${shellQuote(appUserSql)} | ${resolvedMysqlCommand(r.targetDbContainer, r.targetDbContainerKind, targetAdminHost, port, targetCred.user, targetCred.password)}`,
       { timeoutMs: SETUP_TIMEOUT_MS, sudo: !!r.targetDbContainer }
     );
     if (appUserCode !== 0) throw new Error(appUserErr || "Impossible de créer l'identifiant applicatif sur la machine cible.");
@@ -328,7 +358,7 @@ export async function setupMysqlReplication(r: Replication): Promise<void> {
     `MASTER_LOG_FILE=${shellQuote(logFile)}, MASTER_LOG_POS=${logPos}, MASTER_SSL=0; START SLAVE;`;
   const { code: startCode, stderr: startErr } = await runSshCommand(
     r.targetHostId,
-    `echo ${shellQuote(changeMasterSql)} | ${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)}`,
+    `echo ${shellQuote(changeMasterSql)} | ${resolvedMysqlCommand(r.targetDbContainer, r.targetDbContainerKind, targetAdminHost, port, targetCred.user, targetCred.password)}`,
     { timeoutMs: SETUP_TIMEOUT_MS, sudo: !!r.targetDbContainer }
   );
   if (startCode !== 0) throw new Error(startErr || "Impossible de démarrer la réplication sur la machine cible.");
@@ -383,7 +413,7 @@ export async function checkMysqlReplicationStatus(r: Replication): Promise<void>
   }
   const { stdout, code, stderr } = await runSshCommand(
     r.targetHostId,
-    `${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)} -B -e "SHOW SLAVE STATUS"`,
+    `${resolvedMysqlCommand(r.targetDbContainer, r.targetDbContainerKind, targetAdminHost, port, targetCred.user, targetCred.password)} -B -e "SHOW SLAVE STATUS"`,
     { timeoutMs: STATUS_TIMEOUT_MS, sudo: !!r.targetDbContainer }
   );
   if (code !== 0) {
@@ -451,7 +481,7 @@ export async function reverseSyncMysqlReplication(r: Replication): Promise<void>
   updateReplicationStatus(r.id, "setting_up", "Arrêt de la réplication normale sur la machine cible…");
   await runSshCommand(
     r.targetHostId,
-    `echo ${shellQuote("STOP SLAVE;")} | ${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)}`,
+    `echo ${shellQuote("STOP SLAVE;")} | ${resolvedMysqlCommand(r.targetDbContainer, r.targetDbContainerKind, targetAdminHost, port, targetCred.user, targetCred.password)}`,
     { timeoutMs: STATUS_TIMEOUT_MS, sudo: !!r.targetDbContainer }
   ).catch(() => {});
 
@@ -459,7 +489,9 @@ export async function reverseSyncMysqlReplication(r: Replication): Promise<void>
   const dumpPath = `/tmp/hlp-mysql-reverse-dump-${r.id}.sql`;
   const dbArgs = databases.map((db) => shellQuote(db)).join(" ");
   const dumpCmd = r.targetDbContainer
-    ? `docker exec -i -e ${shellQuote(`MYSQL_PWD=${targetCred.password}`)} ${shellQuote(r.targetDbContainer)} mysqldump -u ${shellQuote(targetCred.user)} --single-transaction --databases ${dbArgs} > ${shellQuote(dumpPath)}`
+    ? r.targetDbContainerKind === "incus"
+      ? `incus exec ${shellQuote(r.targetDbContainer)} -- sh -c ${shellQuote(`MYSQL_PWD=${shellQuote(targetCred.password)} mysqldump -u ${shellQuote(targetCred.user)} --single-transaction --databases ${dbArgs}`)} > ${shellQuote(dumpPath)}`
+      : `docker exec -i -e ${shellQuote(`MYSQL_PWD=${targetCred.password}`)} ${shellQuote(r.targetDbContainer)} mysqldump -u ${shellQuote(targetCred.user)} --single-transaction --databases ${dbArgs} > ${shellQuote(dumpPath)}`
     : `MYSQL_PWD=${shellQuote(targetCred.password)} mysqldump -h ${shellQuote(targetAdminHost)} -P ${port} -u ${shellQuote(targetCred.user)} --single-transaction --databases ${dbArgs} > ${shellQuote(dumpPath)}`;
   const { code: dumpCode, stderr: dumpErr } = await runSshCommand(r.targetHostId, dumpCmd, {
     timeoutMs: SETUP_TIMEOUT_MS,
@@ -480,7 +512,7 @@ export async function reverseSyncMysqlReplication(r: Replication): Promise<void>
   const createDbSql = databases.map((db) => `CREATE DATABASE IF NOT EXISTS ${sqlIdent(db)};`).join(" ");
   const { code: createDbCode, stderr: createDbErr } = await runSshCommand(
     r.sourceHostId,
-    `echo ${shellQuote(createDbSql)} | ${resolvedMysqlCommand(r.sourceDbContainer, sourceAdminHost, port, r.dbUser, secrets.dbPassword)}`,
+    `echo ${shellQuote(createDbSql)} | ${resolvedMysqlCommand(r.sourceDbContainer, r.sourceDbContainerKind, sourceAdminHost, port, r.dbUser, secrets.dbPassword)}`,
     { timeoutMs: SETUP_TIMEOUT_MS, sudo: !!r.sourceDbContainer }
   );
   if (createDbCode !== 0) throw new Error(createDbErr || "Impossible de préparer la base sur la machine source.");
@@ -489,7 +521,7 @@ export async function reverseSyncMysqlReplication(r: Replication): Promise<void>
   const listTablesSql = `SELECT CONCAT(table_schema, '.', table_name) FROM information_schema.tables WHERE table_schema IN (${schemaList});`;
   const { code: listTablesCode, stdout: existingTablesOut, stderr: listTablesErr } = await runSshCommand(
     r.sourceHostId,
-    `echo ${shellQuote(listTablesSql)} | ${resolvedMysqlCommand(r.sourceDbContainer, sourceAdminHost, port, r.dbUser, secrets.dbPassword)} --batch --raw -N`,
+    `echo ${shellQuote(listTablesSql)} | ${resolvedMysqlCommand(r.sourceDbContainer, r.sourceDbContainerKind, sourceAdminHost, port, r.dbUser, secrets.dbPassword)} --batch --raw -N`,
     { timeoutMs: STATUS_TIMEOUT_MS, sudo: !!r.sourceDbContainer }
   );
   if (listTablesCode !== 0) throw new Error(listTablesErr || "Impossible de lister les tables existantes sur la machine source.");
@@ -507,14 +539,14 @@ export async function reverseSyncMysqlReplication(r: Replication): Promise<void>
     const dropTablesSql = `SET FOREIGN_KEY_CHECKS = 0; DROP TABLE IF EXISTS ${dropList}; SET FOREIGN_KEY_CHECKS = 1;`;
     const { code: dropTablesCode, stderr: dropTablesErr } = await runSshCommand(
       r.sourceHostId,
-      `echo ${shellQuote(dropTablesSql)} | ${resolvedMysqlCommand(r.sourceDbContainer, sourceAdminHost, port, r.dbUser, secrets.dbPassword)}`,
+      `echo ${shellQuote(dropTablesSql)} | ${resolvedMysqlCommand(r.sourceDbContainer, r.sourceDbContainerKind, sourceAdminHost, port, r.dbUser, secrets.dbPassword)}`,
       { timeoutMs: SETUP_TIMEOUT_MS, sudo: !!r.sourceDbContainer }
     );
     if (dropTablesCode !== 0) throw new Error(dropTablesErr || "Impossible de vider la base sur la machine source avant restauration.");
   }
 
   updateReplicationStatus(r.id, "setting_up", "Restauration sur la machine source…");
-  const restoreCmd = `${resolvedMysqlCommand(r.sourceDbContainer, sourceAdminHost, port, r.dbUser, secrets.dbPassword)} < ${shellQuote(sourceDumpPath)}`;
+  const restoreCmd = `${resolvedMysqlCommand(r.sourceDbContainer, r.sourceDbContainerKind, sourceAdminHost, port, r.dbUser, secrets.dbPassword)} < ${shellQuote(sourceDumpPath)}`;
   const { code: restoreCode, stderr: restoreErr } = await runSshCommand(r.sourceHostId, restoreCmd, {
     timeoutMs: SETUP_TIMEOUT_MS,
     sudo: !!r.sourceDbContainer,
@@ -525,7 +557,7 @@ export async function reverseSyncMysqlReplication(r: Replication): Promise<void>
   updateReplicationStatus(r.id, "setting_up", "Reprise de la réplication normale…");
   const { code: startCode, stderr: startErr } = await runSshCommand(
     r.targetHostId,
-    `echo ${shellQuote("START SLAVE;")} | ${resolvedMysqlCommand(r.targetDbContainer, targetAdminHost, port, targetCred.user, targetCred.password)}`,
+    `echo ${shellQuote("START SLAVE;")} | ${resolvedMysqlCommand(r.targetDbContainer, r.targetDbContainerKind, targetAdminHost, port, targetCred.user, targetCred.password)}`,
     { timeoutMs: STATUS_TIMEOUT_MS, sudo: !!r.targetDbContainer }
   );
   if (startCode !== 0) throw new Error(startErr || "Impossible de reprendre la réplication normale sur la machine cible.");

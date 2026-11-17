@@ -28,7 +28,9 @@ export async function POST(req: NextRequest) {
     appDbUser?: string;
     appDbPassword?: string;
     targetDbContainer?: string;
+    targetDbContainerKind?: "docker" | "incus";
     sourceDbContainer?: string;
+    sourceDbContainerKind?: "docker" | "incus";
     provisionPreset?: "docker_lemp" | "apache_native" | "nginx_native" | "custom";
     provisionDomain?: string;
     provisionPhpVersion?: string;
@@ -86,7 +88,9 @@ export async function POST(req: NextRequest) {
     appDbUser: body.appDbUser,
     appDbPassword: body.appDbPassword,
     targetDbContainer: body.targetDbContainer,
+    targetDbContainerKind: body.targetDbContainerKind,
     sourceDbContainer: body.sourceDbContainer,
+    sourceDbContainerKind: body.sourceDbContainerKind,
     provisionPreset: body.kind === "folder" ? body.provisionPreset : undefined,
     provisionDomain: body.kind === "folder" ? body.provisionDomain : undefined,
     provisionPhpVersion: body.kind === "folder" ? body.provisionPhpVersion : undefined,

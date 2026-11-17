@@ -4,10 +4,12 @@ import { vaultDecrypt } from "../../crypto";
 
 export type DatabaseBackupConfig = {
   /** "docker" (default, for plans saved before this field existed) runs the dump tool via
-   * `docker exec` inside containerId; "native" runs it directly on the host's own shell, for a
-   * database server installed straight on the OS (a common web-server setup: MySQL/Postgres from
-   * the distro's package manager, no container involved). */
-  deployment?: "docker" | "native";
+   * `docker exec` inside containerId; "incus" the same via `incus exec`, for a database (e.g.
+   * MariaDB backing a CyberPanel instance) running inside an Incus container instead; "native"
+   * runs it directly on the host's own shell, for a database server installed straight on the OS
+   * (a common web-server setup: MySQL/Postgres from the distro's package manager, no container
+   * involved). */
+  deployment?: "docker" | "incus" | "native";
   containerId?: string;
   engine: "mysql" | "postgres";
   user: string;
@@ -17,8 +19,8 @@ export type DatabaseBackupConfig = {
 };
 
 /** Wraps a dump tool invocation for wherever the database server actually lives: inside a named
- * container (`docker exec`) or directly on the host's own shell — same command either way, just
- * without the docker indirection for a natively installed server. */
+ * Docker/Incus container (`docker exec`/`incus exec`) or directly on the host's own shell — same
+ * command either way, just without the container indirection for a natively installed server. */
 function wrapDbCommand(
   config: Pick<DatabaseBackupConfig, "deployment" | "containerId">,
   envAssignment: string,
@@ -28,11 +30,14 @@ function wrapDbCommand(
     return `${envAssignment} ${innerCommand}`;
   }
   if (!config.containerId) throw new Error("Conteneur de la base de données manquant pour ce plan.");
+  if (config.deployment === "incus") {
+    return `incus exec ${shellQuote(config.containerId)} -- sh -c ${shellQuote(`${envAssignment} ${innerCommand}`)}`;
+  }
   return `docker exec -e ${envAssignment} ${shellQuote(config.containerId)} ${innerCommand}`;
 }
 
 export type DbConnectionParams = {
-  deployment?: "docker" | "native";
+  deployment?: "docker" | "incus" | "native";
   containerId?: string;
   engine: "mysql" | "postgres";
   user: string;
@@ -78,7 +83,12 @@ export async function dumpDatabase(
   await runSshCommand(hostId, `mkdir -p ${shellQuote(dumpDir)}`, { sudo: true });
 
   const dumps: string[] = [];
-  const location = config.deployment === "native" ? "installée directement sur la machine" : "dans son conteneur Docker";
+  const location =
+    config.deployment === "native"
+      ? "installée directement sur la machine"
+      : config.deployment === "incus"
+        ? "dans son conteneur Incus"
+        : "dans son conteneur Docker";
 
   if (config.engine === "mysql") {
     const file = `${dumpDir}/mysql-dump.sql.gz`;

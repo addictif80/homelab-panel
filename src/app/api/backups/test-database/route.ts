@@ -8,7 +8,7 @@ import { listDatabases } from "@/lib/backup/sources/database";
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as {
     hostId?: number;
-    deployment?: "docker" | "native";
+    deployment?: "docker" | "incus" | "native";
     containerId?: string;
     engine?: "mysql" | "postgres";
     user?: string;

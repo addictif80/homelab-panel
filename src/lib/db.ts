@@ -909,6 +909,8 @@ export function migrate(db: Database.Database) {
       app_db_password_encrypted TEXT,
       target_db_container TEXT,
       source_db_container TEXT,
+      target_db_container_kind TEXT NOT NULL DEFAULT 'docker' CHECK (target_db_container_kind IN ('docker','incus')),
+      source_db_container_kind TEXT NOT NULL DEFAULT 'docker' CHECK (source_db_container_kind IN ('docker','incus')),
       provision_preset TEXT CHECK (provision_preset IN ('docker_lemp','apache_native','nginx_native','custom')),
       provision_domain TEXT,
       provision_php_version TEXT,
@@ -1007,6 +1009,16 @@ export function migrate(db: Database.Database) {
   // replication can independently be native or Docker-containerized.
   if (!haReplicationColumns.some((c) => c.name === "source_db_container")) {
     db.exec(`ALTER TABLE ha_replications ADD COLUMN source_db_container TEXT`);
+  }
+  // Which exec target a configured container field means — 'docker' (the only option when these
+  // columns were added) or 'incus', for a MariaDB living inside an Incus container instead (e.g.
+  // backing a CyberPanel instance). Defaults to 'docker' so every replication created before this
+  // keeps behaving exactly as it did.
+  if (!haReplicationColumns.some((c) => c.name === "target_db_container_kind")) {
+    db.exec(`ALTER TABLE ha_replications ADD COLUMN target_db_container_kind TEXT NOT NULL DEFAULT 'docker'`);
+  }
+  if (!haReplicationColumns.some((c) => c.name === "source_db_container_kind")) {
+    db.exec(`ALTER TABLE ha_replications ADD COLUMN source_db_container_kind TEXT NOT NULL DEFAULT 'docker'`);
   }
 
   // 'folder' only, optional — when set, the target-side rsync runs through `sudo rsync` instead of

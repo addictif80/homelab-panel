@@ -932,15 +932,19 @@ function CreatePlanForm({
     () => new Set(parseSourceConfig<{ containerIds: string[] }>(editingPlan, "docker")?.containerIds ?? [])
   );
 
+  // database — Incus instances for this host (filtered client-side from the fleet-wide list,
+  // same as the per-host Docker container fetch above but there's no per-host Incus route).
+  const [incusInstances, setIncusInstances] = useState<{ name: string; hostId: number }[]>([]);
+
   // database
   const existingDbConfig = parseSourceConfig<{
-    deployment?: "docker" | "native";
+    deployment?: "docker" | "incus" | "native";
     containerId?: string;
     engine: "mysql" | "postgres";
     user: string;
     databases: "all" | string[];
   }>(editingPlan, "database");
-  const [dbDeployment, setDbDeployment] = useState<"docker" | "native">(existingDbConfig?.deployment ?? "docker");
+  const [dbDeployment, setDbDeployment] = useState<"docker" | "incus" | "native">(existingDbConfig?.deployment ?? "docker");
   const [dbContainerId, setDbContainerId] = useState(existingDbConfig?.containerId ?? "");
   const [dbEngine, setDbEngine] = useState<"mysql" | "postgres">(existingDbConfig?.engine ?? "mysql");
   const [dbUser, setDbUser] = useState(existingDbConfig?.user ?? "root");
@@ -976,7 +980,7 @@ function CreatePlanForm({
         body: JSON.stringify({
           hostId: sourceHostId,
           deployment: dbDeployment,
-          containerId: dbDeployment === "docker" ? dbContainerId : undefined,
+          containerId: dbDeployment !== "native" ? dbContainerId : undefined,
           engine: dbEngine,
           user: dbUser,
           password: dbPassword,
@@ -1068,6 +1072,12 @@ function CreatePlanForm({
         })
         .catch(() => setContainersError("Impossible de contacter le panel."));
     }
+    if (sourceType === "database") {
+      fetch(`/api/incus/instances`)
+        .then((r) => r.json())
+        .then((d) => setIncusInstances((d.instances || []).filter((i: { hostId: number }) => i.hostId === sourceHostId)))
+        .catch(() => setIncusInstances([]));
+    }
     if (sourceType === "proxmox_vm") {
       fetch(`/api/proxmox/${sourceHostId}/resources`)
         .then((r) => r.json())
@@ -1092,13 +1102,13 @@ function CreatePlanForm({
       if (selectedContainers.size === 0) return onError("Sélectionne au moins un conteneur.");
       sourceConfig = { containerIds: [...selectedContainers] };
     } else if (sourceType === "database") {
-      if (dbDeployment === "docker" && !dbContainerId) return onError("Conteneur requis.");
+      if (dbDeployment !== "native" && !dbContainerId) return onError("Conteneur requis.");
       // A new plan needs a password up front; an edit can leave it blank to keep the one on file
       // (the PATCH route only re-encrypts it when a new value is actually sent — see api/backups/[id]).
       if (!editingPlan && !dbPassword) return onError("Mot de passe requis.");
       sourceConfig = {
         deployment: dbDeployment,
-        containerId: dbDeployment === "docker" ? dbContainerId : undefined,
+        containerId: dbDeployment !== "native" ? dbContainerId : undefined,
         engine: dbEngine,
         user: dbUser,
         databases: dbAll ? "all" : dbNames.split(",").map((d) => d.trim()).filter(Boolean),
@@ -1347,11 +1357,12 @@ function CreatePlanForm({
             <span className="mb-1 block text-xs text-neutral-400">Installation</span>
             <select
               value={dbDeployment}
-              onChange={(e) => setDbDeployment(e.target.value as "docker" | "native")}
+              onChange={(e) => setDbDeployment(e.target.value as "docker" | "incus" | "native")}
               className={INPUT_CLASS}
             >
               <option value="docker">Dans un conteneur Docker</option>
-              <option value="native">Installée directement sur la machine (sans Docker)</option>
+              <option value="incus">Dans un conteneur Incus</option>
+              <option value="native">Installée directement sur la machine (sans conteneur)</option>
             </select>
           </label>
           {dbDeployment === "docker" && (
@@ -1362,6 +1373,19 @@ function CreatePlanForm({
                 {containers.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {dbDeployment === "incus" && (
+            <label className="block">
+              <span className="mb-1 block text-xs text-neutral-400">Conteneur Incus de la base de données</span>
+              <select value={dbContainerId} onChange={(e) => setDbContainerId(e.target.value)} className={INPUT_CLASS}>
+                <option value="">— choisir —</option>
+                {incusInstances.map((i) => (
+                  <option key={i.name} value={i.name}>
+                    {i.name}
                   </option>
                 ))}
               </select>
@@ -1401,7 +1425,7 @@ function CreatePlanForm({
                 <button
                   type="button"
                   onClick={testDbConnection}
-                  disabled={dbTesting || !dbUser || !dbPassword || (dbDeployment === "docker" && !dbContainerId)}
+                  disabled={dbTesting || !dbUser || !dbPassword || (dbDeployment !== "native" && !dbContainerId)}
                   className="rounded border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
                 >
                   {dbTesting ? "Connexion..." : "Tester la connexion"}
